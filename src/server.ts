@@ -6,7 +6,7 @@ import { categories } from "./categories";
 
 export function startServer(store: EventStore, statusChecker?: () => { whatsappConnected: boolean }, qrCodeGetter?: () => string | null, backfillTrigger?: (days: number) => Promise<number>): void {
   const app = express();
-  app.use(express.json());
+  app.use(express.json({ limit: "10mb" }));
   app.use(express.static(path.resolve(process.cwd(), "public")));
 
   // Connection status
