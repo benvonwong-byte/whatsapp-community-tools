@@ -15,6 +15,7 @@ let calendarDate = new Date();
 let activeCategoryIndex = 0;
 let dashboardExpanded = false;
 let qrPollTimer = null;
+let lastRenderedQr = null;
 
 // Keyboard focus state
 let focusedEventIndex = -1;
@@ -330,6 +331,7 @@ function openQrOverlay() {
   document.getElementById("qr-canvas-container").classList.add("hidden");
   document.getElementById("qr-waiting").classList.remove("hidden");
   document.getElementById("qr-expired").classList.add("hidden");
+  lastRenderedQr = null;
   pollQrCode();
   // Poll QR every 3s
   if (qrPollTimer) clearInterval(qrPollTimer);
@@ -349,6 +351,9 @@ async function pollQrCode() {
     const res = await fetch("/api/qr");
     const data = await res.json();
     if (data.qr) {
+      // Only re-render if the QR data actually changed
+      if (data.qr === lastRenderedQr) return;
+      lastRenderedQr = data.qr;
       document.getElementById("qr-waiting").classList.add("hidden");
       document.getElementById("qr-expired").classList.add("hidden");
       document.getElementById("qr-canvas-container").classList.remove("hidden");
