@@ -5,8 +5,8 @@ dotenv.config();
 
 export const config = {
   anthropicApiKey: process.env.ANTHROPIC_API_KEY || "",
-  dbPath: path.resolve(process.cwd(), "events.db"),
-  authDir: path.resolve(process.cwd(), ".auth"),
+  dbPath: process.env.DB_PATH || path.resolve(process.cwd(), "events.db"),
+  authDir: process.env.AUTH_DIR || path.resolve(process.cwd(), ".auth"),
   port: parseInt(process.env.PORT || "3000", 10),
   // Batch messages every 5 minutes or 20 messages
   batchIntervalMs: 5 * 60 * 1000,
