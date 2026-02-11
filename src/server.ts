@@ -89,6 +89,41 @@ export function startServer(store: EventStore, statusChecker?: () => { whatsappC
     res.json({ chatName, blocked: false });
   });
 
+  // Export all data (for syncing to another instance)
+  app.get("/api/export", (_req, res) => {
+    const events = store.getAllEvents();
+    const blockedGroups = store.getBlockedGroups();
+    res.json({ events, blockedGroups });
+  });
+
+  // Import data from another instance
+  app.post("/api/import", (req, res) => {
+    const { events, blockedGroups } = req.body;
+    let imported = 0;
+    if (events && Array.isArray(events)) {
+      for (const e of events) {
+        if (!store.isEventDuplicate(e.name, e.date, e.location || "")) {
+          store.saveEvent(
+            e.name, e.date, e.startTime || null, e.endTime || null,
+            e.endDate || null, e.location || null,
+            e.description || "", e.url || null, e.category || "other",
+            e.sourceChat || "import", e.sourceMessageId || "import",
+            e.sourceText || ""
+          );
+          imported++;
+        }
+      }
+    }
+    let blocked = 0;
+    if (blockedGroups && Array.isArray(blockedGroups)) {
+      for (const name of blockedGroups) {
+        store.blockGroup(name);
+        blocked++;
+      }
+    }
+    res.json({ imported, skippedDuplicates: (events?.length || 0) - imported, blockedGroups: blocked });
+  });
+
   // Trigger backfill (admin)
   app.post("/api/backfill", async (req, res) => {
     const days = Math.min(parseInt(req.query.days as string) || 7, 30);
