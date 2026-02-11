@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NYC Events</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>NYC Events <span class="kb-hint" title="Keys: 1-4 tabs, j/k navigate, f fav, Enter open, d dashboard">&#x2328;</span>
+      <span id="wa-status" class="wa-status disconnected" title="WhatsApp: checking...">
+        <span class="wa-dot"></span>
+        <span class="wa-label">Checking...</span>
+      </span>
+    </h1>
+    <nav id="view-tabs">
+      <button class="tab active" data-view="calendar">Calendar</button>
+      <button class="tab" data-view="list">List</button>
+      <button class="tab" data-view="categories">Categories</button>
+      <button class="tab" data-view="favorites">Favorites</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- Calendar View -->
+    <section id="view-calendar" class="view active">
+      <!-- Latest Events Banner -->
+      <div id="recent-banner" class="recent-banner">
+        <div class="recent-banner-header">
+          <span class="recent-banner-title">Latest Events Added</span>
+          <span id="recent-banner-updated" class="recent-banner-updated"></span>
+          <button id="recent-banner-toggle" class="recent-banner-toggle">Hide</button>
+        </div>
+        <div id="recent-banner-list" class="recent-banner-list"></div>
+        <div id="recent-banner-empty" class="recent-banner-empty hidden">Waiting for WhatsApp messages...</div>
+      </div>
+
+      <div class="calendar-controls">
+        <button id="cal-prev">&larr;</button>
+        <h2 id="cal-month-label"></h2>
+        <button id="cal-next">&rarr;</button>
+      </div>
+      <div class="calendar-grid">
+        <div class="calendar-header">
+          <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+        </div>
+        <div id="cal-days" class="calendar-days"></div>
+      </div>
+      <div id="cal-day-detail" class="day-detail hidden">
+        <h3 id="cal-day-label"></h3>
+        <div id="cal-day-events"></div>
+      </div>
+    </section>
+
+    <!-- List View -->
+    <section id="view-list" class="view">
+      <div class="list-controls">
+        <select id="list-filter">
+          <option value="all">All Categories</option>
+          <option value="favorites">Favorites Only</option>
+        </select>
+      </div>
+      <div id="list-events" class="event-list"></div>
+      <div id="list-empty" class="empty-state hidden">No events found.</div>
+    </section>
+
+    <!-- Categories View -->
+    <section id="view-categories" class="view">
+      <div id="cat-tabs" class="category-tabs"></div>
+      <div id="cat-swiper" class="category-swiper">
+        <!-- Panels injected by JS -->
+      </div>
+    </section>
+
+    <!-- Favorites View -->
+    <section id="view-favorites" class="view">
+      <div id="fav-events" class="event-list"></div>
+      <div id="fav-empty" class="empty-state">No favorites yet. Tap the heart on any event to save it.</div>
+    </section>
+  </main>
+
+  <!-- Dashboard Panel (persistent, collapsible) -->
+  <section id="dashboard-panel" class="dashboard-panel">
+    <button id="dash-toggle" class="dash-toggle">
+      <span class="dash-toggle-label">Dashboard</span>
+      <span id="dash-toggle-summary" class="dash-toggle-summary"></span>
+      <span class="dash-toggle-arrow">&#9660;</span>
+    </button>
+    <div id="dash-collapsible" class="dash-collapsible">
+      <div class="dash-inner">
+        <div class="dash-summary">
+          <div class="dash-stat">
+            <span class="dash-stat-value" id="dash-total-msgs">0</span>
+            <span class="dash-stat-label">Messages Scanned</span>
+          </div>
+          <div class="dash-stat">
+            <span class="dash-stat-value" id="dash-total-events">0</span>
+            <span class="dash-stat-label">Events Found</span>
+          </div>
+          <div class="dash-stat">
+            <span class="dash-stat-value" id="dash-overall-ratio">0%</span>
+            <span class="dash-stat-label">Overall Signal</span>
+          </div>
+        </div>
+        <div class="dash-sort-controls">
+          <span class="dash-section-title">Group Signal-to-Noise</span>
+          <select id="dash-sort">
+            <option value="ratio">Sort by Ratio</option>
+            <option value="events">Sort by Events</option>
+            <option value="lastActive">Sort by Last Active</option>
+          </select>
+        </div>
+        <div id="dash-monitor-summary" class="dash-monitor-summary"></div>
+        <div id="dash-groups" class="dash-groups"></div>
+        <div id="dash-empty" class="empty-state hidden">No data yet. Start scanning WhatsApp messages to see stats here.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Keyboard shortcuts help -->
+  <div id="kb-help-overlay" class="modal-overlay hidden">
+    <div class="modal kb-help-modal">
+      <button id="kb-help-close" class="modal-close">&times;</button>
+      <h2>Keyboard Shortcuts</h2>
+      <div class="kb-help-grid">
+        <div class="kb-help-section">
+          <h3>Navigation</h3>
+          <div class="kb-row"><kbd>1</kbd><span>Calendar view</span></div>
+          <div class="kb-row"><kbd>2</kbd><span>List view</span></div>
+          <div class="kb-row"><kbd>3</kbd><span>Categories view</span></div>
+          <div class="kb-row"><kbd>4</kbd><span>Favorites view</span></div>
+        </div>
+        <div class="kb-help-section">
+          <h3>Events</h3>
+          <div class="kb-row"><kbd>j</kbd> <kbd>&darr;</kbd><span>Next event</span></div>
+          <div class="kb-row"><kbd>k</kbd> <kbd>&uarr;</kbd><span>Previous event</span></div>
+          <div class="kb-row"><kbd>f</kbd><span>Toggle favorite</span></div>
+          <div class="kb-row"><kbd>Enter</kbd><span>Open event detail</span></div>
+        </div>
+        <div class="kb-help-section">
+          <h3>Other</h3>
+          <div class="kb-row"><kbd>d</kbd><span>Toggle dashboard</span></div>
+          <div class="kb-row"><kbd>&larr;</kbd> <kbd>&rarr;</kbd><span>Switch category</span></div>
+          <div class="kb-row"><kbd>Esc</kbd><span>Close modal</span></div>
+          <div class="kb-row"><kbd>?</kbd><span>Show this help</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Event detail modal -->
+  <div id="modal-overlay" class="modal-overlay hidden">
+    <div class="modal">
+      <button id="modal-close" class="modal-close">&times;</button>
+      <div id="modal-content"></div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
