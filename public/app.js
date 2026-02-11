@@ -14,6 +14,7 @@ let currentView = "calendar";
 let calendarDate = new Date();
 let activeCategoryIndex = 0;
 let dashboardExpanded = false;
+let calCategoryFilter = null; // null = "All", or a category id string
 let qrPollTimer = null;
 let lastRenderedQr = null;
 
@@ -46,10 +47,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupTabs();
   setupCalendar();
   setupCategorySwipe();
+  setupCalCategorySwipe();
   setupModal();
   setupDashboardPanel();
   setupKeyboard();
   setupKbHelp();
+  setupKbPersistentPanel();
   setupRecentBanner();
   setupQrOverlay();
   pollStatus();
@@ -507,8 +510,44 @@ function setupCalendar() {
   });
 }
 
+function renderCalCategoryTabs() {
+  const container = document.getElementById("cal-cat-tabs");
+  container.innerHTML = "";
+
+  // "All" tab
+  const allBtn = document.createElement("button");
+  allBtn.className = "cal-cat-tab" + (calCategoryFilter === null ? " active" : "");
+  allBtn.textContent = "All";
+  allBtn.style.background = calCategoryFilter === null ? "var(--accent)" : "";
+  allBtn.addEventListener("click", () => {
+    calCategoryFilter = null;
+    renderCalendar();
+  });
+  container.appendChild(allBtn);
+
+  // One tab per category
+  categories.forEach((cat) => {
+    const btn = document.createElement("button");
+    btn.className = "cal-cat-tab" + (calCategoryFilter === cat.id ? " active" : "");
+    btn.textContent = cat.name;
+    btn.style.background = calCategoryFilter === cat.id ? (catColors[cat.id] || "var(--accent)") : "";
+    btn.addEventListener("click", () => {
+      calCategoryFilter = cat.id;
+      renderCalendar();
+    });
+    container.appendChild(btn);
+  });
+
+  // Scroll the active tab into view
+  const activeTab = container.querySelector(".cal-cat-tab.active");
+  if (activeTab) {
+    activeTab.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+  }
+}
+
 function renderCalendar() {
   renderRecentBanner();
+  renderCalCategoryTabs();
 
   const year = calendarDate.getFullYear();
   const month = calendarDate.getMonth();
@@ -517,9 +556,14 @@ function renderCalendar() {
   document.getElementById("cal-month-label").textContent =
     calendarDate.toLocaleDateString("en-US", { month: "long", year: "numeric" });
 
+  // Apply calendar category filter
+  const filteredEvents = calCategoryFilter
+    ? allEvents.filter((ev) => ev.category === calCategoryFilter)
+    : allEvents;
+
   // Build event map: dateStr -> events[]
   const eventMap = {};
-  allEvents.forEach((ev) => {
+  filteredEvents.forEach((ev) => {
     const key = ev.date;
     if (!eventMap[key]) eventMap[key] = [];
     eventMap[key].push(ev);
@@ -587,20 +631,43 @@ function createCalDay(date, eventMap, otherMonth, isToday = false) {
   const events = eventMap[key] || [];
 
   if (events.length > 0) {
-    const dots = document.createElement("div");
-    dots.className = "day-dots";
-    // Show up to 6 dots, unique categories
+    // Deduplicate by hash
+    const unique = [];
     const seen = new Set();
     events.forEach((ev) => {
-      if (seen.size >= 6) return;
-      if (seen.has(ev.hash)) return;
-      seen.add(ev.hash);
-      const dot = document.createElement("div");
-      dot.className = "dot";
-      dot.dataset.category = ev.category;
-      dots.appendChild(dot);
+      if (!seen.has(ev.hash)) {
+        seen.add(ev.hash);
+        unique.push(ev);
+      }
     });
-    el.appendChild(dots);
+
+    const maxVisible = 3;
+    const eventsContainer = document.createElement("div");
+    eventsContainer.className = "day-events";
+
+    unique.slice(0, maxVisible).forEach((ev) => {
+      const item = document.createElement("div");
+      item.className = "day-event-item";
+      item.dataset.category = ev.category;
+      item.dataset.hash = ev.hash;
+      item.textContent = ev.name;
+      item.title = ev.name;
+      item.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const event = allEvents.find((x) => x.hash === ev.hash);
+        if (event) showModal(event);
+      });
+      eventsContainer.appendChild(item);
+    });
+
+    if (unique.length > maxVisible) {
+      const more = document.createElement("div");
+      more.className = "day-event-more";
+      more.textContent = `+${unique.length - maxVisible} more`;
+      eventsContainer.appendChild(more);
+    }
+
+    el.appendChild(eventsContainer);
   }
 
   el.addEventListener("click", () => {
@@ -784,6 +851,32 @@ function setupCategorySwipe() {
   });
 }
 
+function setupCalCategorySwipe() {
+  const calView = document.getElementById("view-calendar");
+
+  calView.addEventListener("touchstart", (e) => {
+    touchStartX = e.changedTouches[0].screenX;
+  });
+
+  calView.addEventListener("touchend", (e) => {
+    touchEndX = e.changedTouches[0].screenX;
+    const diff = touchStartX - touchEndX;
+
+    if (Math.abs(diff) > 60) {
+      const catIds = categories.map((c) => c.id);
+      const currentIdx = calCategoryFilter === null ? -1 : catIds.indexOf(calCategoryFilter);
+
+      if (diff > 0 && currentIdx < catIds.length - 1) {
+        calCategoryFilter = catIds[currentIdx + 1];
+        renderCalendar();
+      } else if (diff < 0 && currentIdx > -1) {
+        calCategoryFilter = currentIdx <= 0 ? null : catIds[currentIdx - 1];
+        renderCalendar();
+      }
+    }
+  });
+}
+
 // ── Favorites View ──
 
 function renderFavorites() {
@@ -873,14 +966,30 @@ function setupKeyboard() {
         e.preventDefault();
         break;
       case "ArrowRight":
-        if (currentView === "categories" && activeCategoryIndex < categories.length - 1) {
+        if (currentView === "calendar") {
+          if (calCategoryFilter === null) {
+            calCategoryFilter = categories.length > 0 ? categories[0].id : null;
+          } else {
+            const idx = categories.findIndex((c) => c.id === calCategoryFilter);
+            if (idx < categories.length - 1) calCategoryFilter = categories[idx + 1].id;
+          }
+          renderCalendar();
+          e.preventDefault();
+        } else if (currentView === "categories" && activeCategoryIndex < categories.length - 1) {
           activeCategoryIndex++;
           renderCategories();
           e.preventDefault();
         }
         break;
       case "ArrowLeft":
-        if (currentView === "categories" && activeCategoryIndex > 0) {
+        if (currentView === "calendar") {
+          if (calCategoryFilter !== null) {
+            const idx = categories.findIndex((c) => c.id === calCategoryFilter);
+            calCategoryFilter = idx <= 0 ? null : categories[idx - 1].id;
+          }
+          renderCalendar();
+          e.preventDefault();
+        } else if (currentView === "categories" && activeCategoryIndex > 0) {
           activeCategoryIndex--;
           renderCategories();
           e.preventDefault();
@@ -897,8 +1006,16 @@ function setupKeyboard() {
 }
 
 function setupKbHelp() {
-  // Click keyboard icon to show help
-  document.querySelector(".kb-hint").addEventListener("click", toggleKbHelp);
+  // Click keyboard icon: restore persistent panel if dismissed, otherwise toggle full help
+  document.querySelector(".kb-hint").addEventListener("click", () => {
+    const panel = document.getElementById("kb-persistent-panel");
+    if (panel && panel.classList.contains("dismissed")) {
+      panel.classList.remove("dismissed");
+      localStorage.removeItem("kb-panel-dismissed");
+      return;
+    }
+    toggleKbHelp();
+  });
 
   // Close button
   document.getElementById("kb-help-close").addEventListener("click", () => {
@@ -910,6 +1027,20 @@ function setupKbHelp() {
     if (e.target.id === "kb-help-overlay") {
       document.getElementById("kb-help-overlay").classList.add("hidden");
     }
+  });
+}
+
+function setupKbPersistentPanel() {
+  const panel = document.getElementById("kb-persistent-panel");
+  if (!panel) return;
+
+  if (localStorage.getItem("kb-panel-dismissed") === "true") {
+    panel.classList.add("dismissed");
+  }
+
+  document.getElementById("kb-persistent-dismiss").addEventListener("click", () => {
+    panel.classList.add("dismissed");
+    localStorage.setItem("kb-panel-dismissed", "true");
   });
 }
 

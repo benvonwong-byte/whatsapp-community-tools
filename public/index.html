@@ -37,6 +37,9 @@
         <div id="recent-banner-empty" class="recent-banner-empty hidden">Waiting for WhatsApp messages...</div>
       </div>
 
+      <!-- Calendar Category Filter Tabs -->
+      <div id="cal-cat-tabs" class="calendar-cat-tabs"></div>
+
       <div class="calendar-controls">
         <button id="cal-prev">&larr;</button>
         <h2 id="cal-month-label"></h2>
@@ -169,6 +172,23 @@
     <div class="modal">
       <button id="modal-close" class="modal-close">&times;</button>
       <div id="modal-content"></div>
+    </div>
+  </div>
+
+  <!-- Persistent keyboard shortcuts hint panel -->
+  <div id="kb-persistent-panel" class="kb-persistent-panel">
+    <div class="kb-persistent-header">
+      <span class="kb-persistent-title">Shortcuts</span>
+      <button id="kb-persistent-dismiss" class="kb-persistent-dismiss" title="Dismiss">&times;</button>
+    </div>
+    <div class="kb-persistent-body">
+      <div class="kb-p-row"><kbd>1</kbd>-<kbd>4</kbd> <span>Views</span></div>
+      <div class="kb-p-row"><kbd>j</kbd><kbd>k</kbd> <span>Nav events</span></div>
+      <div class="kb-p-row"><kbd>&larr;</kbd><kbd>&rarr;</kbd> <span>Categories</span></div>
+      <div class="kb-p-row"><kbd>Enter</kbd> <span>Open</span></div>
+      <div class="kb-p-row"><kbd>f</kbd> <span>Favorite</span></div>
+      <div class="kb-p-row"><kbd>d</kbd> <span>Dashboard</span></div>
+      <div class="kb-p-row"><kbd>?</kbd> <span>All shortcuts</span></div>
     </div>
   </div>
 

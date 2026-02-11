@@ -193,12 +193,13 @@ main {
 }
 
 .cal-day {
-  min-height: 70px;
+  min-height: 100px;
   padding: 6px;
   border-radius: 6px;
   cursor: pointer;
   transition: background 0.15s;
   position: relative;
+  overflow: hidden;
 }
 
 .cal-day:hover {
@@ -219,16 +220,88 @@ main {
   margin-bottom: 4px;
 }
 
-.cal-day .day-dots {
+/* Event titles inside calendar cells */
+.day-events {
   display: flex;
-  flex-wrap: wrap;
-  gap: 3px;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 2px;
+  overflow: hidden;
 }
 
-.cal-day .dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
+.day-event-item {
+  font-size: 10px;
+  line-height: 1.3;
+  padding: 1px 4px;
+  border-radius: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  transition: background 0.1s;
+  border-left: 3px solid var(--accent);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+}
+
+.day-event-item:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.day-event-item[data-category="somatic"]            { border-left-color: var(--cat-somatic); }
+.day-event-item[data-category="dance_movement"]     { border-left-color: var(--cat-dance_movement); }
+.day-event-item[data-category="systems_metacrisis"] { border-left-color: var(--cat-systems_metacrisis); }
+.day-event-item[data-category="environment"]        { border-left-color: var(--cat-environment); }
+.day-event-item[data-category="social_impact"]      { border-left-color: var(--cat-social_impact); }
+.day-event-item[data-category="learning"]           { border-left-color: var(--cat-learning); }
+.day-event-item[data-category="skills"]             { border-left-color: var(--cat-skills); }
+.day-event-item[data-category="multiday"]           { border-left-color: var(--cat-multiday); }
+.day-event-item[data-category="conference"]         { border-left-color: var(--cat-conference); }
+.day-event-item[data-category="online"]             { border-left-color: var(--cat-online); }
+
+.day-event-more {
+  font-size: 9px;
+  color: var(--text-dim);
+  padding: 1px 4px;
+  cursor: pointer;
+}
+
+.day-event-more:hover {
+  color: var(--text);
+}
+
+/* Calendar Category Filter Tabs */
+.calendar-cat-tabs {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  padding-bottom: 12px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.calendar-cat-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.cal-cat-tab {
+  background: var(--surface);
+  border: 2px solid var(--border);
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.cal-cat-tab.active {
+  color: #fff;
+  border-color: transparent;
 }
 
 .day-detail {
@@ -515,17 +588,93 @@ main {
 .category-badge[data-category="conference"] { background: var(--cat-conference); color: #1a1a1a; }
 .category-badge[data-category="online"] { background: var(--cat-online); color: #1a1a1a; }
 
-/* Dot colors on calendar */
-.dot[data-category="somatic"] { background: var(--cat-somatic); }
-.dot[data-category="dance_movement"] { background: var(--cat-dance_movement); }
-.dot[data-category="systems_metacrisis"] { background: var(--cat-systems_metacrisis); }
-.dot[data-category="environment"] { background: var(--cat-environment); }
-.dot[data-category="social_impact"] { background: var(--cat-social_impact); }
-.dot[data-category="learning"] { background: var(--cat-learning); }
-.dot[data-category="skills"] { background: var(--cat-skills); }
-.dot[data-category="multiday"] { background: var(--cat-multiday); }
-.dot[data-category="conference"] { background: var(--cat-conference); }
-.dot[data-category="online"] { background: var(--cat-online); }
+/* Persistent Keyboard Shortcuts Panel */
+.kb-persistent-panel {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 50;
+  background: rgba(26, 26, 26, 0.85);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 11px;
+  color: var(--text-dim);
+  opacity: 0.5;
+  transition: opacity 0.2s;
+  max-width: 180px;
+}
+
+.kb-persistent-panel:hover {
+  opacity: 1;
+}
+
+.kb-persistent-panel.dismissed {
+  display: none;
+}
+
+.kb-persistent-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.kb-persistent-title {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-dim);
+}
+
+.kb-persistent-dismiss {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+  opacity: 0.5;
+  transition: opacity 0.15s;
+}
+
+.kb-persistent-dismiss:hover {
+  opacity: 1;
+  color: var(--text);
+}
+
+.kb-persistent-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.kb-p-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+}
+
+.kb-p-row span {
+  margin-left: auto;
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.kb-p-row kbd {
+  font-size: 9px;
+  padding: 1px 4px;
+  min-width: 18px;
+  margin-right: 1px;
+}
+
+.public-mode .kb-persistent-panel {
+  display: none;
+}
 
 /* Dashboard */
 .dash-summary {
@@ -1106,10 +1255,12 @@ kbd {
 @media (max-width: 600px) {
   header { padding: 12px 16px 0; }
   main { padding: 16px; }
-  .cal-day { min-height: 50px; padding: 4px; }
+  .cal-day { min-height: 60px; padding: 4px; }
   .cal-day .day-number { font-size: 11px; }
-  .dot { width: 5px; height: 5px; }
+  .day-event-item:nth-child(n+2) { display: none; }
+  .cal-cat-tab { font-size: 10px; padding: 4px 8px; }
   .dashboard-panel { padding: 0 16px 16px; }
   .dash-group-stats { gap: 8px; font-size: 11px; }
   .dash-group-cats { display: none; }
+  .kb-persistent-panel { display: none !important; }
 }
