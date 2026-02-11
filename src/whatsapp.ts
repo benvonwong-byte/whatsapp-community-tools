@@ -1,5 +1,7 @@
 import { Client, LocalAuth, Message } from "whatsapp-web.js";
 import qrcode from "qrcode-terminal";
+import fs from "fs";
+import path from "path";
 import { config } from "./config";
 
 export interface BufferedMessage {
@@ -214,8 +216,45 @@ export class WhatsAppClient {
     return this.currentQr;
   }
 
+  private cleanChromiumLocks() {
+    // Remove stale Chromium lock files that persist on volumes across container restarts
+    const authDir = config.authDir;
+    const lockFiles = ["SingletonLock", "SingletonCookie", "SingletonSocket"];
+    const searchDirs = [authDir];
+
+    // Also search subdirectories (LocalAuth creates session-* folders)
+    try {
+      const entries = fs.readdirSync(authDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          searchDirs.push(path.join(authDir, entry.name));
+          // Check one level deeper (session-*/Default/)
+          try {
+            const subEntries = fs.readdirSync(path.join(authDir, entry.name), { withFileTypes: true });
+            for (const sub of subEntries) {
+              if (sub.isDirectory()) {
+                searchDirs.push(path.join(authDir, entry.name, sub.name));
+              }
+            }
+          } catch {}
+        }
+      }
+    } catch {}
+
+    for (const dir of searchDirs) {
+      for (const lock of lockFiles) {
+        const lockPath = path.join(dir, lock);
+        try {
+          fs.unlinkSync(lockPath);
+          console.log(`[cleanup] Removed stale lock: ${lockPath}`);
+        } catch {}
+      }
+    }
+  }
+
   async start() {
     console.log("Starting WhatsApp client...");
+    this.cleanChromiumLocks();
     await this.client.initialize();
   }
 
