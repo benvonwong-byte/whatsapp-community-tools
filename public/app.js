@@ -1,3 +1,6 @@
+// Admin mode: add ?admin to the URL to enable admin features
+const isAdmin = new URLSearchParams(window.location.search).has("admin");
+
 // State
 let allEvents = [];
 let categories = [];
@@ -11,6 +14,7 @@ let currentView = "calendar";
 let calendarDate = new Date();
 let activeCategoryIndex = 0;
 let dashboardExpanded = false;
+let qrPollTimer = null;
 
 // Keyboard focus state
 let focusedEventIndex = -1;
@@ -36,6 +40,7 @@ const catColors = {
 
 // Init
 document.addEventListener("DOMContentLoaded", async () => {
+  setupAdminMode();
   await loadData();
   setupTabs();
   setupCalendar();
@@ -45,6 +50,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupKeyboard();
   setupKbHelp();
   setupRecentBanner();
+  setupQrOverlay();
   pollStatus();
   renderCurrentView();
   // Poll for new events every 30s
@@ -276,10 +282,87 @@ function renderStatus() {
     el.className = "wa-status connected";
     el.title = "WhatsApp: connected";
     el.querySelector(".wa-label").textContent = "Connected";
+    // Stop QR polling when connected
+    if (qrPollTimer) {
+      clearInterval(qrPollTimer);
+      qrPollTimer = null;
+    }
+    document.getElementById("qr-overlay").classList.add("hidden");
   } else {
-    el.className = "wa-status disconnected";
-    el.title = "WhatsApp: disconnected";
+    el.className = "wa-status disconnected" + (isAdmin ? " admin-clickable" : "");
+    el.title = isAdmin ? "Click to connect WhatsApp" : "WhatsApp: disconnected";
     el.querySelector(".wa-label").textContent = "Disconnected";
+  }
+}
+
+// ── Admin Mode ──
+
+function setupAdminMode() {
+  if (!isAdmin) {
+    // Hide admin-only elements
+    document.getElementById("dashboard-panel").classList.add("hidden");
+    document.body.classList.add("public-mode");
+    // Hide favorites tab in public mode
+    const favTab = document.querySelector('.tab[data-view="favorites"]');
+    if (favTab) favTab.classList.add("hidden");
+    return;
+  }
+
+  document.body.classList.add("admin-mode");
+
+  // Make status badge clickable to open QR
+  document.getElementById("wa-status").addEventListener("click", () => {
+    if (!waConnected && isAdmin) {
+      openQrOverlay();
+    }
+  });
+}
+
+function setupQrOverlay() {
+  document.getElementById("qr-close").addEventListener("click", closeQrOverlay);
+  document.getElementById("qr-overlay").addEventListener("click", (e) => {
+    if (e.target.id === "qr-overlay") closeQrOverlay();
+  });
+}
+
+function openQrOverlay() {
+  document.getElementById("qr-overlay").classList.remove("hidden");
+  document.getElementById("qr-canvas-container").classList.add("hidden");
+  document.getElementById("qr-waiting").classList.remove("hidden");
+  document.getElementById("qr-expired").classList.add("hidden");
+  pollQrCode();
+  // Poll QR every 3s
+  if (qrPollTimer) clearInterval(qrPollTimer);
+  qrPollTimer = setInterval(pollQrCode, 3000);
+}
+
+function closeQrOverlay() {
+  document.getElementById("qr-overlay").classList.add("hidden");
+  if (qrPollTimer) {
+    clearInterval(qrPollTimer);
+    qrPollTimer = null;
+  }
+}
+
+async function pollQrCode() {
+  try {
+    const res = await fetch("/api/qr");
+    const data = await res.json();
+    if (data.qr) {
+      document.getElementById("qr-waiting").classList.add("hidden");
+      document.getElementById("qr-expired").classList.add("hidden");
+      document.getElementById("qr-canvas-container").classList.remove("hidden");
+      const canvas = document.getElementById("qr-canvas");
+      QRCode.toCanvas(canvas, data.qr, {
+        width: 280,
+        margin: 2,
+        color: { dark: "#000000", light: "#ffffff" },
+      });
+    } else if (waConnected) {
+      closeQrOverlay();
+    }
+  } catch (err) {
+    console.error("Failed to fetch QR code:", err);
   }
 }
 
@@ -910,9 +993,9 @@ function eventCardHTML(event) {
           </div>
           <span class="category-badge" data-category="${event.category}">${escapeHtml(catName)}</span>
         </div>
-        <button class="fav-btn ${event.favorited ? "favorited" : ""}" data-hash="${event.hash}" title="Toggle favorite">
+        ${isAdmin ? `<button class="fav-btn ${event.favorited ? "favorited" : ""}" data-hash="${event.hash}" title="Toggle favorite">
           ${event.favorited ? "\u2665" : "\u2661"}
-        </button>
+        </button>` : ""}
       </div>
     </div>`;
 }

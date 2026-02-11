@@ -1038,6 +1038,62 @@ kbd {
   50% { transform: translateX(-10px); }
 }
 
+/* ── Admin / Public Mode ── */
+.wa-status.admin-clickable {
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.wa-status.admin-clickable:hover {
+  background: rgba(214, 48, 49, 0.15);
+}
+
+.public-mode .wa-status {
+  display: none;
+}
+
+.public-mode .kb-hint {
+  display: none;
+}
+
+/* QR Code Modal */
+.qr-modal {
+  max-width: 380px;
+  text-align: center;
+}
+
+.qr-modal h2 {
+  text-align: center;
+  padding-right: 0;
+}
+
+.qr-instructions {
+  font-size: 13px;
+  color: var(--text-dim);
+  line-height: 1.5;
+  margin-bottom: 20px;
+}
+
+.qr-canvas-container {
+  display: flex;
+  justify-content: center;
+  padding: 20px;
+  background: #fff;
+  border-radius: 12px;
+  margin: 0 auto 16px;
+  width: fit-content;
+}
+
+.qr-waiting, .qr-expired {
+  font-size: 13px;
+  color: var(--text-dim);
+  padding: 40px 0;
+}
+
+.qr-expired {
+  color: #fdcb6e;
+}
+
 /* Responsive */
 @media (max-width: 600px) {
   header { padding: 12px 16px 0; }

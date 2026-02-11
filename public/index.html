@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NYC Events</title>
   <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
 </head>
 <body>
   <header>
@@ -146,6 +147,20 @@
           <div class="kb-row"><kbd>?</kbd><span>Show this help</span></div>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- QR Code overlay (admin mode, when disconnected) -->
+  <div id="qr-overlay" class="modal-overlay hidden">
+    <div class="modal qr-modal">
+      <button id="qr-close" class="modal-close">&times;</button>
+      <h2>Connect WhatsApp</h2>
+      <p class="qr-instructions">Scan this QR code with your WhatsApp app:<br>Settings &rarr; Linked Devices &rarr; Link a Device</p>
+      <div id="qr-canvas-container" class="qr-canvas-container">
+        <canvas id="qr-canvas"></canvas>
+      </div>
+      <p id="qr-waiting" class="qr-waiting">Waiting for QR code...</p>
+      <p id="qr-expired" class="qr-expired hidden">QR code expired. Waiting for a new one...</p>
     </div>
   </div>
 

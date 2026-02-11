@@ -21,6 +21,7 @@ export class WhatsAppClient {
   private onReady: ReadyCallback | null = null;
   private isGroupBlocked: ((chatName: string) => boolean) | null = null;
   private ready = false;
+  private currentQr: string | null = null;
 
   constructor() {
     this.client = new Client({
@@ -46,11 +47,13 @@ export class WhatsAppClient {
     this.client.on("qr", (qr) => {
       console.log("\nScan this QR code with your WhatsApp app:\n");
       qrcode.generate(qr, { small: true });
+      this.currentQr = qr;
     });
 
     this.client.on("ready", async () => {
       console.log("WhatsApp client is ready!");
       this.ready = true;
+      this.currentQr = null;
       this.startFlushTimer();
       if (this.onReady) {
         await this.onReady();
@@ -59,6 +62,7 @@ export class WhatsAppClient {
 
     this.client.on("authenticated", () => {
       console.log("WhatsApp authenticated successfully.");
+      this.currentQr = null;
     });
 
     this.client.on("auth_failure", (msg) => {
@@ -204,6 +208,10 @@ export class WhatsAppClient {
 
     console.log(`[backfill] Total: ${allMessages.length} messages from ${days} days.`);
     return allMessages;
+  }
+
+  getQrCode(): string | null {
+    return this.currentQr;
   }
 
   async start() {

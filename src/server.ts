@@ -4,7 +4,7 @@ import { config } from "./config";
 import { EventStore } from "./store";
 import { categories } from "./categories";
 
-export function startServer(store: EventStore, statusChecker?: () => { whatsappConnected: boolean }): void {
+export function startServer(store: EventStore, statusChecker?: () => { whatsappConnected: boolean }, qrCodeGetter?: () => string | null): void {
   const app = express();
   app.use(express.json());
   app.use(express.static(path.resolve(process.cwd(), "public")));
@@ -13,6 +13,12 @@ export function startServer(store: EventStore, statusChecker?: () => { whatsappC
   app.get("/api/status", (_req, res) => {
     const status = statusChecker ? statusChecker() : { whatsappConnected: false };
     res.json({ ...status, serverTime: new Date().toISOString() });
+  });
+
+  // Get QR code for WhatsApp auth (admin only)
+  app.get("/api/qr", (_req, res) => {
+    const qr = qrCodeGetter ? qrCodeGetter() : null;
+    res.json({ qr });
   });
 
   // Get all events

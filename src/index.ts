@@ -66,9 +66,11 @@ async function main() {
 
   const whatsapp = new WhatsAppClient();
 
-  startServer(store, () => ({
-    whatsappConnected: whatsapp.isConnected(),
-  }));
+  startServer(
+    store,
+    () => ({ whatsappConnected: whatsapp.isConnected() }),
+    () => whatsapp.getQrCode()
+  );
 
   // WhatsApp + Claude are optional — skip if no API key
   if (!config.anthropicApiKey) {
