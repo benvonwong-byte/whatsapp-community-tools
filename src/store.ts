@@ -257,6 +257,12 @@ export class EventStore {
     return { totalMessages: msgs.cnt, totalEvents: evts.cnt };
   }
 
+  getAllProcessedMessages(): { messageId: string; chatName: string; body: string; timestamp: number }[] {
+    return this.db
+      .prepare("SELECT message_id, chat_name, body, timestamp FROM processed_messages")
+      .all() as any[];
+  }
+
   private mapRow(row: any): StoredEvent {
     return {
       hash: row.hash,

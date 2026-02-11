@@ -93,12 +93,13 @@ export function startServer(store: EventStore, statusChecker?: () => { whatsappC
   app.get("/api/export", (_req, res) => {
     const events = store.getAllEvents();
     const blockedGroups = store.getBlockedGroups();
-    res.json({ events, blockedGroups });
+    const processedMessages = store.getAllProcessedMessages();
+    res.json({ events, blockedGroups, processedMessages });
   });
 
   // Import data from another instance
   app.post("/api/import", (req, res) => {
-    const { events, blockedGroups } = req.body;
+    const { events, blockedGroups, processedMessages } = req.body;
     let imported = 0;
     if (events && Array.isArray(events)) {
       for (const e of events) {
@@ -121,7 +122,21 @@ export function startServer(store: EventStore, statusChecker?: () => { whatsappC
         blocked++;
       }
     }
-    res.json({ imported, skippedDuplicates: (events?.length || 0) - imported, blockedGroups: blocked });
+    let messages = 0;
+    if (processedMessages && Array.isArray(processedMessages)) {
+      for (const m of processedMessages) {
+        if (!store.isMessageProcessed(m.messageId || m.message_id)) {
+          store.markMessageProcessed(
+            m.messageId || m.message_id,
+            m.chatName || m.chat_name,
+            m.timestamp,
+            m.body || ""
+          );
+          messages++;
+        }
+      }
+    }
+    res.json({ imported, skippedDuplicates: (events?.length || 0) - imported, blockedGroups: blocked, processedMessages: messages });
   });
 
   // Trigger backfill (admin)
