@@ -1,5 +1,6 @@
-// Admin mode: add ?admin to the URL to enable admin features
-const isAdmin = new URLSearchParams(window.location.search).has("admin");
+// Admin mode: add ?admin=TOKEN to the URL to enable admin features
+const adminToken = new URLSearchParams(window.location.search).get("admin");
+const isAdmin = !!adminToken;
 
 // State
 let allEvents = [];
@@ -63,21 +64,34 @@ document.addEventListener("DOMContentLoaded", async () => {
   setInterval(pollStatus, 10000);
 });
 
+// Helper: fetch an admin-protected endpoint with the token
+function adminFetch(url, options = {}) {
+  const separator = url.includes("?") ? "&" : "?";
+  return fetch(`${url}${separator}token=${encodeURIComponent(adminToken)}`, options);
+}
+
 async function loadData() {
   try {
-    const [eventsRes, catsRes, statsRes, blockedRes, recentRes] = await Promise.all([
+    const fetches = [
       fetch("/api/events"),
       fetch("/api/categories"),
       fetch("/api/stats"),
-      fetch("/api/groups/blocked"),
       fetch("/api/events/recent?limit=15"),
-    ]);
-    allEvents = await eventsRes.json();
-    categories = await catsRes.json();
-    dashboardStats = await statsRes.json();
-    const blockedList = await blockedRes.json();
-    blockedGroups = new Set(blockedList);
-    recentEvents = await recentRes.json();
+    ];
+    // Only fetch blocked groups in admin mode (requires auth)
+    if (isAdmin) {
+      fetches.push(adminFetch("/api/groups/blocked"));
+    }
+
+    const results = await Promise.all(fetches);
+    allEvents = await results[0].json();
+    categories = await results[1].json();
+    dashboardStats = await results[2].json();
+    recentEvents = await results[3].json();
+    if (isAdmin && results[4]) {
+      const blockedList = await results[4].json();
+      blockedGroups = new Set(blockedList);
+    }
     lastDataFetch = new Date();
     renderCurrentView();
   } catch (err) {
@@ -249,10 +263,10 @@ function renderDashboard() {
       const isBlocked = blockedGroups.has(chatName);
       try {
         if (isBlocked) {
-          await fetch(`/api/groups/${encodeURIComponent(chatName)}/block`, { method: "DELETE" });
+          await adminFetch(`/api/groups/${encodeURIComponent(chatName)}/block`, { method: "DELETE" });
           blockedGroups.delete(chatName);
         } else {
-          await fetch(`/api/groups/${encodeURIComponent(chatName)}/block`, { method: "POST" });
+          await adminFetch(`/api/groups/${encodeURIComponent(chatName)}/block`, { method: "POST" });
           blockedGroups.add(chatName);
         }
         renderDashboard();
@@ -351,7 +365,8 @@ function closeQrOverlay() {
 
 async function pollQrCode() {
   try {
-    const res = await fetch("/api/qr");
+    const res = await adminFetch("/api/qr");
+    if (res.status === 401) { console.warn("QR endpoint requires admin token"); return; }
     const data = await res.json();
     if (data.qr) {
       // Only re-render if the QR data actually changed

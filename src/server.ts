@@ -1,24 +1,39 @@
-import express from "express";
+import express, { Request, Response, NextFunction } from "express";
 import path from "path";
 import { config } from "./config";
 import { EventStore } from "./store";
 import { categories } from "./categories";
 
+// Admin auth middleware: checks ?token= query param or Authorization: Bearer header
+function requireAdmin(req: Request, res: Response, next: NextFunction): void {
+  const token = (req.query.token as string) || req.headers.authorization?.replace("Bearer ", "");
+  if (!token || token !== config.adminToken) {
+    res.status(401).json({ error: "Unauthorized. Provide ?token=<ADMIN_TOKEN> or Authorization header." });
+    return;
+  }
+  next();
+}
+
 export function startServer(store: EventStore, statusChecker?: () => { whatsappConnected: boolean }, qrCodeGetter?: () => string | null, backfillTrigger?: (days: number) => Promise<number>): void {
   const app = express();
-  app.use(express.json({ limit: "10mb" }));
+  app.use(express.json({ limit: "2mb" }));
+
+  // Security headers
+  app.use((_req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    next();
+  });
+
   app.use(express.static(path.resolve(process.cwd(), "public")));
+
+  // ── Public endpoints (read-only, safe for anyone) ──
 
   // Connection status
   app.get("/api/status", (_req, res) => {
     const status = statusChecker ? statusChecker() : { whatsappConnected: false };
     res.json({ ...status, serverTime: new Date().toISOString() });
-  });
-
-  // Get QR code for WhatsApp auth (admin only)
-  app.get("/api/qr", (_req, res) => {
-    const qr = qrCodeGetter ? qrCodeGetter() : null;
-    res.json({ qr });
   });
 
   // Get all events
@@ -39,7 +54,7 @@ export function startServer(store: EventStore, statusChecker?: () => { whatsappC
     res.json(events);
   });
 
-  // Toggle favorite
+  // Toggle favorite (harmless user action)
   app.post("/api/events/:hash/favorite", (req, res) => {
     const favorited = store.toggleFavorite(req.params.hash);
     res.json({ hash: req.params.hash, favorited });
@@ -52,7 +67,7 @@ export function startServer(store: EventStore, statusChecker?: () => { whatsappC
 
   // Get recently added events
   app.get("/api/events/recent", (req, res) => {
-    const limit = Math.min(parseInt(req.query.limit as string) || 15, 50);
+    const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 15, 1), 50);
     const events = store.getRecentEvents(limit);
     res.json(events);
   });
@@ -70,35 +85,48 @@ export function startServer(store: EventStore, statusChecker?: () => { whatsappC
     res.json({ ...totalStats, groups: groupStats });
   });
 
+  // ── Admin endpoints (require token) ──
+
+  // Get QR code for WhatsApp auth
+  app.get("/api/qr", requireAdmin, (_req, res) => {
+    const qr = qrCodeGetter ? qrCodeGetter() : null;
+    res.json({ qr });
+  });
+
   // Get blocked groups
-  app.get("/api/groups/blocked", (_req, res) => {
+  app.get("/api/groups/blocked", requireAdmin, (_req, res) => {
     res.json(store.getBlockedGroups());
   });
 
   // Block a group
-  app.post("/api/groups/:chatName/block", (req, res) => {
-    const chatName = decodeURIComponent(req.params.chatName);
+  app.post("/api/groups/:chatName/block", requireAdmin, (req, res) => {
+    const chatName = decodeURIComponent(req.params.chatName as string);
     store.blockGroup(chatName);
     res.json({ chatName, blocked: true });
   });
 
   // Unblock a group
-  app.delete("/api/groups/:chatName/block", (req, res) => {
-    const chatName = decodeURIComponent(req.params.chatName);
+  app.delete("/api/groups/:chatName/block", requireAdmin, (req, res) => {
+    const chatName = decodeURIComponent(req.params.chatName as string);
     store.unblockGroup(chatName);
     res.json({ chatName, blocked: false });
   });
 
-  // Export all data (for syncing to another instance)
-  app.get("/api/export", (_req, res) => {
+  // Export all data (for syncing to another instance) — strip message bodies
+  app.get("/api/export", requireAdmin, (_req, res) => {
     const events = store.getAllEvents();
     const blockedGroups = store.getBlockedGroups();
-    const processedMessages = store.getAllProcessedMessages();
+    const processedMessages = store.getAllProcessedMessages().map(m => ({
+      message_id: m.message_id,
+      chat_name: m.chat_name,
+      timestamp: m.timestamp,
+      body: m.body,
+    }));
     res.json({ events, blockedGroups, processedMessages });
   });
 
   // Import data from another instance
-  app.post("/api/import", (req, res) => {
+  app.post("/api/import", requireAdmin, (req, res) => {
     const { events, blockedGroups, processedMessages } = req.body;
     let imported = 0;
     if (events && Array.isArray(events)) {
@@ -140,8 +168,8 @@ export function startServer(store: EventStore, statusChecker?: () => { whatsappC
   });
 
   // Trigger backfill (admin)
-  app.post("/api/backfill", async (req, res) => {
-    const days = Math.min(parseInt(req.query.days as string) || 7, 30);
+  app.post("/api/backfill", requireAdmin, async (req, res) => {
+    const days = Math.min(Math.max(parseInt(req.query.days as string) || 7, 1), 30);
     if (!backfillTrigger) {
       res.status(503).json({ error: "Backfill not available (no WhatsApp connection)" });
       return;
@@ -150,12 +178,13 @@ export function startServer(store: EventStore, statusChecker?: () => { whatsappC
       const eventsFound = await backfillTrigger(days);
       res.json({ message: `Backfill complete`, days, eventsFound });
     } catch (err: any) {
-      res.status(500).json({ error: err.message || "Backfill failed" });
+      console.error("[backfill] Error:", err);
+      res.status(500).json({ error: "Backfill failed" });
     }
   });
 
   // Seed sample events for testing the UI
-  app.post("/api/seed", (_req, res) => {
+  app.post("/api/seed", requireAdmin, (_req, res) => {
     const today = new Date();
     const d = (offset: number) => {
       const dt = new Date(today);
@@ -197,6 +226,12 @@ export function startServer(store: EventStore, statusChecker?: () => { whatsappC
   });
 
   app.listen(config.port, () => {
-    console.log(`\nWeb UI available at http://localhost:${config.port}\n`);
+    console.log(`\nWeb UI available at http://localhost:${config.port}`);
+    if (!process.env.ADMIN_TOKEN) {
+      console.log(`Admin token (auto-generated): ${config.adminToken}`);
+      console.log(`Set ADMIN_TOKEN env var for a stable token.\n`);
+    } else {
+      console.log(`Admin token loaded from ADMIN_TOKEN env var.\n`);
+    }
   });
 }

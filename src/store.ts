@@ -257,7 +257,7 @@ export class EventStore {
     return { totalMessages: msgs.cnt, totalEvents: evts.cnt };
   }
 
-  getAllProcessedMessages(): { messageId: string; chatName: string; body: string; timestamp: number }[] {
+  getAllProcessedMessages(): { message_id: string; chat_name: string; body: string; timestamp: number }[] {
     return this.db
       .prepare("SELECT message_id, chat_name, body, timestamp FROM processed_messages")
       .all() as any[];

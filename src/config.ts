@@ -1,10 +1,12 @@
 import dotenv from "dotenv";
+import crypto from "crypto";
 import path from "path";
 
 dotenv.config();
 
 export const config = {
   anthropicApiKey: process.env.ANTHROPIC_API_KEY || "",
+  adminToken: process.env.ADMIN_TOKEN || crypto.randomBytes(32).toString("hex"),
   dbPath: process.env.DB_PATH || path.resolve(process.cwd(), "events.db"),
   authDir: process.env.AUTH_DIR || path.resolve(process.cwd(), ".auth"),
   port: parseInt(process.env.PORT || "3000", 10),

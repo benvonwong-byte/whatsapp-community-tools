@@ -19,11 +19,14 @@ export class WhatsAppClient {
   private client: Client;
   private buffer: BufferedMessage[] = [];
   private flushTimer: NodeJS.Timeout | null = null;
+  private healthTimer: NodeJS.Timeout | null = null;
   private onFlush: FlushCallback | null = null;
   private onReady: ReadyCallback | null = null;
   private isGroupBlocked: ((chatName: string) => boolean) | null = null;
   private ready = false;
   private currentQr: string | null = null;
+  private reconnectAttempts = 0;
+  private maxReconnectAttempts = 10;
 
   constructor() {
     this.client = new Client({
@@ -36,8 +39,7 @@ export class WhatsAppClient {
           "--disable-dev-shm-usage",
           "--disable-gpu",
           "--no-first-run",
-          "--no-zygote",
-          "--single-process",
+          "--disable-extensions",
         ],
       },
     });
@@ -56,9 +58,15 @@ export class WhatsAppClient {
       console.log("WhatsApp client is ready!");
       this.ready = true;
       this.currentQr = null;
+      this.reconnectAttempts = 0;
       this.startFlushTimer();
+      this.startHealthCheck();
       if (this.onReady) {
-        await this.onReady();
+        try {
+          await this.onReady();
+        } catch (err) {
+          console.error("[ready] Error in ready handler:", err);
+        }
       }
     });
 
@@ -69,16 +77,86 @@ export class WhatsAppClient {
 
     this.client.on("auth_failure", (msg) => {
       console.error("WhatsApp authentication failed:", msg);
+      this.ready = false;
+      // Clear auth cache to force re-authentication via QR
+      try {
+        const entries = fs.readdirSync(config.authDir, { withFileTypes: true });
+        for (const entry of entries) {
+          if (entry.isDirectory() && entry.name.startsWith("session-")) {
+            fs.rmSync(path.join(config.authDir, entry.name), { recursive: true, force: true });
+            console.log(`[auth_failure] Cleared stale session: ${entry.name}`);
+          }
+        }
+      } catch {}
+      console.log("[auth_failure] Please scan the QR code again.");
     });
 
-    this.client.on("disconnected", (reason) => {
-      console.log("WhatsApp disconnected:", reason);
+    this.client.on("disconnected", async (reason) => {
+      console.log(`WhatsApp disconnected: ${reason}`);
       this.ready = false;
+      this.stopTimers();
+
+      // For permanent disconnects (user logged out elsewhere), don't retry
+      if (reason === "UNPAIRED" || reason === "UNPAIRED_IDLE") {
+        console.error("[disconnect] Session unpaired. Requires re-authentication via QR code.");
+        return;
+      }
+
+      // For transient disconnects, attempt reconnection with backoff
+      await this.reconnect();
+    });
+
+    // Monitor connection state changes
+    this.client.on("change_state", (state) => {
+      console.log(`[state] WhatsApp state: ${state}`);
     });
 
     this.client.on("message", async (msg: Message) => {
-      await this.handleMessage(msg);
+      try {
+        await this.handleMessage(msg);
+      } catch (err) {
+        console.error("[message] Error handling message:", err);
+      }
     });
+  }
+
+  private async reconnect() {
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      console.error(`[reconnect] Max attempts (${this.maxReconnectAttempts}) reached. Giving up.`);
+      return;
+    }
+
+    this.reconnectAttempts++;
+    const delay = Math.min(5000 * Math.pow(2, this.reconnectAttempts - 1), 120000); // 5s, 10s, 20s... up to 2min
+    console.log(`[reconnect] Attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${Math.round(delay / 1000)}s...`);
+
+    await new Promise(resolve => setTimeout(resolve, delay));
+
+    try {
+      this.cleanChromiumLocks();
+      // Destroy old client gracefully
+      try { await this.client.destroy(); } catch {}
+      // Re-create client
+      this.client = new Client({
+        authStrategy: new LocalAuth({ dataPath: config.authDir }),
+        puppeteer: {
+          headless: true,
+          args: [
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-gpu",
+            "--no-first-run",
+            "--disable-extensions",
+          ],
+        },
+      });
+      this.setupEventHandlers();
+      await this.client.initialize();
+    } catch (err) {
+      console.error(`[reconnect] Failed:`, err);
+      await this.reconnect(); // Retry with next backoff
+    }
   }
 
   private async handleMessage(msg: Message) {
@@ -112,11 +190,35 @@ export class WhatsAppClient {
   }
 
   private startFlushTimer() {
+    if (this.flushTimer) clearInterval(this.flushTimer);
     this.flushTimer = setInterval(async () => {
       if (this.buffer.length > 0) {
         await this.flush();
       }
     }, config.batchIntervalMs);
+  }
+
+  private startHealthCheck() {
+    if (this.healthTimer) clearInterval(this.healthTimer);
+    this.healthTimer = setInterval(async () => {
+      if (!this.ready) return;
+      try {
+        const state = await this.client.getState();
+        if (!state || state !== "CONNECTED") {
+          console.warn(`[health] Unexpected state: ${state}`);
+        }
+      } catch (err) {
+        console.error("[health] Health check failed, client may have crashed:", err);
+        this.ready = false;
+        this.stopTimers();
+        await this.reconnect();
+      }
+    }, 60000); // Check every 60s
+  }
+
+  private stopTimers() {
+    if (this.flushTimer) { clearInterval(this.flushTimer); this.flushTimer = null; }
+    if (this.healthTimer) { clearInterval(this.healthTimer); this.healthTimer = null; }
   }
 
   private async flush() {
@@ -259,13 +361,15 @@ export class WhatsAppClient {
   }
 
   async stop() {
-    if (this.flushTimer) {
-      clearInterval(this.flushTimer);
-    }
+    this.stopTimers();
     // Flush remaining messages
     await this.flush();
     if (this.ready) {
-      await this.client.destroy();
+      try {
+        await this.client.destroy();
+      } catch (err) {
+        console.error("[shutdown] Error destroying client:", err);
+      }
     }
   }
 }
