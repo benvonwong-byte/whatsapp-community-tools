@@ -354,7 +354,7 @@ async function pollQrCode() {
       document.getElementById("qr-canvas-container").classList.remove("hidden");
       const canvas = document.getElementById("qr-canvas");
       QRCode.toCanvas(canvas, data.qr, {
-        width: 280,
+        width: 320,
         margin: 2,
         color: { dark: "#000000", light: "#ffffff" },
       });

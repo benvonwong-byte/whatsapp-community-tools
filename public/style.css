@@ -1058,7 +1058,9 @@ kbd {
 
 /* QR Code Modal */
 .qr-modal {
-  max-width: 380px;
+  max-width: 400px;
+  max-height: none;
+  overflow: visible;
   text-align: center;
 }
 
@@ -1077,11 +1079,17 @@ kbd {
 .qr-canvas-container {
   display: flex;
   justify-content: center;
-  padding: 20px;
-  background: #fff;
+  align-items: center;
+  padding: 16px;
+  background: #ffffff;
   border-radius: 12px;
   margin: 0 auto 16px;
-  width: fit-content;
+}
+
+.qr-canvas-container canvas {
+  display: block;
+  max-width: 100%;
+  height: auto;
 }
 
 .qr-waiting, .qr-expired {
