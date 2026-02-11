@@ -66,10 +66,31 @@ async function main() {
 
   const whatsapp = new WhatsAppClient();
 
+  const runBackfill = async (days: number): Promise<number> => {
+    console.log(`\n[backfill] Starting ${days}-day backfill...`);
+    const messages = await whatsapp.fetchRecentMessages(days);
+    if (messages.length === 0) {
+      console.log("[backfill] No messages to process.");
+      return 0;
+    }
+    let totalEvents = 0;
+    const batchSize = 20;
+    for (let i = 0; i < messages.length; i += batchSize) {
+      const batch = messages.slice(i, i + batchSize);
+      console.log(`[backfill] Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(messages.length / batchSize)}...`);
+      const before = store.getTotalStats().totalEvents;
+      await processBatch(batch, store);
+      totalEvents += store.getTotalStats().totalEvents - before;
+    }
+    console.log(`[backfill] Done! Found ${totalEvents} new events.\n`);
+    return totalEvents;
+  };
+
   startServer(
     store,
     () => ({ whatsappConnected: whatsapp.isConnected() }),
-    () => whatsapp.getQrCode()
+    () => whatsapp.getQrCode(),
+    runBackfill
   );
 
   // WhatsApp + Claude are optional — skip if no API key
@@ -90,23 +111,7 @@ async function main() {
 
   // On ready, backfill last 7 days of messages
   whatsapp.setReadyHandler(async () => {
-    console.log("\n[backfill] Starting 7-day backfill...");
-    const messages = await whatsapp.fetchRecentMessages(7);
-
-    if (messages.length === 0) {
-      console.log("[backfill] No messages to process.");
-      return;
-    }
-
-    // Process in batches of 20 to avoid overwhelming the LLM
-    const batchSize = 20;
-    for (let i = 0; i < messages.length; i += batchSize) {
-      const batch = messages.slice(i, i + batchSize);
-      console.log(`[backfill] Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(messages.length / batchSize)}...`);
-      await processBatch(batch, store);
-    }
-
-    console.log("[backfill] Done! Check http://localhost:" + config.port + "\n");
+    await runBackfill(7);
   });
 
   const shutdown = async () => {

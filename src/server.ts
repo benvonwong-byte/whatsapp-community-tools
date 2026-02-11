@@ -4,7 +4,7 @@ import { config } from "./config";
 import { EventStore } from "./store";
 import { categories } from "./categories";
 
-export function startServer(store: EventStore, statusChecker?: () => { whatsappConnected: boolean }, qrCodeGetter?: () => string | null): void {
+export function startServer(store: EventStore, statusChecker?: () => { whatsappConnected: boolean }, qrCodeGetter?: () => string | null, backfillTrigger?: (days: number) => Promise<number>): void {
   const app = express();
   app.use(express.json());
   app.use(express.static(path.resolve(process.cwd(), "public")));
@@ -87,6 +87,21 @@ export function startServer(store: EventStore, statusChecker?: () => { whatsappC
     const chatName = decodeURIComponent(req.params.chatName);
     store.unblockGroup(chatName);
     res.json({ chatName, blocked: false });
+  });
+
+  // Trigger backfill (admin)
+  app.post("/api/backfill", async (req, res) => {
+    const days = Math.min(parseInt(req.query.days as string) || 7, 30);
+    if (!backfillTrigger) {
+      res.status(503).json({ error: "Backfill not available (no WhatsApp connection)" });
+      return;
+    }
+    try {
+      const eventsFound = await backfillTrigger(days);
+      res.json({ message: `Backfill complete`, days, eventsFound });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Backfill failed" });
+    }
   });
 
   // Seed sample events for testing the UI
