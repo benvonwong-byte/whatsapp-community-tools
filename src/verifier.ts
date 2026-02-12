@@ -240,7 +240,7 @@ export interface VerifyProgress {
 /** Verify a stored event using its source text (when no URL or URL failed). */
 async function verifyFromSourceText(
   event: StoredEvent
-): Promise<{ action: "keep" | "update"; fields?: Partial<{ name: string; date: string; startTime: string | null; endTime: string | null; endDate: string | null; location: string | null }> } | null> {
+): Promise<{ action: "keep" | "update" | "delete"; fields?: Partial<{ name: string; date: string; startTime: string | null; endTime: string | null; endDate: string | null; location: string | null }> } | null> {
   if (!event.sourceText || event.sourceText.trim().length < 20) return null;
 
   const today = new Date().toISOString().split("T")[0];
@@ -255,17 +255,19 @@ EXTRACTED EVENT:
 - End time: ${event.endTime || "unknown"}
 - End date: ${event.endDate || "same day"}
 - Location: ${event.location || "unknown"}
+- Category: ${event.category}
 
 RAW SOURCE MESSAGE:
 ${event.sourceText.slice(0, 4000)}
 
-TASK: Re-read the raw source message carefully and verify the extracted date and time.
+TASK: Re-read the raw source message carefully and verify the extracted date, time, AND location.
 
 RULES:
 1. The source text is the ground truth. If it mentions a specific date/time that differs from the extracted fields, use the source's date/time.
 2. For relative dates like "this Saturday" or "next Friday", resolve them relative to today (${today}).
 3. If the source text is ambiguous or doesn't clearly specify a date, return the original values unchanged.
 4. All dates must be YYYY-MM-DD. All times must be HH:MM in 24-hour format.
+5. IMPORTANT: Determine if this event is in the New York City metro area (NYC, all five boroughs, Northern NJ, Westchester, Long Island). Set "isNYCArea" accordingly. Online/virtual/Zoom events count as NYC area (set true).
 
 Respond with ONLY a JSON object (no markdown):
 {
@@ -273,7 +275,8 @@ Respond with ONLY a JSON object (no markdown):
   "startTime": "HH:MM" or null,
   "endTime": "HH:MM" or null,
   "endDate": "YYYY-MM-DD" or null,
-  "changed": true/false
+  "changed": true/false,
+  "isNYCArea": true/false
 }
 
 JSON:`;
@@ -292,6 +295,12 @@ JSON:`;
     }
 
     const parsed = JSON.parse(jsonStr);
+
+    // Not in NYC area — delete
+    if (parsed.isNYCArea === false) {
+      return { action: "delete" };
+    }
+
     if (!parsed.changed) return null;
 
     return {
@@ -333,6 +342,7 @@ STORED EVENT:
 - End time: ${event.endTime || "unknown"}
 - End date: ${event.endDate || "same day"}
 - Location: ${event.location || "unknown"}
+- Category: ${event.category}
 
 PAGE CONTENT (from ${event.url}):
 ${pageText}
@@ -342,6 +352,7 @@ TASK: Determine if this page contains actual event information, and if so, verif
 Respond with ONLY a JSON object (no markdown):
 {
   "hasEventInfo": true/false,
+  "isNYCArea": true/false,
   "date": "YYYY-MM-DD",
   "startTime": "HH:MM" or null,
   "endTime": "HH:MM" or null,
@@ -357,6 +368,7 @@ RULES:
 3. Set "changed" to true only if you found DIFFERENT information than what's stored.
 4. For relative dates, resolve to YYYY-MM-DD based on today (${today}).
 5. All dates YYYY-MM-DD, all times HH:MM 24-hour format.
+6. IMPORTANT: Set "isNYCArea" to true if the event is in the New York City metro area (NYC, all five boroughs, Northern NJ, Westchester, Long Island) OR if it's an online/virtual/Zoom event. Set false if the event is clearly in another city (LA, SF, Chicago, London, etc.).
 
 JSON:`;
 
@@ -377,6 +389,11 @@ JSON:`;
 
     // Page doesn't have event info — delete the event
     if (!parsed.hasEventInfo) {
+      return { action: "delete" };
+    }
+
+    // Event is not in NYC area — delete
+    if (parsed.isNYCArea === false) {
       return { action: "delete" };
     }
 
@@ -403,9 +420,44 @@ JSON:`;
   }
 }
 
+/** Check if an event is likely in the NYC area based on its location string. */
+function isLikelyOnline(event: StoredEvent): boolean {
+  const cat = event.category?.toLowerCase() || "";
+  if (cat === "online") return true;
+  const loc = (event.location || "").toLowerCase();
+  return /\b(zoom|online|virtual|remote|webinar|livestream|live stream)\b/.test(loc);
+}
+
+/** For events with no URL and insufficient source text, ask Claude about location. */
+async function checkLocationNYC(event: StoredEvent): Promise<boolean> {
+  if (isLikelyOnline(event)) return true;
+
+  const prompt = `Is this event in the New York City metro area (NYC five boroughs, Northern NJ, Westchester, Long Island)?
+
+Event: ${event.name}
+Location: ${event.location || "unknown"}
+Source group: ${event.sourceChat || "unknown"}
+Description: ${(event.description || "").slice(0, 500)}
+
+Answer with ONLY "yes" or "no".`;
+
+  try {
+    const response = await client.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 10,
+      messages: [{ role: "user", content: prompt }],
+    });
+    const text = (response.content[0].type === "text" ? response.content[0].text : "").trim().toLowerCase();
+    return text.startsWith("yes");
+  } catch {
+    return true; // On error, keep the event
+  }
+}
+
 /**
  * Verify ALL stored events. Events with URLs get URL-checked (broken → deleted).
- * Events without URLs get source-text-checked. Updates the database directly.
+ * Events without URLs get source-text-checked. Non-NYC events are deleted.
+ * Updates the database directly.
  */
 export async function verifyAllStoredEvents(
   store: EventStore,
@@ -431,13 +483,13 @@ export async function verifyAllStoredEvents(
         progress.currentEvent = event.name;
         try {
           if (event.url) {
-            // Verify via URL
+            // Verify via URL (also checks NYC location)
             const result = await verifyStoredEventUrl(event);
 
             if (result.action === "delete") {
               store.deleteEvent(event.hash);
               progress.deleted++;
-              console.log(`[verify-all] DELETED "${event.name}" — URL invalid or no event info`);
+              console.log(`[verify-all] DELETED "${event.name}" — URL invalid, no event info, or not in NYC`);
             } else if (result.action === "update" && result.fields) {
               store.updateEvent(event.hash, result.fields);
               progress.updated++;
@@ -450,9 +502,13 @@ export async function verifyAllStoredEvents(
               console.log(`[verify-all] OK "${event.name}" on ${event.date}`);
             }
           } else {
-            // No URL — verify from source text
+            // No URL — verify from source text (also checks NYC location)
             const result = await verifyFromSourceText(event);
-            if (result && result.action === "update" && result.fields) {
+            if (result && result.action === "delete") {
+              store.deleteEvent(event.hash);
+              progress.deleted++;
+              console.log(`[verify-all] DELETED "${event.name}" — not in NYC area`);
+            } else if (result && result.action === "update" && result.fields) {
               store.updateEvent(event.hash, result.fields);
               progress.updated++;
               const changes = Object.entries(result.fields)
@@ -460,8 +516,18 @@ export async function verifyAllStoredEvents(
                 .map(([k, v]) => `${k}: ${(event as any)[k]} → ${v}`)
                 .join(", ");
               console.log(`[verify-all] UPDATED "${event.name}" (from source text) — ${changes}`);
+            } else if (!result) {
+              // No source text or too short — check location with a separate call
+              const inNYC = await checkLocationNYC(event);
+              if (!inNYC) {
+                store.deleteEvent(event.hash);
+                progress.deleted++;
+                console.log(`[verify-all] DELETED "${event.name}" — location "${event.location}" not in NYC area`);
+              } else {
+                console.log(`[verify-all] OK "${event.name}" on ${event.date} (no URL, location confirmed NYC)`);
+              }
             } else {
-              console.log(`[verify-all] OK "${event.name}" on ${event.date} (no URL, source text confirmed)`);
+              console.log(`[verify-all] OK "${event.name}" on ${event.date} (source text confirmed)`);
             }
           }
         } catch (err: any) {
