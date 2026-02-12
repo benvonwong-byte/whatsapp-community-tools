@@ -206,22 +206,22 @@ export function startServer(store: EventStore, statusChecker?: () => { whatsappC
   });
 
   // Trigger backfill (admin)
-  // If ?days= is provided, use that. Otherwise, calculate from last processed message timestamp.
+  // If ?hours= is provided, use that. Otherwise, calculate from last processed message timestamp.
   app.post("/api/backfill", requireAdmin, async (req, res) => {
-    let days: number;
-    const daysParam = req.query.days as string | undefined;
-    if (daysParam) {
-      days = Math.min(Math.max(parseInt(daysParam) || 7, 1), 30);
+    let hours: number;
+    const hoursParam = req.query.hours as string | undefined;
+    if (hoursParam) {
+      hours = Math.min(Math.max(parseInt(hoursParam) || 168, 1), 720); // cap 30 days
     } else {
-      // Smart: calculate gap since last processed message
+      // Smart: calculate gap since last processed message, round up to nearest hour
       const lastTs = store.getLastProcessedTimestamp();
       if (lastTs) {
         const gapMs = Date.now() - lastTs * 1000;
-        const gapDays = Math.ceil(gapMs / (24 * 60 * 60 * 1000));
-        days = Math.max(1, Math.min(gapDays + 1, 30)); // +1 overlap, cap 30
-        console.log(`[backfill] Smart gap: last message ${new Date(lastTs * 1000).toISOString()}, ${gapDays}d ago → scanning ${days} days`);
+        hours = Math.max(1, Math.ceil(gapMs / (60 * 60 * 1000)));
+        hours = Math.min(hours, 720); // cap 30 days
+        console.log(`[backfill] Smart gap: last message ${new Date(lastTs * 1000).toISOString()}, ${hours}h ago → scanning ${hours}h`);
       } else {
-        days = 7; // No history, default to 7
+        hours = 168; // No history, default to 7 days
       }
     }
     if (!backfillTrigger) {
@@ -229,8 +229,8 @@ export function startServer(store: EventStore, statusChecker?: () => { whatsappC
       return;
     }
     try {
-      const eventsFound = await backfillTrigger(days);
-      res.json({ message: `Backfill complete`, days, eventsFound });
+      const eventsFound = await backfillTrigger(hours);
+      res.json({ message: `Backfill complete`, hours, eventsFound });
     } catch (err: any) {
       console.error("[backfill] Error:", err);
       res.status(500).json({ error: "Backfill failed" });

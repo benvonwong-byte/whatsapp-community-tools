@@ -252,14 +252,15 @@ export class WhatsAppClient {
     return this.ready;
   }
 
-  async fetchRecentMessages(days: number = 7, onGroupProgress?: (scanned: number, total: number) => void): Promise<BufferedMessage[]> {
+  async fetchRecentMessages(hours: number = 168, onGroupProgress?: (scanned: number, total: number) => void): Promise<BufferedMessage[]> {
     if (!this.ready) {
       console.log("[backfill] Client not ready, skipping backfill.");
       return [];
     }
 
-    console.log(`[backfill] Fetching messages from the last ${days} days...`);
-    const cutoff = Math.floor(Date.now() / 1000) - days * 24 * 60 * 60;
+    const label = hours >= 24 ? `${(hours / 24).toFixed(1)} days` : `${hours} hours`;
+    console.log(`[backfill] Fetching messages from the last ${label}...`);
+    const cutoff = Math.floor(Date.now() / 1000) - hours * 60 * 60;
     const allMessages: BufferedMessage[] = [];
 
     const chats = await this.client.getChats();
@@ -286,7 +287,7 @@ export class WhatsAppClient {
           (m) => m.timestamp >= cutoff
         );
         if (!hasRecentActivity) {
-          console.log(`[backfill] Skipping "${chat.name}" (no activity in last ${days} days)`);
+          console.log(`[backfill] Skipping "${chat.name}" (no activity in window)`);
           continue;
         }
 
@@ -314,7 +315,7 @@ export class WhatsAppClient {
       }
     }
 
-    console.log(`[backfill] Total: ${allMessages.length} messages from ${days} days.`);
+    console.log(`[backfill] Total: ${allMessages.length} messages from last ${label}.`);
     return allMessages;
   }
 

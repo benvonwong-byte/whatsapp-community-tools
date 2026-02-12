@@ -77,8 +77,9 @@ async function main() {
     totalGroups: 0,
   };
 
-  const runBackfill = async (days: number): Promise<number> => {
-    console.log(`\n[backfill] Starting ${days}-day backfill...`);
+  const runBackfill = async (hours: number): Promise<number> => {
+    const label = hours >= 24 ? `${(hours / 24).toFixed(1)} days` : `${hours}h`;
+    console.log(`\n[backfill] Starting backfill (${label})...`);
     backfillProgress.active = true;
     backfillProgress.phase = "fetching";
     backfillProgress.totalMessages = 0;
@@ -87,7 +88,7 @@ async function main() {
     backfillProgress.groupsScanned = 0;
     backfillProgress.totalGroups = 0;
 
-    const messages = await whatsapp.fetchRecentMessages(days, (scanned, total) => {
+    const messages = await whatsapp.fetchRecentMessages(hours, (scanned, total) => {
       backfillProgress.groupsScanned = scanned;
       backfillProgress.totalGroups = total;
     });
@@ -152,13 +153,13 @@ async function main() {
     const lastTs = store.getLastProcessedTimestamp();
     if (lastTs) {
       const gapMs = Date.now() - lastTs * 1000;
-      const gapDays = Math.ceil(gapMs / (24 * 60 * 60 * 1000));
-      const days = Math.max(1, Math.min(gapDays + 1, 30)); // +1 for overlap, cap at 30
-      console.log(`[ready] Last processed message: ${new Date(lastTs * 1000).toISOString()} (${gapDays}d ago). Backfilling ${days} days.`);
-      await runBackfill(days);
+      const gapHours = Math.ceil(gapMs / (60 * 60 * 1000));
+      const hours = Math.max(1, Math.min(gapHours, 720)); // cap at 30 days
+      console.log(`[ready] Last processed message: ${new Date(lastTs * 1000).toISOString()} (${gapHours}h ago). Backfilling ${hours}h.`);
+      await runBackfill(hours);
     } else {
-      console.log("[ready] No previous messages found. Backfilling 7 days.");
-      await runBackfill(7);
+      console.log("[ready] No previous messages found. Backfilling 168h (7 days).");
+      await runBackfill(168);
     }
   });
 
