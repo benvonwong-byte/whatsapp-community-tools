@@ -132,6 +132,6 @@ export async function extractEvents(
     return events;
   } catch (err) {
     console.error("[extractor] Error calling Claude API:", err);
-    return [];
+    throw err; // Re-throw so callers know extraction failed (vs. legitimately 0 events)
   }
 }

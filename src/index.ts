@@ -19,11 +19,21 @@ async function processBatch(
     `[process] ${newMessages.length} new messages (${messages.length - newMessages.length} already processed)`
   );
 
+  // Extract events FIRST — only mark messages as processed after extraction succeeds.
+  // If extraction fails (API error, JSON parse error), messages stay unmarked
+  // so they'll be retried in the next backfill.
+  let events;
+  try {
+    events = await extractEvents(newMessages);
+  } catch (err) {
+    console.error(`[process] Extraction failed, ${newMessages.length} messages will be retried in next backfill.`);
+    return;
+  }
+
+  // Extraction succeeded — mark all messages as processed
   for (const msg of newMessages) {
     store.markMessageProcessed(msg.id, msg.chatName, msg.timestamp, msg.body);
   }
-
-  const events = await extractEvents(newMessages);
 
   if (events.length === 0) {
     console.log("[process] No events found in this batch.");
