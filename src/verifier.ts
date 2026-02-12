@@ -30,8 +30,24 @@ function htmlToText(html: string): string {
     .trim();
 }
 
+/** Block requests to private/internal IPs to prevent SSRF. */
+function isSafeUrl(url: string): boolean {
+  try {
+    const { hostname } = new URL(url);
+    if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]") return false;
+    if (/^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|169\.254\.)/.test(hostname)) return false;
+    if (hostname.endsWith(".internal") || hostname.endsWith(".local")) return false;
+    return true;
+  } catch { return false; }
+}
+
 /** Fetch a URL with timeout and return its text content. */
 async function fetchPageText(url: string): Promise<string | null> {
+  if (!isSafeUrl(url)) {
+    console.log(`[verifier] Blocked unsafe URL: ${url}`);
+    return null;
+  }
+
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10000); // 10s timeout
@@ -176,52 +192,44 @@ export async function verifyEventDates(events: ExtractedEvent[]): Promise<Extrac
 
   console.log(`[verifier] Verifying ${withUrl.length} event(s) with URLs...`);
 
-  // Process in parallel (max 3 concurrent to avoid rate limits)
-  const concurrency = 3;
-  const verified: ExtractedEvent[] = [];
+  const concurrency = 5;
+  const verified: ExtractedEvent[] = new Array(withUrl.length);
+  let cursor = 0;
 
-  for (let i = 0; i < withUrl.length; i += concurrency) {
-    const batch = withUrl.slice(i, i + concurrency);
-    const results = await Promise.all(
-      batch.map(async (event) => {
-        const pageText = await fetchPageText(event.url!);
-        if (!pageText) {
-          console.log(`[verifier] No page content for "${event.name}", keeping original date.`);
-          return event;
-        }
+  async function worker() {
+    while (cursor < withUrl.length) {
+      const idx = cursor++;
+      const event = withUrl[idx];
+      const pageText = await fetchPageText(event.url!);
+      if (!pageText) {
+        console.log(`[verifier] No page content for "${event.name}", keeping original date.`);
+        verified[idx] = event;
+        continue;
+      }
 
-        const corrections = await verifyFromPage(event, pageText);
-        if (!corrections) {
-          console.log(`[verifier] "${event.name}" on ${event.date} — confirmed correct.`);
-          return event;
-        }
+      const corrections = await verifyFromPage(event, pageText);
+      if (!corrections) {
+        console.log(`[verifier] "${event.name}" on ${event.date} — confirmed correct.`);
+        verified[idx] = event;
+        continue;
+      }
 
-        const updated = { ...event };
-        if (corrections.date !== event.date) {
-          console.log(`[verifier] "${event.name}" date corrected: ${event.date} → ${corrections.date}`);
-        }
-        if (corrections.startTime !== event.startTime) {
-          console.log(`[verifier] "${event.name}" start time corrected: ${event.startTime} → ${corrections.startTime}`);
-        }
-        if (corrections.location && corrections.location !== event.location) {
-          console.log(`[verifier] "${event.name}" location corrected: ${event.location} → ${corrections.location}`);
-        }
-        if (corrections.name) {
-          console.log(`[verifier] "${event.name}" name corrected: "${event.name}" → "${corrections.name}"`);
-          updated.name = corrections.name;
-        }
+      const updated = { ...event };
+      if (corrections.date !== event.date) console.log(`[verifier] "${event.name}" date corrected: ${event.date} → ${corrections.date}`);
+      if (corrections.startTime !== event.startTime) console.log(`[verifier] "${event.name}" start time corrected: ${event.startTime} → ${corrections.startTime}`);
+      if (corrections.location && corrections.location !== event.location) console.log(`[verifier] "${event.name}" location corrected: ${event.location} → ${corrections.location}`);
+      if (corrections.name) { console.log(`[verifier] "${event.name}" name corrected to "${corrections.name}"`); updated.name = corrections.name; }
 
-        updated.date = corrections.date;
-        updated.startTime = corrections.startTime;
-        updated.endTime = corrections.endTime;
-        updated.endDate = corrections.endDate;
-        if (corrections.location) updated.location = corrections.location;
-
-        return updated;
-      })
-    );
-    verified.push(...results);
+      updated.date = corrections.date;
+      updated.startTime = corrections.startTime;
+      updated.endTime = corrections.endTime;
+      updated.endDate = corrections.endDate;
+      if (corrections.location) updated.location = corrections.location;
+      verified[idx] = updated;
+    }
   }
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, withUrl.length) }, () => worker()));
 
   return [...verified, ...withoutUrl];
 }

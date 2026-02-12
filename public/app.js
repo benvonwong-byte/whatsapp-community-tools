@@ -14,6 +14,7 @@ const API_BASE = window.location.hostname.includes("firebaseapp.com") || window.
 // State
 let allEvents = [];
 let categories = [];
+let catMap = {}; // id → category object (rebuilt on loadData)
 let dashboardStats = null;
 let recentEvents = [];
 let blockedGroups = new Set();
@@ -87,8 +88,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   setInterval(loadData, 30000);
   // Poll WhatsApp status every 10s
   setInterval(pollStatus, 10000);
-  // Poll backfill status every 2s
-  backfillPollTimer = setInterval(pollBackfillStatus, 2000);
+  // Poll backfill status every 5s (starts/stops dynamically)
+  backfillPollTimer = setInterval(pollBackfillStatus, 5000);
 });
 
 // Helper: fetch an admin-protected endpoint with the token
@@ -118,6 +119,8 @@ async function loadData() {
     const results = await Promise.all(fetches);
     allEvents = await results[0].json();
     categories = await results[1].json();
+    catMap = {};
+    for (const c of categories) catMap[c.id] = c;
     dashboardStats = await results[2].json();
     recentEvents = await results[3].json();
     if (isAdmin && results[4]) {
@@ -275,7 +278,7 @@ function renderDashboard() {
       const topCats = (g.topCategories || [])
         .slice(0, 3)
         .map((catId) => {
-          const cat = categories.find((c) => c.id === catId);
+          const cat = catMap[catId];
           const name = cat ? cat.name : catId;
           return `<span class="category-badge mini" data-category="${catId}">${escapeHtml(name)}</span>`;
         })
@@ -857,7 +860,7 @@ function renderRecentBanner() {
 
   container.innerHTML = recentEvents
     .map((ev) => {
-      const cat = categories.find((c) => c.id === ev.category);
+      const cat = catMap[ev.category];
       const catName = cat ? cat.name : ev.category;
       const addedLabel = formatRelativeTime(ev.createdAt);
       const evDate = new Date(ev.date + "T00:00:00").toLocaleDateString("en-US", {
@@ -921,7 +924,7 @@ async function showGroupEvents(chatName) {
       let html = `<h2>${escapeHtml(chatName)}</h2>
         <p style="color: var(--text-dim); margin-bottom: 16px;">${events.length} event(s) extracted</p>`;
       html += events.map((ev) => {
-        const cat = categories.find((c) => c.id === ev.category);
+        const cat = catMap[ev.category];
         const catName = cat ? cat.name : ev.category;
         const timeStr = ev.startTime
           ? formatTime(ev.startTime) + (ev.endTime ? ` - ${formatTime(ev.endTime)}` : "")
@@ -1617,7 +1620,7 @@ function searchEvents(query) {
     // Skip past events
     if ((ev.endDate || ev.date) < today) continue;
 
-    const cat = categories.find((c) => c.id === ev.category);
+    const cat = catMap[ev.category];
     const catName = cat ? cat.name : "";
 
     // Score across multiple fields with weights
@@ -1749,7 +1752,7 @@ function renderSearchResults() {
         if (matchField === "location" && event.location) matchHint = `<span class="search-match-hint">Location: ${escapeHtml(event.location)}</span>`;
         else if (matchField === "group" && event.sourceChat) matchHint = `<span class="search-match-hint">Group: ${escapeHtml(event.sourceChat)}</span>`;
         else if (matchField === "category") {
-          const cat = categories.find((c) => c.id === event.category);
+          const cat = catMap[event.category];
           if (cat) matchHint = `<span class="search-match-hint">Category: ${escapeHtml(cat.name)}</span>`;
         }
         else if (matchField === "description") matchHint = `<span class="search-match-hint">Description match</span>`;
@@ -1967,7 +1970,7 @@ function isModalOpen() {
 // ── Event Card HTML ──
 
 function eventCardHTML(event) {
-  const cat = categories.find((c) => c.id === event.category);
+  const cat = catMap[event.category];
   const catName = cat ? cat.name : event.category;
   const timeStr = event.startTime
     ? formatTime(event.startTime) + (event.endTime ? ` - ${formatTime(event.endTime)}` : "")
@@ -2033,7 +2036,7 @@ function setupModal() {
 }
 
 function showModal(event) {
-  const cat = categories.find((c) => c.id === event.category);
+  const cat = catMap[event.category];
   const catName = cat ? cat.name : event.category;
   const timeStr = event.startTime
     ? formatTime(event.startTime) + (event.endTime ? ` - ${formatTime(event.endTime)}` : "")
@@ -2077,10 +2080,10 @@ function showModal(event) {
         <span class="category-badge" data-category="${event.category}">${escapeHtml(catName)}</span>
       </span>
     </div>
-    ${event.url ? `
+    ${event.url && /^https?:\/\//i.test(event.url) ? `
     <div class="detail-row">
       <span class="detail-label">Link</span>
-      <span class="detail-value"><a href="${escapeHtml(event.url)}" target="_blank" rel="noopener">${escapeHtml(event.url)}</a></span>
+      <span class="detail-value"><a href="${escapeHtml(event.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(event.url)}</a></span>
     </div>` : ""}
     <div class="detail-row">
       <span class="detail-label">Source</span>
@@ -2119,11 +2122,11 @@ function formatTime(t) {
   return `${h12}:${m} ${ampm}`;
 }
 
+const _escapeEl = document.createElement("div");
 function escapeHtml(str) {
   if (!str) return "";
-  const div = document.createElement("div");
-  div.textContent = str;
-  return div.innerHTML;
+  _escapeEl.textContent = str;
+  return _escapeEl.innerHTML;
 }
 
 function escapeAttr(str) {

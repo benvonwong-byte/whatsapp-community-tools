@@ -38,10 +38,24 @@ export interface GroupStats {
 export class EventStore {
   private db: Database.Database;
 
+  // Pre-prepared statements for hot paths
+  private stmts!: {
+    isMessageProcessed: Database.Statement;
+    markMessageProcessed: Database.Statement;
+    isEventDuplicate: Database.Statement;
+    saveEvent: Database.Statement;
+    deleteEvent: Database.Statement;
+    getAirtableId: Database.Statement;
+    setAirtableId: Database.Statement;
+    toggleFavorite: Database.Statement;
+    getFavorited: Database.Statement;
+  };
+
   constructor() {
     this.db = new Database(config.dbPath);
     this.db.pragma("journal_mode = WAL");
     this.init();
+    this.prepareStatements();
   }
 
   private init() {
@@ -88,19 +102,26 @@ export class EventStore {
     try { this.db.exec("ALTER TABLE events ADD COLUMN airtable_record_id TEXT"); } catch {}
   }
 
+  private prepareStatements() {
+    this.stmts = {
+      isMessageProcessed: this.db.prepare("SELECT 1 FROM processed_messages WHERE message_id = ?"),
+      markMessageProcessed: this.db.prepare("INSERT OR IGNORE INTO processed_messages (message_id, chat_name, body, timestamp) VALUES (?, ?, ?, ?)"),
+      isEventDuplicate: this.db.prepare("SELECT 1 FROM events WHERE hash = ?"),
+      saveEvent: this.db.prepare(`INSERT OR IGNORE INTO events (hash, name, date, start_time, end_time, end_date, location, description, url, category, source_chat, source_message_id, source_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+      deleteEvent: this.db.prepare("DELETE FROM events WHERE hash = ?"),
+      getAirtableId: this.db.prepare("SELECT airtable_record_id FROM events WHERE hash = ?"),
+      setAirtableId: this.db.prepare("UPDATE events SET airtable_record_id = ? WHERE hash = ?"),
+      toggleFavorite: this.db.prepare("UPDATE events SET favorited = CASE WHEN favorited = 1 THEN 0 ELSE 1 END WHERE hash = ?"),
+      getFavorited: this.db.prepare("SELECT favorited FROM events WHERE hash = ?"),
+    };
+  }
+
   isMessageProcessed(messageId: string): boolean {
-    const row = this.db
-      .prepare("SELECT 1 FROM processed_messages WHERE message_id = ?")
-      .get(messageId);
-    return !!row;
+    return !!this.stmts.isMessageProcessed.get(messageId);
   }
 
   markMessageProcessed(messageId: string, chatName: string, timestamp: number, body: string) {
-    this.db
-      .prepare(
-        "INSERT OR IGNORE INTO processed_messages (message_id, chat_name, body, timestamp) VALUES (?, ?, ?, ?)"
-      )
-      .run(messageId, chatName, body, timestamp);
+    this.stmts.markMessageProcessed.run(messageId, chatName, body, timestamp);
   }
 
   static hashEvent(name: string, date: string, location: string): string {
@@ -110,8 +131,7 @@ export class EventStore {
 
   isEventDuplicate(name: string, date: string, location: string): boolean {
     const hash = EventStore.hashEvent(name, date, location);
-    const row = this.db.prepare("SELECT 1 FROM events WHERE hash = ?").get(hash);
-    return !!row;
+    return !!this.stmts.isEventDuplicate.get(hash);
   }
 
   saveEvent(
@@ -129,13 +149,7 @@ export class EventStore {
     sourceText: string
   ) {
     const hash = EventStore.hashEvent(name, date, location || "");
-    const result = this.db
-      .prepare(
-        `INSERT OR IGNORE INTO events
-         (hash, name, date, start_time, end_time, end_date, location, description, url, category, source_chat, source_message_id, source_text)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(hash, name, date, startTime, endTime, endDate, location, description, url, category, sourceChat, sourceMessageId, sourceText);
+    const result = this.stmts.saveEvent.run(hash, name, date, startTime, endTime, endDate, location, description, url, category, sourceChat, sourceMessageId, sourceText);
 
     // Fire-and-forget Airtable sync (only if a row was actually inserted)
     if (result.changes > 0) {
@@ -146,7 +160,7 @@ export class EventStore {
       });
       airtableCreate(fields).then((recordId) => {
         if (recordId) {
-          this.db.prepare("UPDATE events SET airtable_record_id = ? WHERE hash = ?").run(recordId, hash);
+          this.stmts.setAirtableId.run(recordId, hash);
         }
       }).catch(() => {});
     }
@@ -177,7 +191,7 @@ export class EventStore {
 
     // Fire-and-forget Airtable sync
     if (result.changes > 0) {
-      const row = this.db.prepare("SELECT airtable_record_id FROM events WHERE hash = ?").get(hash) as any;
+      const row = this.stmts.getAirtableId.get(hash) as any;
       if (row?.airtable_record_id) {
         const atFields: Partial<AirtableEventFields> = {};
         if (fields.name !== undefined) atFields.Name = fields.name;
@@ -195,12 +209,10 @@ export class EventStore {
 
   deleteEvent(hash: string): boolean {
     // Look up Airtable record ID before deleting from SQLite
-    const row = this.db.prepare("SELECT airtable_record_id FROM events WHERE hash = ?").get(hash) as any;
+    const row = this.stmts.getAirtableId.get(hash) as any;
     const airtableRecordId = row?.airtable_record_id;
 
-    const result = this.db
-      .prepare("DELETE FROM events WHERE hash = ?")
-      .run(hash);
+    const result = this.stmts.deleteEvent.run(hash);
 
     // Fire-and-forget Airtable delete
     if (result.changes > 0 && airtableRecordId) {
@@ -241,12 +253,8 @@ export class EventStore {
   }
 
   toggleFavorite(hash: string): boolean {
-    this.db
-      .prepare("UPDATE events SET favorited = CASE WHEN favorited = 1 THEN 0 ELSE 1 END WHERE hash = ?")
-      .run(hash);
-    const row = this.db
-      .prepare("SELECT favorited FROM events WHERE hash = ?")
-      .get(hash) as any;
+    this.stmts.toggleFavorite.run(hash);
+    const row = this.stmts.getFavorited.get(hash) as any;
     return row ? !!row.favorited : false;
   }
 
@@ -398,7 +406,7 @@ export class EventStore {
 
   /** Store the Airtable record ID for an event. */
   setAirtableRecordId(hash: string, recordId: string): void {
-    this.db.prepare("UPDATE events SET airtable_record_id = ? WHERE hash = ?").run(recordId, hash);
+    this.stmts.setAirtableId.run(recordId, hash);
   }
 
   /** Get all events that haven't been synced to Airtable yet. */

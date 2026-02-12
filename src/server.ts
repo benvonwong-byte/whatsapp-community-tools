@@ -1,9 +1,15 @@
 import express, { Request, Response, NextFunction } from "express";
+import crypto from "crypto";
 import path from "path";
 import { config } from "./config";
 import { EventStore } from "./store";
 import { categories } from "./categories";
 import { verifyAllStoredEvents, VerifyProgress } from "./verifier";
+
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
+}
 
 export interface BackfillProgress {
   active: boolean;
@@ -47,7 +53,7 @@ console.error = (...args: any[]) => { captureLog("error", args); origError(...ar
 // Admin auth middleware: checks ?token= query param or Authorization: Bearer header
 function requireAdmin(req: Request, res: Response, next: NextFunction): void {
   const token = (req.query.token as string) || req.headers.authorization?.replace("Bearer ", "");
-  if (!token || token !== config.adminToken) {
+  if (!token || !timingSafeEqual(token, config.adminToken)) {
     res.status(401).json({ error: "Unauthorized. Provide ?token=<ADMIN_TOKEN> or Authorization header." });
     return;
   }
@@ -59,9 +65,16 @@ export function startServer(store: EventStore, statusChecker?: () => { whatsappC
   app.use(express.json({ limit: "2mb" }));
 
   // CORS: allow Firebase-hosted frontend to call Railway API
+  const allowedOriginSuffixes = [".firebaseapp.com", ".web.app"];
   app.use((req, res, next) => {
     const origin = req.headers.origin || "";
-    if (origin.includes("firebaseapp.com") || origin.includes("web.app") || origin.includes("localhost")) {
+    let allowed = false;
+    try {
+      const { hostname } = new URL(origin);
+      allowed = hostname === "localhost" || hostname === "127.0.0.1"
+        || allowedOriginSuffixes.some((s) => hostname === s.slice(1) || hostname.endsWith(s));
+    } catch {}
+    if (allowed) {
       res.setHeader("Access-Control-Allow-Origin", origin);
       res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
       res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
@@ -71,6 +84,7 @@ export function startServer(store: EventStore, statusChecker?: () => { whatsappC
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-Frame-Options", "DENY");
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://whatsapp-events-nyc-production.up.railway.app https://nominatim.openstreetmap.org; img-src 'self' data:");
     next();
   });
 
@@ -85,7 +99,7 @@ export function startServer(store: EventStore, statusChecker?: () => { whatsappC
       res.status(503).json({ error: "Login not configured." });
       return;
     }
-    if (email === config.adminEmail && password === config.adminPassword) {
+    if (timingSafeEqual(email, config.adminEmail) && timingSafeEqual(password, config.adminPassword)) {
       res.json({ token: config.adminToken });
     } else {
       res.status(401).json({ error: "Invalid credentials." });
