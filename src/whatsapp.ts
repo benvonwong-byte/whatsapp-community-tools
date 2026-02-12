@@ -28,19 +28,28 @@ export class WhatsAppClient {
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 10;
 
+  private static readonly PUPPETEER_ARGS = [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-gpu",
+    "--no-first-run",
+    "--disable-extensions",
+    "--disable-background-networking",
+    "--disable-default-apps",
+    "--disable-sync",
+    "--disable-translate",
+    "--metrics-recording-only",
+    "--no-zygote",
+    "--single-process",
+  ];
+
   constructor() {
     this.client = new Client({
       authStrategy: new LocalAuth({ dataPath: config.authDir }),
       puppeteer: {
         headless: true,
-        args: [
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-          "--disable-dev-shm-usage",
-          "--disable-gpu",
-          "--no-first-run",
-          "--disable-extensions",
-        ],
+        args: WhatsAppClient.PUPPETEER_ARGS,
       },
     });
 
@@ -55,14 +64,24 @@ export class WhatsAppClient {
     });
 
     this.client.on("ready", async () => {
-      console.log("WhatsApp client is ready! Waiting 10s for chats to sync...");
+      console.log("WhatsApp client is ready! Waiting 30s for chats to sync...");
       this.ready = true;
       this.currentQr = null;
       this.reconnectAttempts = 0;
       this.startFlushTimer();
       this.startHealthCheck();
       // Wait for WhatsApp Web to fully sync chat list before triggering backfill
-      await new Promise(resolve => setTimeout(resolve, 10000));
+      await new Promise(resolve => setTimeout(resolve, 30000));
+      // Verify page is actually responsive before proceeding
+      const alive = await this.isPageAlive();
+      if (!alive) {
+        console.error("[ready] Page not responsive after 30s wait. Triggering reconnect.");
+        this.ready = false;
+        this.stopTimers();
+        await this.reconnect();
+        return;
+      }
+      console.log("[ready] Page health check passed, proceeding.");
       if (this.onReady) {
         try {
           await this.onReady();
@@ -141,17 +160,7 @@ export class WhatsAppClient {
       // Re-create client
       this.client = new Client({
         authStrategy: new LocalAuth({ dataPath: config.authDir }),
-        puppeteer: {
-          headless: true,
-          args: [
-            "--no-sandbox",
-            "--disable-setuid-sandbox",
-            "--disable-dev-shm-usage",
-            "--disable-gpu",
-            "--no-first-run",
-            "--disable-extensions",
-          ],
-        },
+        puppeteer: { headless: true, args: WhatsAppClient.PUPPETEER_ARGS },
       });
       this.setupEventHandlers();
       await this.client.initialize();
@@ -250,8 +259,40 @@ export class WhatsAppClient {
     this.isGroupBlocked = check;
   }
 
+  /** Quick check: is the Puppeteer page still alive and responsive? */
+  private async isPageAlive(timeoutMs = 15000): Promise<boolean> {
+    try {
+      const page = (this.client as any).pupPage;
+      if (!page) return false;
+      await Promise.race([
+        page.evaluate(() => true),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("page evaluate timed out")), timeoutMs)
+        ),
+      ]);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   isConnected(): boolean {
     return this.ready;
+  }
+
+  /** Try getChats() with timeout, return null on failure */
+  private async tryGetChats(timeoutMs = 60000): Promise<Awaited<ReturnType<Client["getChats"]>> | null> {
+    try {
+      return await Promise.race([
+        this.client.getChats(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`getChats() timed out after ${timeoutMs / 1000}s`)), timeoutMs)
+        ),
+      ]);
+    } catch (err: any) {
+      console.error(`[backfill] getChats failed: ${err?.message || err}`);
+      return null;
+    }
   }
 
   async fetchRecentMessages(hours: number = 168, onGroupProgress?: (scanned: number, total: number) => void): Promise<BufferedMessage[]> {
@@ -265,19 +306,47 @@ export class WhatsAppClient {
     const cutoff = Math.floor(Date.now() / 1000) - hours * 60 * 60;
     const allMessages: BufferedMessage[] = [];
 
-    // getChats() can hang after reconnection — add 90s timeout
-    let chats: Awaited<ReturnType<Client["getChats"]>>;
-    try {
-      chats = await Promise.race([
-        this.client.getChats(),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("getChats() timed out after 90s")), 90000)
-        ),
-      ]);
-    } catch (err: any) {
-      const errMsg = err?.message || String(err);
-      console.error(`[backfill] Failed to get chats: ${errMsg}`);
-      throw new Error(`Failed to get chats: ${errMsg}`);
+    // Pre-check: is the page responsive?
+    const alive = await this.isPageAlive();
+    if (!alive) {
+      console.error("[backfill] Page not responsive, triggering reconnect...");
+      this.ready = false;
+      this.stopTimers();
+      this.reconnect(); // fire-and-forget, will re-trigger onReady → backfill
+      throw new Error("WhatsApp page not responsive. Reconnecting...");
+    }
+
+    // Try getChats(), retry once after reconnect if it fails
+    let chats = await this.tryGetChats(60000);
+    if (!chats) {
+      console.warn("[backfill] First getChats() failed. Reconnecting and retrying...");
+      this.ready = false;
+      this.stopTimers();
+      try {
+        this.cleanChromiumLocks();
+        try { await this.client.destroy(); } catch {}
+        this.client = new Client({
+          authStrategy: new LocalAuth({ dataPath: config.authDir }),
+          puppeteer: { headless: true, args: WhatsAppClient.PUPPETEER_ARGS },
+        });
+        this.setupEventHandlers();
+        await this.client.initialize();
+        // Wait for ready event to fire (up to 60s)
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error("Reconnect ready timeout (60s)")), 60000);
+          const check = setInterval(() => {
+            if (this.ready) { clearInterval(check); clearTimeout(timer); resolve(); }
+          }, 1000);
+        });
+        console.log("[backfill] Reconnected. Waiting 15s then retrying getChats()...");
+        await new Promise(resolve => setTimeout(resolve, 15000));
+        chats = await this.tryGetChats(60000);
+      } catch (err: any) {
+        throw new Error(`Reconnect failed: ${err?.message || err}`);
+      }
+      if (!chats) {
+        throw new Error("getChats() failed after reconnect. WhatsApp may need re-authentication.");
+      }
     }
     const groupChats = chats.filter((c) => {
       if (!c.isGroup) return false;

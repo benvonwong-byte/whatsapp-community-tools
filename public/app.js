@@ -544,7 +544,8 @@ async function fetchAndRenderLogs() {
       return;
     }
     container.innerHTML = logs.map((entry) => {
-      const ts = entry.timestamp.replace("T", " ").replace(/\.\d+Z$/, "");
+      const d = new Date(entry.timestamp);
+      const ts = d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
       const cls = `log-entry log-${entry.level}`;
       return `<div class="${cls}"><span class="log-ts">${escapeHtml(ts)}</span>${escapeHtml(entry.message)}</div>`;
     }).join("");
