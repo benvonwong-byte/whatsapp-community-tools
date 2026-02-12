@@ -396,7 +396,7 @@ function renderBackfillProgress(progress) {
   if (!el) return;
 
   // Don't touch the progress bar if verification is using it
-  if (verifyPollTimer) return;
+  if (el.dataset.owner === "verify") return;
 
   // When idle (or unknown), hide and reset flags for next backfill
   if (!progress.active && progress.phase !== "done" && progress.phase !== "error") {
@@ -511,8 +511,9 @@ function renderVerifyProgress(progress) {
     const pct = progress.total > 0 ? Math.round((progress.checked / progress.total) * 100) : 0;
     verifyBtn.textContent = `Verifying ${pct}%`;
 
-    // Reuse the backfill progress bar for verify progress
+    // Reuse the backfill progress bar for verify progress — claim ownership
     if (el) {
+      el.dataset.owner = "verify";
       el.classList.remove("hidden", "done", "error");
       const currentLabel = progress.currentEvent
         ? `Checking: ${progress.currentEvent}`
@@ -522,6 +523,11 @@ function renderVerifyProgress(progress) {
       document.getElementById("backfill-progress-detail").textContent = `${progress.checked} / ${progress.total} events checked`;
       document.getElementById("backfill-progress-events").textContent =
         `${progress.updated} updated, ${progress.deleted} deleted`;
+    }
+
+    // Set up polling if not already active (handles page refresh during verify)
+    if (!verifyPollTimer) {
+      verifyPollTimer = setInterval(pollVerifyStatus, 2000);
     }
   } else if (progress.phase === "done") {
     verifyBtn.disabled = false;
@@ -537,11 +543,12 @@ function renderVerifyProgress(progress) {
       document.getElementById("backfill-progress-events").textContent =
         `${progress.updated} updated, ${progress.deleted} deleted`;
 
-      // Auto-hide after 8s, reload data
+      // Auto-hide after 8s, reload data, release ownership
       loadData();
       setTimeout(() => {
         el.classList.add("hidden");
         el.classList.remove("done");
+        delete el.dataset.owner;
       }, 8000);
     }
 
@@ -558,6 +565,8 @@ function renderVerifyProgress(progress) {
       document.getElementById("backfill-progress-fill").style.width = "100%";
       document.getElementById("backfill-progress-detail").textContent = progress.errorMessage || "Unknown error";
       document.getElementById("backfill-progress-events").textContent = "";
+      // Release ownership after 8s
+      setTimeout(() => { delete el.dataset.owner; }, 8000);
     }
 
     if (verifyPollTimer) { clearInterval(verifyPollTimer); verifyPollTimer = null; }
