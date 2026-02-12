@@ -233,6 +233,7 @@ export interface VerifyProgress {
   checked: number;
   updated: number;
   deleted: number;
+  currentEvent?: string;
   errorMessage?: string;
 }
 
@@ -427,6 +428,7 @@ export async function verifyAllStoredEvents(
 
     await Promise.all(
       batch.map(async (event) => {
+        progress.currentEvent = event.name;
         try {
           if (event.url) {
             // Verify via URL
@@ -474,4 +476,5 @@ export async function verifyAllStoredEvents(
   console.log(`[verify-all] Done! Checked ${progress.checked}, updated ${progress.updated}, deleted ${progress.deleted}.`);
   progress.phase = "done";
   progress.active = false;
+  progress.currentEvent = undefined;
 }

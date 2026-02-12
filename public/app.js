@@ -395,6 +395,9 @@ function renderBackfillProgress(progress) {
   const el = document.getElementById("backfill-progress");
   if (!el) return;
 
+  // Don't touch the progress bar if verification is using it
+  if (verifyPollTimer) return;
+
   // When idle (or unknown), hide and reset flags for next backfill
   if (!progress.active && progress.phase !== "done" && progress.phase !== "error") {
     el.classList.add("hidden");
@@ -511,7 +514,10 @@ function renderVerifyProgress(progress) {
     // Reuse the backfill progress bar for verify progress
     if (el) {
       el.classList.remove("hidden", "done", "error");
-      document.getElementById("backfill-progress-label").textContent = `Verifying events... ${pct}%`;
+      const currentLabel = progress.currentEvent
+        ? `Checking: ${progress.currentEvent}`
+        : `Verifying events... ${pct}%`;
+      document.getElementById("backfill-progress-label").textContent = currentLabel;
       document.getElementById("backfill-progress-fill").style.width = `${pct}%`;
       document.getElementById("backfill-progress-detail").textContent = `${progress.checked} / ${progress.total} events checked`;
       document.getElementById("backfill-progress-events").textContent =
