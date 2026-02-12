@@ -274,9 +274,10 @@ export class WhatsAppClient {
           setTimeout(() => reject(new Error("getChats() timed out after 90s")), 90000)
         ),
       ]);
-    } catch (err) {
-      console.error("[backfill] Failed to get chats:", err);
-      return [];
+    } catch (err: any) {
+      const errMsg = err?.message || String(err);
+      console.error(`[backfill] Failed to get chats: ${errMsg}`);
+      throw new Error(`Failed to get chats: ${errMsg}`);
     }
     const groupChats = chats.filter((c) => {
       if (!c.isGroup) return false;

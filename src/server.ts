@@ -26,7 +26,11 @@ const logBuffer: LogEntry[] = [];
 const LOG_BUFFER_SIZE = 200;
 
 function captureLog(level: "log" | "warn" | "error", args: any[]) {
-  const message = args.map(a => typeof a === "string" ? a : JSON.stringify(a, null, 2)).join(" ");
+  const message = args.map(a => {
+    if (typeof a === "string") return a;
+    if (a instanceof Error) return `${a.message}${a.stack ? "\n" + a.stack : ""}`;
+    try { return JSON.stringify(a, null, 2); } catch { return String(a); }
+  }).join(" ");
   logBuffer.push({ timestamp: new Date().toISOString(), level, message });
   if (logBuffer.length > LOG_BUFFER_SIZE) logBuffer.shift();
 }
