@@ -2,6 +2,11 @@
 const adminToken = new URLSearchParams(window.location.search).get("admin");
 const isAdmin = !!adminToken;
 
+// API base: use Railway URL when hosted on Firebase, relative path when on Railway/localhost
+const API_BASE = window.location.hostname.includes("firebaseapp.com") || window.location.hostname.includes("web.app")
+  ? "https://whatsapp-events-nyc-production.up.railway.app"
+  : "";
+
 // State
 let allEvents = [];
 let categories = [];
@@ -67,16 +72,21 @@ document.addEventListener("DOMContentLoaded", async () => {
 // Helper: fetch an admin-protected endpoint with the token
 function adminFetch(url, options = {}) {
   const separator = url.includes("?") ? "&" : "?";
-  return fetch(`${url}${separator}token=${encodeURIComponent(adminToken)}`, options);
+  return fetch(`${API_BASE}${url}${separator}token=${encodeURIComponent(adminToken)}`, options);
+}
+
+// Helper: fetch a public API endpoint
+function apiFetch(url, options = {}) {
+  return fetch(`${API_BASE}${url}`, options);
 }
 
 async function loadData() {
   try {
     const fetches = [
-      fetch("/api/events"),
-      fetch("/api/categories"),
-      fetch("/api/stats"),
-      fetch("/api/events/recent?limit=15"),
+      apiFetch("/api/events"),
+      apiFetch("/api/categories"),
+      apiFetch("/api/stats"),
+      apiFetch("/api/events/recent?limit=15"),
     ];
     // Only fetch blocked groups in admin mode (requires auth)
     if (isAdmin) {
@@ -281,7 +291,7 @@ function renderDashboard() {
 
 async function pollStatus() {
   try {
-    const res = await fetch("/api/status");
+    const res = await apiFetch("/api/status");
     const data = await res.json();
     waConnected = data.whatsappConnected;
   } catch {
@@ -472,7 +482,7 @@ function formatRelativeTime(str) {
 
 async function showGroupEvents(chatName) {
   try {
-    const res = await fetch(`/api/events/group/${encodeURIComponent(chatName)}`);
+    const res = await apiFetch(`/api/events/group/${encodeURIComponent(chatName)}`);
     const events = await res.json();
 
     const content = document.getElementById("modal-content");
@@ -1101,7 +1111,7 @@ async function favoriteFocusedEvent() {
   if (!hash) return;
 
   try {
-    const res = await fetch(`/api/events/${hash}/favorite`, { method: "POST" });
+    const res = await apiFetch(`/api/events/${hash}/favorite`, { method: "POST" });
     const result = await res.json();
     const ev = allEvents.find((e) => e.hash === hash);
     if (ev) ev.favorited = result.favorited;
@@ -1158,7 +1168,7 @@ function attachCardListeners(container) {
       e.stopPropagation();
       const hash = btn.dataset.hash;
       try {
-        const res = await fetch(`/api/events/${hash}/favorite`, { method: "POST" });
+        const res = await apiFetch(`/api/events/${hash}/favorite`, { method: "POST" });
         const result = await res.json();
         // Update local state
         const ev = allEvents.find((e) => e.hash === hash);

@@ -18,8 +18,16 @@ export function startServer(store: EventStore, statusChecker?: () => { whatsappC
   const app = express();
   app.use(express.json({ limit: "2mb" }));
 
-  // Security headers
-  app.use((_req, res, next) => {
+  // CORS: allow Firebase-hosted frontend to call Railway API
+  app.use((req, res, next) => {
+    const origin = req.headers.origin || "";
+    if (origin.includes("firebaseapp.com") || origin.includes("web.app") || origin.includes("localhost")) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    }
+    if (req.method === "OPTIONS") { res.status(204).end(); return; }
+    // Security headers
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-Frame-Options", "DENY");
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
