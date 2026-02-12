@@ -206,8 +206,24 @@ export function startServer(store: EventStore, statusChecker?: () => { whatsappC
   });
 
   // Trigger backfill (admin)
+  // If ?days= is provided, use that. Otherwise, calculate from last processed message timestamp.
   app.post("/api/backfill", requireAdmin, async (req, res) => {
-    const days = Math.min(Math.max(parseInt(req.query.days as string) || 7, 1), 30);
+    let days: number;
+    const daysParam = req.query.days as string | undefined;
+    if (daysParam) {
+      days = Math.min(Math.max(parseInt(daysParam) || 7, 1), 30);
+    } else {
+      // Smart: calculate gap since last processed message
+      const lastTs = store.getLastProcessedTimestamp();
+      if (lastTs) {
+        const gapMs = Date.now() - lastTs * 1000;
+        const gapDays = Math.ceil(gapMs / (24 * 60 * 60 * 1000));
+        days = Math.max(1, Math.min(gapDays + 1, 30)); // +1 overlap, cap 30
+        console.log(`[backfill] Smart gap: last message ${new Date(lastTs * 1000).toISOString()}, ${gapDays}d ago → scanning ${days} days`);
+      } else {
+        days = 7; // No history, default to 7
+      }
+    }
     if (!backfillTrigger) {
       res.status(503).json({ error: "Backfill not available (no WhatsApp connection)" });
       return;

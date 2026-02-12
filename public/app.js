@@ -491,7 +491,7 @@ function setupAdminMode() {
     refreshBtn.textContent = "Scanning...";
     backfillDoneDismissed = false; // Reset so progress bar shows
     try {
-      await adminFetch("/api/backfill?days=2", { method: "POST" });
+      await adminFetch("/api/backfill", { method: "POST" });
     } catch (err) {
       console.error("Backfill trigger failed:", err);
     } finally {
