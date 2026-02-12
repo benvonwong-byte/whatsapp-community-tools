@@ -80,8 +80,8 @@ header h1 {
   white-space: nowrap;
 }
 
-.refresh-btn:hover { background: var(--accent); color: #fff; }
-.refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.refresh-btn:hover:not(:disabled) { background: var(--accent); color: #fff; }
+.refresh-btn:disabled { opacity: 0.35; cursor: not-allowed; border-color: var(--border); color: var(--text-dim); }
 .refresh-btn.scanning { animation: pulse-dot 1.5s infinite; }
 
 .login-btn:hover { color: var(--text); border-color: var(--text-dim); }

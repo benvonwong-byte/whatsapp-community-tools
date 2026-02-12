@@ -325,13 +325,22 @@ function renderStatus() {
     el.className = "wa-status checking";
     el.title = "WhatsApp: checking...";
     el.querySelector(".wa-label").textContent = "Checking...";
-    if (refreshBtn) refreshBtn.classList.add("hidden");
+    // Show scan button for admin (disabled while checking)
+    if (refreshBtn && isAdmin) {
+      refreshBtn.classList.remove("hidden");
+      refreshBtn.disabled = true;
+      refreshBtn.title = "Waiting for WhatsApp...";
+    }
   } else if (waConnected) {
     el.className = "wa-status connected";
     el.title = "WhatsApp: connected";
     el.querySelector(".wa-label").textContent = "Connected";
-    // Show refresh button when connected + admin
-    if (refreshBtn && isAdmin) refreshBtn.classList.remove("hidden");
+    // Show scan button enabled when connected + admin
+    if (refreshBtn && isAdmin) {
+      refreshBtn.classList.remove("hidden");
+      refreshBtn.disabled = false;
+      refreshBtn.title = "Scan for new events";
+    }
     // Stop QR polling when connected
     if (qrPollTimer) {
       clearInterval(qrPollTimer);
@@ -342,7 +351,12 @@ function renderStatus() {
     el.className = "wa-status disconnected" + (isAdmin ? " admin-clickable" : "");
     el.title = isAdmin ? "Click to connect WhatsApp" : "WhatsApp: disconnected";
     el.querySelector(".wa-label").textContent = "Disconnected";
-    if (refreshBtn) refreshBtn.classList.add("hidden");
+    // Show scan button for admin (disabled when disconnected)
+    if (refreshBtn && isAdmin) {
+      refreshBtn.classList.remove("hidden");
+      refreshBtn.disabled = true;
+      refreshBtn.title = "WhatsApp disconnected";
+    }
   }
 }
 
