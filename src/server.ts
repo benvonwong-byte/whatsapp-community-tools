@@ -4,7 +4,7 @@ import path from "path";
 import { config } from "./config";
 import { EventStore } from "./store";
 import { categories } from "./categories";
-import { verifyAllStoredEvents, VerifyProgress } from "./verifier";
+import { verifyAllStoredEvents, VerifyProgress, deduplicateEvents, DedupProgress } from "./verifier";
 
 function timingSafeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
@@ -351,6 +351,37 @@ export function startServer(store: EventStore, statusChecker?: () => { whatsappC
         verifyProgress.phase = "idle";
       }
     }, 15000);
+  });
+
+  // ── Deduplication ──
+  const dedupProgress: DedupProgress = {
+    active: false,
+    phase: "idle",
+    total: 0,
+    checked: 0,
+    deleted: 0,
+  };
+
+  app.get("/api/dedup-status", (_req, res) => {
+    res.json(dedupProgress);
+  });
+
+  app.post("/api/dedup", requireAdmin, (_req, res) => {
+    if (dedupProgress.active) {
+      res.status(409).json({ error: "Deduplication already in progress" });
+      return;
+    }
+
+    // Runs synchronously (fast — just string comparisons, no API calls)
+    res.json({ message: "Deduplication started" });
+    deduplicateEvents(store, dedupProgress);
+
+    // Reset to idle after 10s
+    setTimeout(() => {
+      if (dedupProgress.phase === "done") {
+        dedupProgress.phase = "idle";
+      }
+    }, 10000);
   });
 
   // Airtable bulk sync — push all unsynced events to Airtable

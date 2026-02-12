@@ -100,6 +100,23 @@ header h1 {
 .verify-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 .verify-btn.verifying { animation: pulse-dot 1.5s infinite; border-color: var(--accent); color: var(--accent); }
 
+.dedup-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.dedup-btn:hover:not(:disabled) { color: var(--text); border-color: var(--text-dim); }
+.dedup-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.dedup-progress .backfill-progress-fill { background: linear-gradient(90deg, #9b59b6, #8e44ad); }
+.dedup-progress.done .backfill-progress-fill { background: linear-gradient(90deg, #27ae60, #2ecc71); }
+
 /* Logs button */
 .logs-btn {
   background: none;

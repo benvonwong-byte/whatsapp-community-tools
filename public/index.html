@@ -17,6 +17,7 @@
       </span>
       <button id="refresh-btn" class="refresh-btn hidden" title="Scan for new events">&#8635; Scan</button>
       <button id="verify-btn" class="verify-btn hidden" title="Verify all event dates via links">Verify</button>
+      <button id="dedup-btn" class="dedup-btn hidden" title="Remove duplicate events">Dedup</button>
       <button id="logs-btn" class="logs-btn hidden" title="View server logs">Logs</button>
       <button id="login-btn" class="login-btn" title="Admin login">Login</button>
       <button id="logout-btn" class="logout-btn hidden" title="Logout">Logout</button>
@@ -83,6 +84,21 @@
         <div class="backfill-progress-stats">
           <span id="verify-progress-detail"></span>
           <span id="verify-progress-events"></span>
+        </div>
+      </div>
+
+      <!-- Dedup Progress Bar -->
+      <div id="dedup-progress" class="backfill-progress dedup-progress hidden">
+        <div class="backfill-progress-header">
+          <span class="backfill-progress-icon dedup-icon">&#x2702;</span>
+          <span id="dedup-progress-label" class="backfill-progress-label">Removing duplicates...</span>
+        </div>
+        <div class="backfill-progress-bar">
+          <div id="dedup-progress-fill" class="backfill-progress-fill"></div>
+        </div>
+        <div class="backfill-progress-stats">
+          <span id="dedup-progress-detail"></span>
+          <span id="dedup-progress-events"></span>
         </div>
       </div>
 

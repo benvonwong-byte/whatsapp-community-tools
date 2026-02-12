@@ -35,6 +35,7 @@ let searchQuery = "";
 let searchActive = false;
 let previousView = null; // view to restore when search is cleared
 let verifyPollTimer = null;
+let dedupPollTimer = null;
 let searchSort = "relevance"; // "relevance" | "date" | "proximity"
 let proximityAddress = "";
 let proximityCoords = null; // { lat, lng }
@@ -583,6 +584,73 @@ function renderVerifyProgress(progress) {
   }
 }
 
+// ── Dedup Progress ──
+
+async function pollDedupStatus() {
+  if (!isAdmin) return;
+  try {
+    const res = await apiFetch("/api/dedup-status");
+    const progress = await res.json();
+    renderDedupProgress(progress);
+  } catch {}
+}
+
+function renderDedupProgress(progress) {
+  const dedupBtn = document.getElementById("dedup-btn");
+  if (!dedupBtn) return;
+
+  const el = document.getElementById("dedup-progress");
+  if (!el) return;
+
+  const label = document.getElementById("dedup-progress-label");
+  const fill = document.getElementById("dedup-progress-fill");
+  const detail = document.getElementById("dedup-progress-detail");
+  const eventsEl = document.getElementById("dedup-progress-events");
+
+  if (progress.phase === "idle" && !progress.active) {
+    dedupBtn.disabled = false;
+    dedupBtn.textContent = "Dedup";
+    el.classList.add("hidden");
+    el.classList.remove("done");
+    if (dedupPollTimer) { clearInterval(dedupPollTimer); dedupPollTimer = null; }
+    return;
+  }
+
+  if (progress.phase === "running") {
+    dedupBtn.disabled = true;
+    dedupBtn.textContent = "Deduping...";
+    el.classList.remove("hidden", "done");
+    const pct = progress.total > 0 ? Math.round((progress.checked / progress.total) * 100) : 0;
+    label.textContent = progress.currentEvent
+      ? `Checking: ${progress.currentEvent}`
+      : `Scanning for duplicates... ${pct}%`;
+    fill.style.width = `${pct}%`;
+    detail.textContent = `${progress.checked} / ${progress.total} events scanned`;
+    eventsEl.textContent = `${progress.deleted} duplicates removed`;
+
+    if (!dedupPollTimer) {
+      dedupPollTimer = setInterval(pollDedupStatus, 1000);
+    }
+  } else if (progress.phase === "done") {
+    dedupBtn.disabled = false;
+    dedupBtn.textContent = "Dedup";
+    el.classList.remove("hidden");
+    el.classList.add("done");
+    label.textContent = "Deduplication complete!";
+    fill.style.width = "100%";
+    detail.textContent = `${progress.total} events scanned`;
+    eventsEl.textContent = `${progress.deleted} duplicates removed`;
+
+    loadData();
+    setTimeout(() => {
+      el.classList.add("hidden");
+      el.classList.remove("done");
+    }, 8000);
+
+    if (dedupPollTimer) { clearInterval(dedupPollTimer); dedupPollTimer = null; }
+  }
+}
+
 // ── Admin Mode ──
 
 function setupAdminMode() {
@@ -659,6 +727,29 @@ function setupAdminMode() {
 
   // Poll verify status on load (in case one is already running)
   pollVerifyStatus();
+
+  // Dedup button: triggers fuzzy duplicate removal
+  const dedupBtn = document.getElementById("dedup-btn");
+  dedupBtn.classList.remove("hidden");
+  dedupBtn.addEventListener("click", async () => {
+    if (dedupBtn.disabled) return;
+    dedupBtn.disabled = true;
+    dedupBtn.textContent = "Deduping...";
+    try {
+      await adminFetch("/api/dedup", { method: "POST" });
+      pollDedupStatus();
+      if (!dedupPollTimer) {
+        dedupPollTimer = setInterval(pollDedupStatus, 1000);
+      }
+    } catch (err) {
+      console.error("Dedup trigger failed:", err);
+      dedupBtn.disabled = false;
+      dedupBtn.textContent = "Dedup";
+    }
+  });
+
+  // Poll dedup status on load (in case one is already running)
+  pollDedupStatus();
 
   // Logs button
   const logsBtn = document.getElementById("logs-btn");

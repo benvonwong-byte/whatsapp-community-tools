@@ -507,9 +507,26 @@ function eventQuality(event: StoredEvent): number {
   return score;
 }
 
+export interface DedupProgress {
+  active: boolean;
+  phase: "idle" | "running" | "done";
+  total: number;
+  checked: number;
+  deleted: number;
+  currentEvent?: string;
+}
+
 /** Find and remove duplicate events (similar name + same or adjacent date). */
-function deduplicateEvents(store: EventStore, progress: VerifyProgress): number {
+export function deduplicateEvents(store: EventStore, progress: DedupProgress): number {
   const events = store.getAllEvents();
+  progress.total = events.length;
+  progress.checked = 0;
+  progress.deleted = 0;
+  progress.phase = "running";
+  progress.active = true;
+
+  console.log(`[dedup] Scanning ${events.length} events for duplicates...`);
+
   const deleted = new Set<string>();
 
   // Group events by date
@@ -524,6 +541,8 @@ function deduplicateEvents(store: EventStore, progress: VerifyProgress): number 
     if (group.length < 2) continue;
     for (let i = 0; i < group.length; i++) {
       if (deleted.has(group[i].hash)) continue;
+      progress.currentEvent = group[i].name;
+      progress.checked++;
       for (let j = i + 1; j < group.length; j++) {
         if (deleted.has(group[j].hash)) continue;
         const sim = nameSimilarity(group[i].name, group[j].name);
@@ -535,7 +554,7 @@ function deduplicateEvents(store: EventStore, progress: VerifyProgress): number 
           deleted.add(dup.hash);
           progress.deleted++;
           console.log(
-            `[verify-all] DEDUP deleted "${dup.name}" (${dup.date}) — duplicate of "${keeper.name}" (similarity: ${(sim * 100).toFixed(0)}%)`
+            `[dedup] Deleted "${dup.name}" (${dup.date}) — duplicate of "${keeper.name}" (similarity: ${(sim * 100).toFixed(0)}%)`
           );
         }
       }
@@ -565,12 +584,17 @@ function deduplicateEvents(store: EventStore, progress: VerifyProgress): number 
           deleted.add(dup.hash);
           progress.deleted++;
           console.log(
-            `[verify-all] DEDUP deleted "${dup.name}" (${dup.date}) — duplicate of "${keeper.name}" (${keeper.date}, similarity: ${(sim * 100).toFixed(0)}%)`
+            `[dedup] Deleted "${dup.name}" (${dup.date}) — duplicate of "${keeper.name}" (${keeper.date}, similarity: ${(sim * 100).toFixed(0)}%)`
           );
         }
       }
     }
   }
+
+  console.log(`[dedup] Done! Scanned ${events.length} events, removed ${deleted.size} duplicates.`);
+  progress.phase = "done";
+  progress.active = false;
+  progress.currentEvent = undefined;
 
   return deleted.size;
 }
@@ -696,15 +720,7 @@ export async function verifyAllStoredEvents(
 
   await Promise.all(Array.from({ length: Math.min(concurrency, events.length) }, () => worker()));
 
-  // Deduplication pass — remove fuzzy duplicates (similar name + same/adjacent date)
-  progress.currentEvent = "Checking for duplicates...";
-  console.log(`[verify-all] Running deduplication pass...`);
-  const dedupCount = deduplicateEvents(store, progress);
-  if (dedupCount > 0) {
-    console.log(`[verify-all] Deduplication removed ${dedupCount} duplicate events.`);
-  }
-
-  console.log(`[verify-all] Done! Checked ${progress.checked}, updated ${progress.updated}, deleted ${progress.deleted} (incl. ${dedupCount} duplicates).`);
+  console.log(`[verify-all] Done! Checked ${progress.checked}, updated ${progress.updated}, deleted ${progress.deleted}.`);
   progress.phase = "done";
   progress.active = false;
   progress.currentEvent = undefined;
