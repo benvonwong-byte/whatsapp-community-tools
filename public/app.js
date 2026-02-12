@@ -2228,7 +2228,24 @@ function showModal(event) {
     </button>
     <div class="source-text">${escapeHtml(event.sourceText)}</div>
     ` : ""}
+    ${isAdmin ? `<button class="modal-delete-btn" data-hash="${event.hash}">Delete Event</button>` : ""}
   `;
+
+  // Wire up modal delete button
+  const modalDelBtn = content.querySelector(".modal-delete-btn");
+  if (modalDelBtn) {
+    modalDelBtn.addEventListener("click", async () => {
+      if (!confirm(`Delete "${event.name}"?`)) return;
+      try {
+        await adminFetch(`/api/events/${event.hash}`, { method: "DELETE" });
+        allEvents = allEvents.filter((e) => e.hash !== event.hash);
+        document.getElementById("modal-overlay").classList.add("hidden");
+        renderCurrentView();
+      } catch (err) {
+        console.error("Failed to delete event:", err);
+      }
+    });
+  }
 
   document.getElementById("modal-overlay").classList.remove("hidden");
 }

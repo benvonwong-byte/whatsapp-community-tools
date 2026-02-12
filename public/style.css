@@ -1099,6 +1099,23 @@ main {
   display: block;
 }
 
+.modal-delete-btn {
+  display: block;
+  margin-top: 20px;
+  padding: 8px 20px;
+  background: #e74c3c;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.modal-delete-btn:hover {
+  background: #c0392b;
+}
+
 /* ── Dashboard Panel (persistent, collapsible) ── */
 .dashboard-panel {
   max-width: 900px;
