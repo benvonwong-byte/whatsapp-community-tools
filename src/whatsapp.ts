@@ -55,12 +55,14 @@ export class WhatsAppClient {
     });
 
     this.client.on("ready", async () => {
-      console.log("WhatsApp client is ready!");
+      console.log("WhatsApp client is ready! Waiting 10s for chats to sync...");
       this.ready = true;
       this.currentQr = null;
       this.reconnectAttempts = 0;
       this.startFlushTimer();
       this.startHealthCheck();
+      // Wait for WhatsApp Web to fully sync chat list before triggering backfill
+      await new Promise(resolve => setTimeout(resolve, 10000));
       if (this.onReady) {
         try {
           await this.onReady();
@@ -263,7 +265,19 @@ export class WhatsAppClient {
     const cutoff = Math.floor(Date.now() / 1000) - hours * 60 * 60;
     const allMessages: BufferedMessage[] = [];
 
-    const chats = await this.client.getChats();
+    // getChats() can hang after reconnection — add 90s timeout
+    let chats: Awaited<ReturnType<Client["getChats"]>>;
+    try {
+      chats = await Promise.race([
+        this.client.getChats(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("getChats() timed out after 90s")), 90000)
+        ),
+      ]);
+    } catch (err) {
+      console.error("[backfill] Failed to get chats:", err);
+      return [];
+    }
     const groupChats = chats.filter((c) => {
       if (!c.isGroup) return false;
       const participants = (c as any).participants;
