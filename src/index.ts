@@ -1,6 +1,6 @@
 import { config } from "./config";
 import { WhatsAppClient, BufferedMessage } from "./whatsapp";
-import { extractEvents } from "./extractor";
+import { extractEvents, enrichWithEventLinks } from "./extractor";
 import { verifyEventDates } from "./verifier";
 import { startServer, BackfillProgress } from "./server";
 import { EventStore } from "./store";
@@ -20,12 +20,15 @@ async function processBatch(
     `[process] ${newMessages.length} new messages (${messages.length - newMessages.length} already processed)`
   );
 
+  // Enrich messages that contain Eventbrite/Luma/Partiful links with fetched page content
+  const enrichedMessages = await enrichWithEventLinks(newMessages);
+
   // Extract events FIRST — only mark messages as processed after extraction succeeds.
   // If extraction fails (API error, JSON parse error), messages stay unmarked
   // so they'll be retried in the next backfill.
   let events;
   try {
-    events = await extractEvents(newMessages);
+    events = await extractEvents(enrichedMessages);
   } catch (err) {
     console.error(`[process] Extraction failed, ${newMessages.length} messages will be retried in next backfill.`);
     return;

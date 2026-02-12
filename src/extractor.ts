@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { config } from "./config";
 import { categories, getCategorySummary } from "./categories";
 import { BufferedMessage } from "./whatsapp";
+import { fetchPageText } from "./verifier";
 
 export interface ExtractedEvent {
   name: string;
@@ -47,9 +48,10 @@ RULES:
 4. FILTER OUT events that are purely: nightlife, parties, club nights, concerts, entertainment, hedonistic gatherings, or anything without a learning/growth/community purpose.
 5. For relative dates like "this Saturday" or "next Friday", resolve them to actual dates based on today (${today}).
 6. If a message contains a link to an event page, include it in the url field.
-7. If you cannot determine a specific time, set startTime and endTime to null.
-8. For multi-day events, set endDate to the last day.
-9. Write a brief description summarizing what the event is about.
+7. Some messages include "[Event page content from <url>]:" followed by fetched page text from Eventbrite, Luma, or Partiful. Use this page content as the PRIMARY source for event name, date, time, location, and description. The NYC location filter still applies — skip if the event is not in the NYC metro area.
+8. If you cannot determine a specific time, set startTime and endTime to null.
+9. For multi-day events, set endDate to the last day.
+10. Write a brief description summarizing what the event is about.
 
 MESSAGES:
 ${messageBlock}
@@ -134,4 +136,69 @@ export async function extractEvents(
     console.error("[extractor] Error calling Claude API:", err);
     throw err; // Re-throw so callers know extraction failed (vs. legitimately 0 events)
   }
+}
+
+// ── Event link enrichment ──
+
+const EVENT_LINK_PATTERN =
+  /https?:\/\/(?:www\.)?(?:eventbrite\.com\/e\/|lu\.ma\/|partiful\.com\/e\/)\S+/gi;
+
+/**
+ * Scan messages for Eventbrite, Luma, and Partiful links, fetch their page
+ * content, and append it to the message body so Claude can extract full event details.
+ * Returns new message copies — originals are not mutated.
+ */
+export async function enrichWithEventLinks(
+  messages: BufferedMessage[]
+): Promise<BufferedMessage[]> {
+  // Collect all unique event URLs across all messages
+  const urlToMessages = new Map<string, number[]>(); // url → message indices
+  for (let i = 0; i < messages.length; i++) {
+    const matches = messages[i].body.match(EVENT_LINK_PATTERN);
+    if (!matches) continue;
+    for (const url of new Set(matches)) {
+      if (!urlToMessages.has(url)) urlToMessages.set(url, []);
+      urlToMessages.get(url)!.push(i);
+    }
+  }
+
+  if (urlToMessages.size === 0) return messages;
+
+  console.log(`[enrich] Found ${urlToMessages.size} event link(s) to fetch...`);
+
+  // Fetch all URLs in parallel (max 5 concurrent)
+  const urlContent = new Map<string, string>();
+  const urls = [...urlToMessages.keys()];
+  const concurrency = 5;
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < urls.length) {
+      const idx = cursor++;
+      const url = urls[idx];
+      const text = await fetchPageText(url);
+      if (text) {
+        urlContent.set(url, text);
+        console.log(`[enrich] Fetched page content for ${url} (${text.length} chars)`);
+      } else {
+        console.log(`[enrich] No content from ${url}`);
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, urls.length) }, () => worker())
+  );
+
+  if (urlContent.size === 0) return messages;
+
+  // Build enriched copies of messages
+  const enriched = messages.map((m) => ({ ...m }));
+  for (const [url, content] of urlContent) {
+    for (const idx of urlToMessages.get(url)!) {
+      enriched[idx].body += `\n\n[Event page content from ${url}]:\n${content}`;
+    }
+  }
+
+  return enriched;
 }
