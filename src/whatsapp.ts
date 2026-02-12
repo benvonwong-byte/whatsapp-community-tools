@@ -40,8 +40,6 @@ export class WhatsAppClient {
     "--disable-sync",
     "--disable-translate",
     "--metrics-recording-only",
-    "--no-zygote",
-    "--single-process",
   ];
 
   constructor() {
@@ -280,19 +278,36 @@ export class WhatsAppClient {
     return this.ready;
   }
 
-  /** Try getChats() with timeout, return null on failure */
-  private async tryGetChats(timeoutMs = 60000): Promise<Awaited<ReturnType<Client["getChats"]>> | null> {
-    try {
-      return await Promise.race([
-        this.client.getChats(),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error(`getChats() timed out after ${timeoutMs / 1000}s`)), timeoutMs)
-        ),
-      ]);
-    } catch (err: any) {
-      console.error(`[backfill] getChats failed: ${err?.message || err}`);
-      return null;
-    }
+  /**
+   * Get lightweight list of group chat IDs directly from WhatsApp Web's internal store.
+   * Bypasses client.getChats() which serializes ALL chats and crashes on low-memory environments.
+   */
+  private async getGroupChatIds(): Promise<{ id: string; name: string; participantCount: number }[]> {
+    const page = (this.client as any).pupPage;
+    if (!page) throw new Error("No pupPage available");
+
+    const groups: { id: string; name: string; participantCount: number }[] = await Promise.race([
+      page.evaluate(`(async () => {
+        const chats = window.Store.Chat.getModelsArray();
+        const results = [];
+        for (const chat of chats) {
+          if (!chat.isGroup) continue;
+          const pCount = chat.groupMetadata && chat.groupMetadata.participants && chat.groupMetadata.participants._models
+            ? chat.groupMetadata.participants._models.length : 0;
+          results.push({
+            id: chat.id._serialized,
+            name: chat.formattedTitle || chat.name || chat.id._serialized,
+            participantCount: pCount,
+          });
+        }
+        return results;
+      })()`),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("getGroupChatIds timed out after 30s")), 30000)
+      ),
+    ]);
+
+    return groups;
   }
 
   async fetchRecentMessages(hours: number = 168, onGroupProgress?: (scanned: number, total: number) => void): Promise<BufferedMessage[]> {
@@ -316,53 +331,35 @@ export class WhatsAppClient {
       throw new Error("WhatsApp page not responsive. Reconnecting...");
     }
 
-    // Try getChats(), retry once after reconnect if it fails
-    let chats = await this.tryGetChats(60000);
-    if (!chats) {
-      console.warn("[backfill] First getChats() failed. Reconnecting and retrying...");
-      this.ready = false;
-      this.stopTimers();
-      try {
-        this.cleanChromiumLocks();
-        try { await this.client.destroy(); } catch {}
-        this.client = new Client({
-          authStrategy: new LocalAuth({ dataPath: config.authDir }),
-          puppeteer: { headless: true, args: WhatsAppClient.PUPPETEER_ARGS },
-        });
-        this.setupEventHandlers();
-        await this.client.initialize();
-        // Wait for ready event to fire (up to 60s)
-        await new Promise<void>((resolve, reject) => {
-          const timer = setTimeout(() => reject(new Error("Reconnect ready timeout (60s)")), 60000);
-          const check = setInterval(() => {
-            if (this.ready) { clearInterval(check); clearTimeout(timer); resolve(); }
-          }, 1000);
-        });
-        console.log("[backfill] Reconnected. Waiting 15s then retrying getChats()...");
-        await new Promise(resolve => setTimeout(resolve, 15000));
-        chats = await this.tryGetChats(60000);
-      } catch (err: any) {
-        throw new Error(`Reconnect failed: ${err?.message || err}`);
-      }
-      if (!chats) {
-        throw new Error("getChats() failed after reconnect. WhatsApp may need re-authentication.");
-      }
+    // Get lightweight group chat list directly from Store (avoids getChats() crash)
+    let groupInfos: { id: string; name: string; participantCount: number }[];
+    try {
+      groupInfos = await this.getGroupChatIds();
+    } catch (err: any) {
+      throw new Error(`Failed to list group chats: ${err?.message || err}`);
     }
-    const groupChats = chats.filter((c) => {
-      if (!c.isGroup) return false;
-      const participants = (c as any).participants;
-      if (participants && participants.length <= 10) return false;
-      if (this.isGroupBlocked && this.isGroupBlocked(c.name)) return false;
+
+    // Filter: groups with >10 participants, not blocked
+    const filteredGroups = groupInfos.filter((g) => {
+      if (g.participantCount <= 10) return false;
+      if (this.isGroupBlocked && this.isGroupBlocked(g.name)) return false;
       return true;
     });
-    console.log(`[backfill] Found ${groupChats.length} group chats (>10 members).`);
-    if (onGroupProgress) onGroupProgress(0, groupChats.length);
+    console.log(`[backfill] Found ${filteredGroups.length} group chats (>10 members) out of ${groupInfos.length} total groups.`);
+    if (onGroupProgress) onGroupProgress(0, filteredGroups.length);
 
     let groupIndex = 0;
-    for (const chat of groupChats) {
+    for (const groupInfo of filteredGroups) {
       groupIndex++;
-      if (onGroupProgress) onGroupProgress(groupIndex, groupChats.length);
+      if (onGroupProgress) onGroupProgress(groupIndex, filteredGroups.length);
       try {
+        // Fetch the full chat object one at a time (avoids bulk serialization crash)
+        const chat = await this.client.getChatById(groupInfo.id);
+        if (!chat) {
+          console.warn(`[backfill] Could not load chat: "${groupInfo.name}"`);
+          continue;
+        }
+
         // Fetch up to 500 messages per chat
         const messages = await chat.fetchMessages({ limit: 500 });
 
@@ -371,7 +368,7 @@ export class WhatsAppClient {
           (m) => m.timestamp >= cutoff
         );
         if (!hasRecentActivity) {
-          console.log(`[backfill] Skipping "${chat.name}" (no activity in window)`);
+          console.log(`[backfill] Skipping "${groupInfo.name}" (no activity in window)`);
           continue;
         }
 
@@ -383,7 +380,7 @@ export class WhatsAppClient {
 
           allMessages.push({
             id: msg.id._serialized,
-            chatName: chat.name,
+            chatName: groupInfo.name,
             body: msg.body,
             timestamp: msg.timestamp,
             from: msg.author || msg.from,
@@ -392,10 +389,10 @@ export class WhatsAppClient {
         }
 
         if (count > 0) {
-          console.log(`[backfill] "${chat.name}": ${count} messages`);
+          console.log(`[backfill] "${groupInfo.name}": ${count} messages`);
         }
-      } catch (err) {
-        console.error(`[backfill] Error fetching from "${chat.name}":`, err);
+      } catch (err: any) {
+        console.error(`[backfill] Error fetching from "${groupInfo.name}": ${err?.message || err}`);
       }
     }
 
