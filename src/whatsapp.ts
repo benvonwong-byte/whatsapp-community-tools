@@ -259,14 +259,18 @@ export class WhatsAppClient {
     const allMessages: BufferedMessage[] = [];
 
     const chats = await this.client.getChats();
+    let blockedCount = 0;
     const groupChats = chats.filter((c) => {
       if (!c.isGroup) return false;
       const participants = (c as any).participants;
       if (participants && participants.length <= 10) return false;
-      if (this.isGroupBlocked && this.isGroupBlocked(c.name)) return false;
+      if (this.isGroupBlocked && this.isGroupBlocked(c.name)) {
+        blockedCount++;
+        return false;
+      }
       return true;
     });
-    console.log(`[backfill] Found ${groupChats.length} group chats (>10 members).`);
+    console.log(`[backfill] Found ${groupChats.length} group chats (>10 members)${blockedCount > 0 ? `, skipped ${blockedCount} blocked` : ""}.`);
     if (onGroupProgress) onGroupProgress(0, groupChats.length);
 
     let groupIndex = 0;

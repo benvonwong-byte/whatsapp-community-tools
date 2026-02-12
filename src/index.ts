@@ -161,17 +161,20 @@ async function main() {
 
   whatsapp.setGroupBlockedCheck((chatName: string) => store.isGroupBlocked(chatName));
 
-  // On ready (initial connect or reconnect), backfill since last processed message
+  // On ready (initial connect or reconnect), backfill since last event found.
+  // Uses the last event's created_at rather than the last processed message,
+  // because real-time messages keep updating the processed timestamp even
+  // when backfill scanning is broken or not finding events.
   whatsapp.setReadyHandler(async () => {
-    const lastTs = store.getLastProcessedTimestamp();
-    if (lastTs) {
-      const gapMs = Date.now() - lastTs * 1000;
+    const lastEventTs = store.getLastEventCreatedTimestamp();
+    if (lastEventTs) {
+      const gapMs = Date.now() - lastEventTs * 1000;
       const gapHours = Math.ceil(gapMs / (60 * 60 * 1000));
       const hours = Math.max(1, Math.min(gapHours, 720)); // cap at 30 days
-      console.log(`[ready] Last processed message: ${new Date(lastTs * 1000).toISOString()} (${gapHours}h ago). Backfilling ${hours}h.`);
+      console.log(`[ready] Last event created: ${new Date(lastEventTs * 1000).toISOString()} (${gapHours}h ago). Backfilling ${hours}h.`);
       await runBackfill(hours);
     } else {
-      console.log("[ready] No previous messages found. Backfilling 168h (7 days).");
+      console.log("[ready] No previous events found. Backfilling 168h (7 days).");
       await runBackfill(168);
     }
   });

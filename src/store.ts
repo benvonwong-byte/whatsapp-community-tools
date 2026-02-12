@@ -264,6 +264,15 @@ export class EventStore {
     return row?.ts ?? null;
   }
 
+  /** Returns the Unix epoch (seconds) of the most recently created event, or null if no events. */
+  getLastEventCreatedTimestamp(): number | null {
+    const row = this.db
+      .prepare("SELECT MAX(created_at) as ca FROM events")
+      .get() as any;
+    if (!row?.ca) return null;
+    return Math.floor(new Date(row.ca + "Z").getTime() / 1000);
+  }
+
   getAllProcessedMessages(): { message_id: string; chat_name: string; body: string; timestamp: number }[] {
     return this.db
       .prepare("SELECT message_id, chat_name, body, timestamp FROM processed_messages")
