@@ -403,14 +403,14 @@ JSON:`;
 }
 
 /**
- * Verify ALL stored future events. Events with URLs get URL-checked (broken → deleted).
+ * Verify ALL stored events. Events with URLs get URL-checked (broken → deleted).
  * Events without URLs get source-text-checked. Updates the database directly.
  */
 export async function verifyAllStoredEvents(
   store: EventStore,
   progress: VerifyProgress
 ): Promise<void> {
-  const events = store.getFutureEvents();
+  const events = store.getAllEvents();
   progress.total = events.length;
   progress.checked = 0;
   progress.updated = 0;
@@ -418,7 +418,7 @@ export async function verifyAllStoredEvents(
   progress.phase = "running";
   progress.active = true;
 
-  console.log(`[verify-all] Starting verification of ${events.length} future events...`);
+  console.log(`[verify-all] Starting verification of ${events.length} events...`);
 
   const concurrency = 3;
 

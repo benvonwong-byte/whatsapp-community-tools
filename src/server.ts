@@ -297,7 +297,7 @@ export function startServer(store: EventStore, statusChecker?: () => { whatsappC
     res.json(verifyProgress);
   });
 
-  // Trigger bulk verification of all future events (admin)
+  // Trigger bulk verification of all stored events (admin)
   app.post("/api/verify-all", requireAdmin, async (_req, res) => {
     if (verifyProgress.active) {
       res.status(409).json({ error: "Verification already in progress" });
