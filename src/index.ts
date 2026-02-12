@@ -1,6 +1,7 @@
 import { config } from "./config";
 import { WhatsAppClient, BufferedMessage } from "./whatsapp";
 import { extractEvents } from "./extractor";
+import { verifyEventDates } from "./verifier";
 import { startServer, BackfillProgress } from "./server";
 import { EventStore } from "./store";
 
@@ -38,6 +39,13 @@ async function processBatch(
   if (events.length === 0) {
     console.log("[process] No events found in this batch.");
     return;
+  }
+
+  // Verify dates by fetching event URLs (only for events that have a URL)
+  try {
+    events = await verifyEventDates(events);
+  } catch (err) {
+    console.error("[process] Date verification failed, using original dates:", err);
   }
 
   console.log(`[process] Found ${events.length} event(s), checking for duplicates...`);
