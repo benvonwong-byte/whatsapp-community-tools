@@ -395,9 +395,6 @@ function renderBackfillProgress(progress) {
   const el = document.getElementById("backfill-progress");
   if (!el) return;
 
-  // Don't touch the progress bar if verification is using it
-  if (el.dataset.owner === "verify") return;
-
   // When idle (or unknown), hide and reset flags for next backfill
   if (!progress.active && progress.phase !== "done" && progress.phase !== "error") {
     el.classList.add("hidden");
@@ -491,13 +488,21 @@ function renderVerifyProgress(progress) {
   const verifyBtn = document.getElementById("verify-btn");
   if (!verifyBtn) return;
 
-  const el = document.getElementById("backfill-progress");
+  const el = document.getElementById("verify-progress");
+  if (!el) return;
+
+  const label = document.getElementById("verify-progress-label");
+  const fill = document.getElementById("verify-progress-fill");
+  const detail = document.getElementById("verify-progress-detail");
+  const eventsEl = document.getElementById("verify-progress-events");
+  const icon = el.querySelector(".verify-icon");
 
   if (progress.phase === "idle" && !progress.active) {
-    // Reset button state
     verifyBtn.disabled = false;
     verifyBtn.classList.remove("verifying");
     verifyBtn.textContent = "Verify";
+    el.classList.add("hidden");
+    el.classList.remove("done", "error");
     if (verifyPollTimer) {
       clearInterval(verifyPollTimer);
       verifyPollTimer = null;
@@ -511,19 +516,14 @@ function renderVerifyProgress(progress) {
     const pct = progress.total > 0 ? Math.round((progress.checked / progress.total) * 100) : 0;
     verifyBtn.textContent = `Verifying ${pct}%`;
 
-    // Reuse the backfill progress bar for verify progress — claim ownership
-    if (el) {
-      el.dataset.owner = "verify";
-      el.classList.remove("hidden", "done", "error");
-      const currentLabel = progress.currentEvent
-        ? `Checking: ${progress.currentEvent}`
-        : `Verifying events... ${pct}%`;
-      document.getElementById("backfill-progress-label").textContent = currentLabel;
-      document.getElementById("backfill-progress-fill").style.width = `${pct}%`;
-      document.getElementById("backfill-progress-detail").textContent = `${progress.checked} / ${progress.total} events checked`;
-      document.getElementById("backfill-progress-events").textContent =
-        `${progress.updated} updated, ${progress.deleted} deleted`;
-    }
+    el.classList.remove("hidden", "done", "error");
+    label.textContent = progress.currentEvent
+      ? `Checking: ${progress.currentEvent}`
+      : `Verifying events... ${pct}%`;
+    fill.style.width = `${pct}%`;
+    detail.textContent = `${progress.checked} / ${progress.total} events checked`;
+    eventsEl.textContent = `${progress.updated} updated, ${progress.deleted} deleted`;
+    if (icon) icon.style.animation = "spin-icon 1.5s linear infinite";
 
     // Set up polling if not already active (handles page refresh during verify)
     if (!verifyPollTimer) {
@@ -534,23 +534,19 @@ function renderVerifyProgress(progress) {
     verifyBtn.classList.remove("verifying");
     verifyBtn.textContent = "Verify";
 
-    if (el) {
-      el.classList.remove("hidden", "error");
-      el.classList.add("done");
-      document.getElementById("backfill-progress-label").textContent = "Verification complete!";
-      document.getElementById("backfill-progress-fill").style.width = "100%";
-      document.getElementById("backfill-progress-detail").textContent = `${progress.total} events checked`;
-      document.getElementById("backfill-progress-events").textContent =
-        `${progress.updated} updated, ${progress.deleted} deleted`;
+    el.classList.remove("hidden", "error");
+    el.classList.add("done");
+    label.textContent = "Verification complete!";
+    fill.style.width = "100%";
+    detail.textContent = `${progress.total} events checked`;
+    eventsEl.textContent = `${progress.updated} updated, ${progress.deleted} deleted`;
+    if (icon) icon.style.animation = "none";
 
-      // Auto-hide after 8s, reload data, release ownership
-      loadData();
-      setTimeout(() => {
-        el.classList.add("hidden");
-        el.classList.remove("done");
-        delete el.dataset.owner;
-      }, 8000);
-    }
+    loadData();
+    setTimeout(() => {
+      el.classList.add("hidden");
+      el.classList.remove("done");
+    }, 8000);
 
     if (verifyPollTimer) { clearInterval(verifyPollTimer); verifyPollTimer = null; }
   } else if (progress.phase === "error") {
@@ -558,16 +554,13 @@ function renderVerifyProgress(progress) {
     verifyBtn.classList.remove("verifying");
     verifyBtn.textContent = "Verify";
 
-    if (el) {
-      el.classList.remove("hidden", "done");
-      el.classList.add("error");
-      document.getElementById("backfill-progress-label").textContent = "Verification failed";
-      document.getElementById("backfill-progress-fill").style.width = "100%";
-      document.getElementById("backfill-progress-detail").textContent = progress.errorMessage || "Unknown error";
-      document.getElementById("backfill-progress-events").textContent = "";
-      // Release ownership after 8s
-      setTimeout(() => { delete el.dataset.owner; }, 8000);
-    }
+    el.classList.remove("hidden", "done");
+    el.classList.add("error");
+    label.textContent = "Verification failed";
+    fill.style.width = "100%";
+    detail.textContent = progress.errorMessage || "Unknown error";
+    eventsEl.textContent = "";
+    if (icon) icon.style.animation = "none";
 
     if (verifyPollTimer) { clearInterval(verifyPollTimer); verifyPollTimer = null; }
   }

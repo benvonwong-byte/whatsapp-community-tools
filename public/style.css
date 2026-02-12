@@ -1235,6 +1235,59 @@ main {
   color: var(--text-dim);
 }
 
+/* ── Verify Progress Bar (distinct from backfill) ── */
+.verify-progress {
+  border-color: #0984e3;
+  animation: verify-glow 2s ease-in-out infinite;
+}
+
+@keyframes verify-glow {
+  0%, 100% { border-color: #0984e3; box-shadow: 0 0 0 rgba(9, 132, 227, 0); }
+  50% { border-color: #0984e3; box-shadow: 0 0 12px rgba(9, 132, 227, 0.25); }
+}
+
+.verify-progress .backfill-progress-fill {
+  background: #0984e3;
+}
+
+.verify-progress .backfill-progress-icon {
+  color: #0984e3;
+  animation: none;
+  font-size: 18px;
+}
+
+.verify-progress.done {
+  animation: none;
+  border-color: #00b894;
+}
+
+.verify-progress.done .backfill-progress-icon {
+  color: #00b894;
+}
+
+.verify-progress.done .backfill-progress-fill {
+  background: #00b894;
+}
+
+.verify-progress.error {
+  animation: none;
+  border-color: #d63031;
+}
+
+.verify-progress.error .backfill-progress-icon {
+  color: #d63031;
+}
+
+.verify-progress.error .backfill-progress-fill {
+  background: #d63031;
+}
+
+.verify-progress .backfill-progress-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ── Latest Events Banner (top of Calendar) ── */
 .recent-banner {
   background: var(--surface);
