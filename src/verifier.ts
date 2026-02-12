@@ -5,6 +5,38 @@ import { EventStore, StoredEvent } from "./store";
 
 const client = new Anthropic({ apiKey: config.anthropicApiKey });
 
+// ── Rate-limited Claude wrapper ──
+// Enforces max ~4 req/min with retry on 429 errors.
+let lastClaudeCall = 0;
+const MIN_CLAUDE_INTERVAL = 15_000; // 15s between calls → 4/min (safe under 5/min limit)
+
+async function rateLimitedClaude(
+  opts: { model: string; max_tokens: number; messages: { role: "user"; content: string }[] },
+  retries = 3
+): Promise<Anthropic.Messages.Message> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    // Enforce minimum interval between calls
+    const now = Date.now();
+    const wait = MIN_CLAUDE_INTERVAL - (now - lastClaudeCall);
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    lastClaudeCall = Date.now();
+
+    try {
+      return await client.messages.create(opts as any);
+    } catch (err: any) {
+      const status = err?.status || err?.error?.status;
+      if (status === 429 && attempt < retries) {
+        const backoff = Math.min(30_000, 15_000 * (attempt + 1));
+        console.log(`[verifier] Rate limited (429), retrying in ${(backoff / 1000).toFixed(0)}s... (attempt ${attempt + 1}/${retries})`);
+        await new Promise((r) => setTimeout(r, backoff));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error("Rate limit retries exhausted");
+}
+
 /** Strip HTML tags and extract readable text from a page. */
 function htmlToText(html: string): string {
   return html
@@ -148,7 +180,7 @@ Set "changed" to true ONLY if you found different information on the page. If th
 JSON:`;
 
   try {
-    const response = await client.messages.create({
+    const response = await rateLimitedClaude({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 512,
       messages: [{ role: "user", content: prompt }],
@@ -292,7 +324,7 @@ Respond with ONLY a JSON object (no markdown):
 JSON:`;
 
   try {
-    const response = await client.messages.create({
+    const response = await rateLimitedClaude({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 256,
       messages: [{ role: "user", content: prompt }],
@@ -383,7 +415,7 @@ RULES:
 JSON:`;
 
   try {
-    const response = await client.messages.create({
+    const response = await rateLimitedClaude({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 512,
       messages: [{ role: "user", content: prompt }],
@@ -565,7 +597,7 @@ Description: ${(event.description || "").slice(0, 500)}
 Answer with ONLY "yes" or "no".`;
 
   try {
-    const response = await client.messages.create({
+    const response = await rateLimitedClaude({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 10,
       messages: [{ role: "user", content: prompt }],
@@ -596,8 +628,8 @@ export async function verifyAllStoredEvents(
 
   console.log(`[verify-all] Starting verification of ${events.length} events...`);
 
-  // Worker pool — each worker grabs the next event as soon as it finishes
-  const concurrency = 10;
+  // Worker pool — concurrency kept low since Claude API is rate-limited (5 req/min)
+  const concurrency = 2;
   let cursor = 0;
 
   async function processEvent(event: StoredEvent) {
