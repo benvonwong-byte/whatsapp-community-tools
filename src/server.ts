@@ -329,6 +329,33 @@ export function startServer(store: EventStore, statusChecker?: () => { whatsappC
     }, 15000);
   });
 
+  // Airtable bulk sync — push all unsynced events to Airtable
+  app.post("/api/airtable-sync", requireAdmin, async (_req, res) => {
+    if (!config.airtableApiKey || !config.airtableBaseId || !config.airtableTableId) {
+      res.status(503).json({ error: "Airtable not configured. Set AIRTABLE_API_KEY, AIRTABLE_BASE_ID, AIRTABLE_TABLE_ID." });
+      return;
+    }
+
+    const unsynced = store.getEventsWithoutAirtableId();
+    if (unsynced.length === 0) {
+      res.json({ message: "All events already synced to Airtable.", synced: 0 });
+      return;
+    }
+
+    console.log(`[airtable-sync] Syncing ${unsynced.length} events to Airtable...`);
+    res.json({ message: `Syncing ${unsynced.length} events to Airtable in background.` });
+
+    const { airtableBatchCreate, toAirtableFields } = await import("./airtable");
+    const fields = unsynced.map((e) => toAirtableFields(e));
+    const results = await airtableBatchCreate(fields);
+
+    for (const { hash, recordId } of results) {
+      store.setAirtableRecordId(hash, recordId);
+    }
+
+    console.log(`[airtable-sync] Done! Synced ${results.length}/${unsynced.length} events.`);
+  });
+
   // Seed sample events for testing the UI
   app.post("/api/seed", requireAdmin, (_req, res) => {
     const today = new Date();

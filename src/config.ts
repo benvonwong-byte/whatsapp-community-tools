@@ -15,6 +15,10 @@ export const config = {
   // Batch messages every 5 minutes or 20 messages
   batchIntervalMs: 5 * 60 * 1000,
   batchMaxMessages: 20,
+  // Airtable sync (optional — leave empty to disable)
+  airtableApiKey: process.env.AIRTABLE_API_KEY || "",
+  airtableBaseId: process.env.AIRTABLE_BASE_ID || "",
+  airtableTableId: process.env.AIRTABLE_TABLE_ID || "",
 };
 
 export function validateConfig() {

@@ -1,6 +1,13 @@
 import Database from "better-sqlite3";
 import crypto from "crypto";
 import { config } from "./config";
+import {
+  airtableCreate,
+  airtableUpdate,
+  airtableDelete,
+  toAirtableFields,
+  AirtableEventFields,
+} from "./airtable";
 
 export interface StoredEvent {
   hash: string;
@@ -77,6 +84,8 @@ export class EventStore {
     try { this.db.exec("ALTER TABLE processed_messages ADD COLUMN body TEXT DEFAULT ''"); } catch {}
     // Migrate: add source_text column if missing
     try { this.db.exec("ALTER TABLE events ADD COLUMN source_text TEXT DEFAULT ''"); } catch {}
+    // Migrate: add airtable_record_id column if missing
+    try { this.db.exec("ALTER TABLE events ADD COLUMN airtable_record_id TEXT"); } catch {}
   }
 
   isMessageProcessed(messageId: string): boolean {
@@ -120,13 +129,27 @@ export class EventStore {
     sourceText: string
   ) {
     const hash = EventStore.hashEvent(name, date, location || "");
-    this.db
+    const result = this.db
       .prepare(
         `INSERT OR IGNORE INTO events
          (hash, name, date, start_time, end_time, end_date, location, description, url, category, source_chat, source_message_id, source_text)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(hash, name, date, startTime, endTime, endDate, location, description, url, category, sourceChat, sourceMessageId, sourceText);
+
+    // Fire-and-forget Airtable sync (only if a row was actually inserted)
+    if (result.changes > 0) {
+      const fields = toAirtableFields({
+        hash, name, date, startTime, endTime, endDate, location,
+        description, url, category, sourceChat,
+        favorited: false, createdAt: new Date().toISOString(),
+      });
+      airtableCreate(fields).then((recordId) => {
+        if (recordId) {
+          this.db.prepare("UPDATE events SET airtable_record_id = ? WHERE hash = ?").run(recordId, hash);
+        }
+      }).catch(() => {});
+    }
   }
 
   /** Update an event's fields by hash. Returns true if a row was updated. */
@@ -151,13 +174,39 @@ export class EventStore {
     const result = this.db
       .prepare(`UPDATE events SET ${sets.join(", ")} WHERE hash = ?`)
       .run(...values);
+
+    // Fire-and-forget Airtable sync
+    if (result.changes > 0) {
+      const row = this.db.prepare("SELECT airtable_record_id FROM events WHERE hash = ?").get(hash) as any;
+      if (row?.airtable_record_id) {
+        const atFields: Partial<AirtableEventFields> = {};
+        if (fields.name !== undefined) atFields.Name = fields.name;
+        if (fields.date !== undefined) atFields["Start Date"] = fields.date;
+        if (fields.startTime !== undefined) atFields["Start Time"] = fields.startTime;
+        if (fields.endTime !== undefined) atFields["End Time"] = fields.endTime;
+        if (fields.endDate !== undefined) atFields["End Date"] = fields.endDate;
+        if (fields.location !== undefined) atFields.Location = fields.location;
+        airtableUpdate(row.airtable_record_id, atFields).catch(() => {});
+      }
+    }
+
     return result.changes > 0;
   }
 
   deleteEvent(hash: string): boolean {
+    // Look up Airtable record ID before deleting from SQLite
+    const row = this.db.prepare("SELECT airtable_record_id FROM events WHERE hash = ?").get(hash) as any;
+    const airtableRecordId = row?.airtable_record_id;
+
     const result = this.db
       .prepare("DELETE FROM events WHERE hash = ?")
       .run(hash);
+
+    // Fire-and-forget Airtable delete
+    if (result.changes > 0 && airtableRecordId) {
+      airtableDelete(airtableRecordId).catch(() => {});
+    }
+
     return result.changes > 0;
   }
 
@@ -345,6 +394,19 @@ export class EventStore {
       favorited: !!row.favorited,
       createdAt: row.created_at,
     };
+  }
+
+  /** Store the Airtable record ID for an event. */
+  setAirtableRecordId(hash: string, recordId: string): void {
+    this.db.prepare("UPDATE events SET airtable_record_id = ? WHERE hash = ?").run(recordId, hash);
+  }
+
+  /** Get all events that haven't been synced to Airtable yet. */
+  getEventsWithoutAirtableId(): StoredEvent[] {
+    const rows = this.db
+      .prepare("SELECT * FROM events WHERE airtable_record_id IS NULL OR airtable_record_id = '' ORDER BY date ASC")
+      .all() as any[];
+    return rows.map(this.mapRow);
   }
 
   close() {
