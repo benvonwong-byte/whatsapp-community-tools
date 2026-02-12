@@ -219,6 +219,66 @@ nav#view-tabs {
   border-bottom-color: var(--accent);
 }
 
+/* Search bar */
+.search-bar {
+  position: relative;
+  padding: 8px 0 10px;
+}
+
+.search-bar input {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 14px;
+  padding: 8px 36px 8px 12px;
+  border-radius: 8px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.search-bar input:focus {
+  border-color: var(--accent);
+}
+
+.search-bar input::placeholder {
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.search-clear {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 2px 6px;
+  line-height: 1;
+}
+
+.search-clear:hover {
+  color: var(--text);
+}
+
+.search-summary {
+  font-size: 13px;
+  color: var(--text-dim);
+  padding-bottom: 12px;
+}
+
+.search-match-hint {
+  display: block;
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 4px;
+  padding-left: 2px;
+  font-style: italic;
+}
+
 main {
   padding: 20px;
   max-width: 900px;
@@ -361,16 +421,9 @@ main {
 /* Calendar Category Filter Tabs */
 .calendar-cat-tabs {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 6px;
   padding-bottom: 12px;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
-}
-
-.calendar-cat-tabs::-webkit-scrollbar {
-  display: none;
 }
 
 .cal-cat-tab {

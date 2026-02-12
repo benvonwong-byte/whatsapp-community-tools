@@ -30,6 +30,9 @@ let lastRenderedQr = null;
 let backfillPollTimer = null;
 let backfillDismissTimer = null;
 let backfillDoneDismissed = false; // prevents re-showing after dismiss
+let searchQuery = "";
+let searchActive = false;
+let previousView = null; // view to restore when search is cleared
 
 // Keyboard focus state
 let focusedEventIndex = -1;
@@ -67,6 +70,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupKeyboard();
   setupKbHelp();
   setupKbPersistentPanel();
+  setupSearch();
   setupRecentBanner();
   setupQrOverlay();
   pollStatus();
@@ -125,7 +129,14 @@ async function loadData() {
 function setupTabs() {
   document.querySelectorAll(".tab").forEach((tab) => {
     tab.addEventListener("click", () => {
-      document.querySelector(".tab.active").classList.remove("active");
+      // Clear search if active
+      if (searchActive) {
+        searchActive = false;
+        searchQuery = "";
+        document.getElementById("search-input").value = "";
+        document.getElementById("search-clear").classList.add("hidden");
+      }
+      document.querySelector(".tab.active")?.classList.remove("active");
       tab.classList.add("active");
       document.querySelector(".view.active").classList.remove("active");
       const viewId = `view-${tab.dataset.view}`;
@@ -1220,6 +1231,204 @@ function renderFavorites() {
   attachCardListeners(container);
 }
 
+// ── Search ──
+
+function setupSearch() {
+  const input = document.getElementById("search-input");
+  const clearBtn = document.getElementById("search-clear");
+
+  input.addEventListener("input", () => {
+    searchQuery = input.value.trim();
+    clearBtn.classList.toggle("hidden", !searchQuery);
+
+    if (searchQuery.length > 0) {
+      if (!searchActive) {
+        previousView = currentView;
+        searchActive = true;
+        // Show search view, hide others
+        document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
+        document.getElementById("view-search").classList.add("active");
+        // Deactivate nav tabs
+        document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+      }
+      renderSearchResults();
+    } else {
+      exitSearch();
+    }
+  });
+
+  clearBtn.addEventListener("click", () => {
+    input.value = "";
+    searchQuery = "";
+    clearBtn.classList.add("hidden");
+    exitSearch();
+    input.focus();
+  });
+
+  // Escape while focused in search clears it
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      input.value = "";
+      searchQuery = "";
+      clearBtn.classList.add("hidden");
+      exitSearch();
+      input.blur();
+      e.preventDefault();
+    }
+  });
+}
+
+function exitSearch() {
+  if (!searchActive) return;
+  searchActive = false;
+  // Restore previous view
+  const viewName = previousView || "calendar";
+  currentView = viewName;
+  document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
+  document.getElementById(`view-${viewName}`).classList.add("active");
+  const tab = document.querySelector(`.tab[data-view="${viewName}"]`);
+  if (tab) {
+    document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+    tab.classList.add("active");
+  }
+  renderCurrentView();
+}
+
+function fuzzyScore(query, text) {
+  if (!text) return 0;
+  const q = query.toLowerCase();
+  const t = text.toLowerCase();
+
+  // Exact substring match — highest score
+  if (t.includes(q)) return 100;
+
+  // Word-start matching: check if query matches the start of any word
+  const words = t.split(/\s+/);
+  for (const word of words) {
+    if (word.startsWith(q)) return 80;
+  }
+
+  // All query words present (for multi-word queries like "yoga brooklyn")
+  const queryWords = q.split(/\s+/);
+  if (queryWords.length > 1) {
+    const allPresent = queryWords.every((qw) => t.includes(qw));
+    if (allPresent) return 90;
+  }
+
+  // Fuzzy character matching: all characters of query appear in order
+  let qi = 0;
+  let consecutiveBonus = 0;
+  let lastMatchIdx = -2;
+  for (let ti = 0; ti < t.length && qi < q.length; ti++) {
+    if (t[ti] === q[qi]) {
+      if (ti === lastMatchIdx + 1) consecutiveBonus += 5;
+      lastMatchIdx = ti;
+      qi++;
+    }
+  }
+  if (qi === q.length) {
+    return 40 + consecutiveBonus;
+  }
+
+  return 0;
+}
+
+function searchEvents(query) {
+  if (!query) return [];
+
+  const results = [];
+  const today = todayStr();
+
+  for (const ev of allEvents) {
+    // Skip past events
+    if ((ev.endDate || ev.date) < today) continue;
+
+    const cat = categories.find((c) => c.id === ev.category);
+    const catName = cat ? cat.name : "";
+
+    // Score across multiple fields with weights
+    const nameScore = fuzzyScore(query, ev.name) * 3;
+    const locationScore = fuzzyScore(query, ev.location) * 2;
+    const descScore = fuzzyScore(query, ev.description) * 1.5;
+    const catScore = fuzzyScore(query, catName) * 1.5;
+    const groupScore = fuzzyScore(query, ev.sourceChat) * 1;
+
+    const totalScore = Math.max(nameScore, locationScore, descScore, catScore, groupScore);
+
+    if (totalScore > 0) {
+      // Determine which field matched best for highlighting
+      let matchField = "name";
+      const scores = { name: nameScore, location: locationScore, description: descScore, category: catScore, group: groupScore };
+      let best = 0;
+      for (const [field, s] of Object.entries(scores)) {
+        if (s > best) { best = s; matchField = field; }
+      }
+      results.push({ event: ev, score: totalScore, matchField });
+    }
+  }
+
+  // Sort by score descending, then by date ascending
+  results.sort((a, b) => b.score - a.score || a.event.date.localeCompare(b.event.date));
+  return results;
+}
+
+function renderSearchResults() {
+  const results = searchEvents(searchQuery);
+  const container = document.getElementById("search-events");
+  const empty = document.getElementById("search-empty");
+  const summary = document.getElementById("search-summary");
+
+  summary.textContent = results.length > 0
+    ? `${results.length} event${results.length !== 1 ? "s" : ""} matching "${searchQuery}"`
+    : "";
+
+  if (results.length === 0) {
+    container.innerHTML = "";
+    empty.classList.remove("hidden");
+    return;
+  }
+  empty.classList.add("hidden");
+
+  // Group by date
+  const grouped = {};
+  results.forEach(({ event: ev, matchField }) => {
+    if (!grouped[ev.date]) grouped[ev.date] = [];
+    grouped[ev.date].push({ event: ev, matchField });
+  });
+
+  let html = "";
+  Object.keys(grouped)
+    .sort()
+    .forEach((date) => {
+      const d = new Date(date + "T00:00:00");
+      const label = d.toLocaleDateString("en-US", {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+      });
+      html += `<div class="list-date-header">${label}</div>`;
+      html += grouped[date].map(({ event, matchField }) => {
+        let matchHint = "";
+        if (matchField === "location" && event.location) matchHint = `<span class="search-match-hint">Location: ${escapeHtml(event.location)}</span>`;
+        else if (matchField === "group" && event.sourceChat) matchHint = `<span class="search-match-hint">Group: ${escapeHtml(event.sourceChat)}</span>`;
+        else if (matchField === "category") {
+          const cat = categories.find((c) => c.id === event.category);
+          if (cat) matchHint = `<span class="search-match-hint">Category: ${escapeHtml(cat.name)}</span>`;
+        }
+        else if (matchField === "description") matchHint = `<span class="search-match-hint">Description match</span>`;
+        const card = eventCardHTML(event);
+        if (!matchHint) return card;
+        // Insert hint before the last closing </div> of the card
+        const lastClose = card.lastIndexOf("</div>");
+        return card.slice(0, lastClose) + matchHint + card.slice(lastClose);
+      }).join("");
+    });
+
+  container.innerHTML = html;
+  attachCardListeners(container);
+  updateFocusedCards();
+}
+
 // ── Keyboard Navigation ──
 
 function setupKeyboard() {
@@ -1230,8 +1439,13 @@ function setupKeyboard() {
 
     // Skip if modal is open (except Escape and ?)
     const kbHelpOpen = !document.getElementById("kb-help-overlay").classList.contains("hidden");
-    if (e.key === "?" || e.key === "/") {
+    if (e.key === "?") {
       toggleKbHelp();
+      e.preventDefault();
+      return;
+    }
+    if (e.key === "/") {
+      document.getElementById("search-input").focus();
       e.preventDefault();
       return;
     }
