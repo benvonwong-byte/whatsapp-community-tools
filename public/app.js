@@ -214,14 +214,21 @@ function renderDashboard() {
     const bBlocked = blockedGroups.has(b.chatName) ? 1 : 0;
     if (aBlocked !== bBlocked) return aBlocked - bBlocked;
 
-    if (sortBy === "events") return (a.eventCount - b.eventCount) * dir;
+    if (sortBy === "events") {
+      const diff = (a.eventCount - b.eventCount) * dir;
+      return diff !== 0 ? diff : b.messageCount - a.messageCount;
+    }
     if (sortBy === "lastActive") {
       if (!a.lastActive && !b.lastActive) return 0;
       if (!a.lastActive) return 1;
       if (!b.lastActive) return -1;
-      return a.lastActive.localeCompare(b.lastActive) * dir;
+      const diff = a.lastActive.localeCompare(b.lastActive) * dir;
+      return diff !== 0 ? diff : b.messageCount - a.messageCount;
     }
-    return (a.ratio - b.ratio) * dir;
+    // Ratio sort: tiebreak by most messages first (higher volume = more meaningful)
+    const ratioDiff = (a.ratio - b.ratio) * dir;
+    if (ratioDiff !== 0) return ratioDiff;
+    return b.messageCount - a.messageCount;
   });
 
   // Find max ratio for scaling bars
