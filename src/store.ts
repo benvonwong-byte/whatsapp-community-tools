@@ -257,6 +257,14 @@ export class EventStore {
     return { totalMessages: msgs.cnt, totalEvents: evts.cnt };
   }
 
+  /** Clear processed messages within a time window so they can be re-extracted. */
+  clearProcessedMessagesSince(cutoffTimestamp: number): number {
+    const result = this.db
+      .prepare("DELETE FROM processed_messages WHERE timestamp >= ?")
+      .run(cutoffTimestamp);
+    return result.changes;
+  }
+
   getLastProcessedTimestamp(): number | null {
     const row = this.db
       .prepare("SELECT MAX(timestamp) as ts FROM processed_messages")

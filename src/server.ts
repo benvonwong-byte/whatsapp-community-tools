@@ -53,7 +53,7 @@ function requireAdmin(req: Request, res: Response, next: NextFunction): void {
   next();
 }
 
-export function startServer(store: EventStore, statusChecker?: () => { whatsappConnected: boolean }, qrCodeGetter?: () => string | null, backfillTrigger?: (days: number) => Promise<number>, backfillProgressGetter?: () => BackfillProgress): void {
+export function startServer(store: EventStore, statusChecker?: () => { whatsappConnected: boolean }, qrCodeGetter?: () => string | null, backfillTrigger?: (hours: number) => Promise<number>, backfillProgressGetter?: () => BackfillProgress): void {
   const app = express();
   app.use(express.json({ limit: "2mb" }));
 
@@ -243,10 +243,12 @@ export function startServer(store: EventStore, statusChecker?: () => { whatsappC
   });
 
   // Trigger backfill (admin)
-  // If ?hours= is provided, use that. Otherwise, calculate from last event found.
+  // ?hours= to set window, otherwise smart-calculates from last event.
+  // ?force=true to clear processed messages in the window and re-extract.
   app.post("/api/backfill", requireAdmin, async (req, res) => {
     let hours: number;
     const hoursParam = req.query.hours as string | undefined;
+    const force = req.query.force === "true";
     if (hoursParam) {
       hours = Math.min(Math.max(parseInt(hoursParam) || 168, 1), 720); // cap 30 days
     } else {
@@ -261,13 +263,18 @@ export function startServer(store: EventStore, statusChecker?: () => { whatsappC
         hours = 168; // No history, default to 7 days
       }
     }
+    if (force) {
+      const cutoff = Math.floor(Date.now() / 1000) - hours * 60 * 60;
+      const cleared = store.clearProcessedMessagesSince(cutoff);
+      console.log(`[backfill] Force mode: cleared ${cleared} processed messages from last ${hours}h for re-extraction.`);
+    }
     if (!backfillTrigger) {
       res.status(503).json({ error: "Backfill not available (no WhatsApp connection)" });
       return;
     }
     try {
       const eventsFound = await backfillTrigger(hours);
-      res.json({ message: `Backfill complete`, hours, eventsFound });
+      res.json({ message: `Backfill complete`, hours, eventsFound, force });
     } catch (err: any) {
       console.error("[backfill] Error:", err);
       res.status(500).json({ error: "Backfill failed" });
