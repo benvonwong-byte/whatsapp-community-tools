@@ -1,6 +1,10 @@
-// Admin mode: add ?admin=TOKEN to the URL to enable admin features
-const adminToken = new URLSearchParams(window.location.search).get("admin");
+// Admin mode: ?admin=TOKEN in URL, or saved token in localStorage
+const adminToken = new URLSearchParams(window.location.search).get("admin") || localStorage.getItem("adminToken");
 const isAdmin = !!adminToken;
+// Persist URL token to localStorage so login survives navigation
+if (adminToken && !localStorage.getItem("adminToken")) {
+  localStorage.setItem("adminToken", adminToken);
+}
 
 // API base: use Railway URL when hosted on Firebase, relative path when on Railway/localhost
 const API_BASE = window.location.hostname.includes("firebaseapp.com") || window.location.hostname.includes("web.app")
@@ -49,6 +53,7 @@ const catColors = {
 // Init
 document.addEventListener("DOMContentLoaded", async () => {
   setupAdminMode();
+  setupLogin();
   await loadData();
   setupTabs();
   setupCalendar();
@@ -326,6 +331,9 @@ function renderStatus() {
 // ── Admin Mode ──
 
 function setupAdminMode() {
+  const loginBtn = document.getElementById("login-btn");
+  const logoutBtn = document.getElementById("logout-btn");
+
   if (!isAdmin) {
     // Hide admin-only elements
     document.getElementById("dashboard-panel").classList.add("hidden");
@@ -333,15 +341,80 @@ function setupAdminMode() {
     // Hide favorites tab in public mode
     const favTab = document.querySelector('.tab[data-view="favorites"]');
     if (favTab) favTab.classList.add("hidden");
+    // Show login, hide logout
+    loginBtn.classList.remove("hidden");
+    logoutBtn.classList.add("hidden");
     return;
   }
 
+  // Admin mode active
   document.body.classList.add("admin-mode");
+  loginBtn.classList.add("hidden");
+  logoutBtn.classList.remove("hidden");
 
   // Make status badge clickable to open QR
   document.getElementById("wa-status").addEventListener("click", () => {
     if (!waConnected && isAdmin) {
       openQrOverlay();
+    }
+  });
+}
+
+function setupLogin() {
+  const loginBtn = document.getElementById("login-btn");
+  const logoutBtn = document.getElementById("logout-btn");
+  const overlay = document.getElementById("login-overlay");
+  const closeBtn = document.getElementById("login-close");
+  const form = document.getElementById("login-form");
+  const errorEl = document.getElementById("login-error");
+
+  loginBtn.addEventListener("click", () => {
+    overlay.classList.remove("hidden");
+    document.getElementById("login-email").focus();
+  });
+
+  closeBtn.addEventListener("click", () => overlay.classList.add("hidden"));
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) overlay.classList.add("hidden");
+  });
+
+  logoutBtn.addEventListener("click", () => {
+    localStorage.removeItem("adminToken");
+    // Remove ?admin= from URL if present
+    const url = new URL(window.location);
+    url.searchParams.delete("admin");
+    window.location.href = url.toString();
+  });
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    errorEl.classList.add("hidden");
+    const email = document.getElementById("login-email").value;
+    const password = document.getElementById("login-password").value;
+    const submitBtn = form.querySelector(".login-submit");
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Signing in...";
+
+    try {
+      const res = await fetch(`${API_BASE}/api/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await res.json();
+      if (res.ok && data.token) {
+        localStorage.setItem("adminToken", data.token);
+        window.location.reload();
+      } else {
+        errorEl.textContent = data.error || "Login failed.";
+        errorEl.classList.remove("hidden");
+      }
+    } catch (err) {
+      errorEl.textContent = "Connection error. Try again.";
+      errorEl.classList.remove("hidden");
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Sign In";
     }
   });
 }

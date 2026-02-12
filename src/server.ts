@@ -38,6 +38,20 @@ export function startServer(store: EventStore, statusChecker?: () => { whatsappC
 
   // ── Public endpoints (read-only, safe for anyone) ──
 
+  // Login: exchange email/password for admin token
+  app.post("/api/login", (req, res) => {
+    const { email, password } = req.body;
+    if (!config.adminEmail || !config.adminPassword) {
+      res.status(503).json({ error: "Login not configured." });
+      return;
+    }
+    if (email === config.adminEmail && password === config.adminPassword) {
+      res.json({ token: config.adminToken });
+    } else {
+      res.status(401).json({ error: "Invalid credentials." });
+    }
+  });
+
   // Connection status
   app.get("/api/status", (_req, res) => {
     const status = statusChecker ? statusChecker() : { whatsappConnected: false };

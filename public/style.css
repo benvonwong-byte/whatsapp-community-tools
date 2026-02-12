@@ -54,6 +54,64 @@ header h1 {
   gap: 8px;
 }
 
+/* Login / Logout buttons */
+.login-btn, .logout-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.15s;
+  margin-left: auto;
+}
+
+.login-btn:hover { color: var(--text); border-color: var(--text-dim); }
+.logout-btn { border-color: transparent; font-size: 10px; margin-left: 0; }
+.logout-btn:hover { color: var(--fav); }
+
+/* Login modal */
+.login-modal { max-width: 320px; }
+.login-modal h2 { margin-bottom: 16px; }
+
+#login-form { display: flex; flex-direction: column; gap: 12px; }
+
+#login-form input {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--text);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+#login-form input:focus { border-color: var(--accent); }
+#login-form input::placeholder { color: var(--text-dim); }
+
+.login-submit {
+  background: var(--accent);
+  border: none;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.login-submit:hover { opacity: 0.85; }
+.login-submit:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.login-error {
+  color: var(--fav);
+  font-size: 12px;
+  text-align: center;
+}
+
 /* WhatsApp Status Indicator */
 .wa-status {
   display: inline-flex;

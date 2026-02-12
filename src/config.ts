@@ -7,6 +7,8 @@ dotenv.config();
 export const config = {
   anthropicApiKey: process.env.ANTHROPIC_API_KEY || "",
   adminToken: process.env.ADMIN_TOKEN || crypto.randomBytes(32).toString("hex"),
+  adminEmail: process.env.ADMIN_EMAIL || "",
+  adminPassword: process.env.ADMIN_PASSWORD || "",
   dbPath: process.env.DB_PATH || path.resolve(process.cwd(), "events.db"),
   authDir: process.env.AUTH_DIR || path.resolve(process.cwd(), ".auth"),
   port: parseInt(process.env.PORT || "3000", 10),
