@@ -132,7 +132,7 @@ export function startServer(store: EventStore, statusChecker?: () => { whatsappC
 
   // Delete event (admin only)
   app.delete("/api/events/:hash", requireAdmin, (req, res) => {
-    const deleted = store.deleteEvent(req.params.hash);
+    const deleted = store.deleteEvent(req.params.hash as string);
     if (deleted) {
       res.json({ ok: true });
     } else {
