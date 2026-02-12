@@ -1,9 +1,71 @@
 import { config } from "./config";
 import { WhatsAppClient, BufferedMessage } from "./whatsapp";
 import { extractEvents } from "./extractor";
-import { verifyEventDates } from "./verifier";
+import { verifyEventDates, fetchPageText } from "./verifier";
 import { startServer, BackfillProgress } from "./server";
 import { EventStore } from "./store";
+
+// ── Event link enrichment ──
+
+const EVENT_LINK_PATTERN =
+  /https?:\/\/(?:www\.)?(?:eventbrite\.com\/e\/|lu\.ma\/|partiful\.com\/e\/)\S+/gi;
+
+/**
+ * Scan messages for Eventbrite, Luma, and Partiful links, fetch their page
+ * content, and append it to the message body so Claude can extract full event details.
+ * Returns new message copies — originals are not mutated.
+ */
+async function enrichWithEventLinks(
+  messages: BufferedMessage[]
+): Promise<BufferedMessage[]> {
+  const urlToMessages = new Map<string, number[]>();
+  for (let i = 0; i < messages.length; i++) {
+    const matches = messages[i].body.match(EVENT_LINK_PATTERN);
+    if (!matches) continue;
+    for (const url of new Set(matches)) {
+      if (!urlToMessages.has(url)) urlToMessages.set(url, []);
+      urlToMessages.get(url)!.push(i);
+    }
+  }
+
+  if (urlToMessages.size === 0) return messages;
+
+  console.log(`[enrich] Found ${urlToMessages.size} event link(s) to fetch...`);
+
+  const urlContent = new Map<string, string>();
+  const urls = [...urlToMessages.keys()];
+  const concurrency = 5;
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < urls.length) {
+      const idx = cursor++;
+      const url = urls[idx];
+      const text = await fetchPageText(url);
+      if (text) {
+        urlContent.set(url, text);
+        console.log(`[enrich] Fetched page content for ${url} (${text.length} chars)`);
+      } else {
+        console.log(`[enrich] No content from ${url}`);
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, urls.length) }, () => worker())
+  );
+
+  if (urlContent.size === 0) return messages;
+
+  const enriched = messages.map((m) => ({ ...m }));
+  for (const [url, content] of urlContent) {
+    for (const idx of urlToMessages.get(url)!) {
+      enriched[idx].body += `\n\n[Event page content from ${url}]:\n${content}`;
+    }
+  }
+
+  return enriched;
+}
 
 async function processBatch(
   messages: BufferedMessage[],
@@ -20,12 +82,15 @@ async function processBatch(
     `[process] ${newMessages.length} new messages (${messages.length - newMessages.length} already processed)`
   );
 
+  // Enrich messages that contain Eventbrite/Luma/Partiful links with fetched page content
+  const enrichedMessages = await enrichWithEventLinks(newMessages);
+
   // Extract events FIRST — only mark messages as processed after extraction succeeds.
   // If extraction fails (API error, JSON parse error), messages stay unmarked
   // so they'll be retried in the next backfill.
   let events;
   try {
-    events = await extractEvents(newMessages);
+    events = await extractEvents(enrichedMessages);
   } catch (err) {
     console.error(`[process] Extraction failed, ${newMessages.length} messages will be retried in next backfill.`);
     return;

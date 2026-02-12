@@ -47,9 +47,10 @@ RULES:
 4. FILTER OUT events that are purely: nightlife, parties, club nights, concerts, entertainment, hedonistic gatherings, or anything without a learning/growth/community purpose.
 5. For relative dates like "this Saturday" or "next Friday", resolve them to actual dates based on today (${today}).
 6. If a message contains a link to an event page, include it in the url field.
-7. If you cannot determine a specific time, set startTime and endTime to null.
-8. For multi-day events, set endDate to the last day.
-9. Write a brief description summarizing what the event is about.
+7. Some messages include "[Event page content from <url>]:" followed by fetched page text from Eventbrite, Luma, or Partiful. Use this page content as the PRIMARY source for event name, date, time, location, and description. The NYC location filter still applies — skip if the event is not in the NYC metro area.
+8. If you cannot determine a specific time, set startTime and endTime to null.
+9. For multi-day events, set endDate to the last day.
+10. Write a brief description summarizing what the event is about.
 
 MESSAGES:
 ${messageBlock}
