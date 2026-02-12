@@ -33,6 +33,7 @@ let backfillDoneDismissed = false; // prevents re-showing after dismiss
 let searchQuery = "";
 let searchActive = false;
 let previousView = null; // view to restore when search is cleared
+let verifyPollTimer = null;
 
 // Keyboard focus state
 let focusedEventIndex = -1;
@@ -470,6 +471,93 @@ function renderBackfillProgress(progress) {
   }
 }
 
+// ── Verify Progress ──
+
+async function pollVerifyStatus() {
+  if (!isAdmin) return;
+  try {
+    const res = await apiFetch("/api/verify-status");
+    const progress = await res.json();
+    renderVerifyProgress(progress);
+  } catch {
+    // silently ignore
+  }
+}
+
+function renderVerifyProgress(progress) {
+  const verifyBtn = document.getElementById("verify-btn");
+  if (!verifyBtn) return;
+
+  const el = document.getElementById("backfill-progress");
+
+  if (progress.phase === "idle" && !progress.active) {
+    // Reset button state
+    verifyBtn.disabled = false;
+    verifyBtn.classList.remove("verifying");
+    verifyBtn.textContent = "Verify";
+    if (verifyPollTimer) {
+      clearInterval(verifyPollTimer);
+      verifyPollTimer = null;
+    }
+    return;
+  }
+
+  if (progress.phase === "running") {
+    verifyBtn.disabled = true;
+    verifyBtn.classList.add("verifying");
+    const pct = progress.total > 0 ? Math.round((progress.checked / progress.total) * 100) : 0;
+    verifyBtn.textContent = `Verifying ${pct}%`;
+
+    // Reuse the backfill progress bar for verify progress
+    if (el) {
+      el.classList.remove("hidden", "done", "error");
+      document.getElementById("backfill-progress-label").textContent = `Verifying events... ${pct}%`;
+      document.getElementById("backfill-progress-fill").style.width = `${pct}%`;
+      document.getElementById("backfill-progress-detail").textContent = `${progress.checked} / ${progress.total} events checked`;
+      document.getElementById("backfill-progress-events").textContent =
+        `${progress.updated} updated, ${progress.deleted} deleted`;
+    }
+  } else if (progress.phase === "done") {
+    verifyBtn.disabled = false;
+    verifyBtn.classList.remove("verifying");
+    verifyBtn.textContent = "Verify";
+
+    if (el) {
+      el.classList.remove("hidden", "error");
+      el.classList.add("done");
+      document.getElementById("backfill-progress-label").textContent = "Verification complete!";
+      document.getElementById("backfill-progress-fill").style.width = "100%";
+      document.getElementById("backfill-progress-detail").textContent = `${progress.total} events checked`;
+      document.getElementById("backfill-progress-events").textContent =
+        `${progress.updated} updated, ${progress.deleted} deleted`;
+
+      // Auto-hide after 8s, reload data
+      loadData();
+      setTimeout(() => {
+        el.classList.add("hidden");
+        el.classList.remove("done");
+      }, 8000);
+    }
+
+    if (verifyPollTimer) { clearInterval(verifyPollTimer); verifyPollTimer = null; }
+  } else if (progress.phase === "error") {
+    verifyBtn.disabled = false;
+    verifyBtn.classList.remove("verifying");
+    verifyBtn.textContent = "Verify";
+
+    if (el) {
+      el.classList.remove("hidden", "done");
+      el.classList.add("error");
+      document.getElementById("backfill-progress-label").textContent = "Verification failed";
+      document.getElementById("backfill-progress-fill").style.width = "100%";
+      document.getElementById("backfill-progress-detail").textContent = progress.errorMessage || "Unknown error";
+      document.getElementById("backfill-progress-events").textContent = "";
+    }
+
+    if (verifyPollTimer) { clearInterval(verifyPollTimer); verifyPollTimer = null; }
+  }
+}
+
 // ── Admin Mode ──
 
 function setupAdminMode() {
@@ -520,6 +608,32 @@ function setupAdminMode() {
       loadData();
     }
   });
+
+  // Verify button: triggers bulk date verification
+  const verifyBtn = document.getElementById("verify-btn");
+  verifyBtn.classList.remove("hidden");
+  verifyBtn.addEventListener("click", async () => {
+    if (verifyBtn.disabled) return;
+    verifyBtn.disabled = true;
+    verifyBtn.classList.add("verifying");
+    verifyBtn.textContent = "Verifying...";
+    try {
+      await adminFetch("/api/verify-all", { method: "POST" });
+      // Start polling for progress
+      pollVerifyStatus();
+      if (!verifyPollTimer) {
+        verifyPollTimer = setInterval(pollVerifyStatus, 2000);
+      }
+    } catch (err) {
+      console.error("Verify trigger failed:", err);
+      verifyBtn.disabled = false;
+      verifyBtn.classList.remove("verifying");
+      verifyBtn.textContent = "Verify";
+    }
+  });
+
+  // Poll verify status on load (in case one is already running)
+  pollVerifyStatus();
 
   // Logs button
   const logsBtn = document.getElementById("logs-btn");

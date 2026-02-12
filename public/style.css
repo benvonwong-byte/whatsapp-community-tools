@@ -84,6 +84,22 @@ header h1 {
 .refresh-btn:disabled { opacity: 0.35; cursor: not-allowed; border-color: var(--border); color: var(--text-dim); }
 .refresh-btn.scanning { animation: pulse-dot 1.5s infinite; }
 
+/* Verify button */
+.verify-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.verify-btn:hover:not(:disabled) { color: var(--text); border-color: var(--text-dim); }
+.verify-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.verify-btn.verifying { animation: pulse-dot 1.5s infinite; border-color: var(--accent); color: var(--accent); }
+
 /* Logs button */
 .logs-btn {
   background: none;

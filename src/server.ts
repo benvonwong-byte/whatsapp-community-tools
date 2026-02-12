@@ -3,6 +3,7 @@ import path from "path";
 import { config } from "./config";
 import { EventStore } from "./store";
 import { categories } from "./categories";
+import { verifyAllStoredEvents, VerifyProgress } from "./verifier";
 
 export interface BackfillProgress {
   active: boolean;
@@ -279,6 +280,53 @@ export function startServer(store: EventStore, statusChecker?: () => { whatsappC
       console.error("[backfill] Error:", err);
       res.status(500).json({ error: "Backfill failed" });
     }
+  });
+
+  // ── Verify all events ──
+  const verifyProgress: VerifyProgress = {
+    active: false,
+    phase: "idle",
+    total: 0,
+    checked: 0,
+    updated: 0,
+    deleted: 0,
+  };
+
+  // Verify-all progress (public — frontend polls this for the progress bar)
+  app.get("/api/verify-status", (_req, res) => {
+    res.json(verifyProgress);
+  });
+
+  // Trigger bulk verification of all future events (admin)
+  app.post("/api/verify-all", requireAdmin, async (_req, res) => {
+    if (verifyProgress.active) {
+      res.status(409).json({ error: "Verification already in progress" });
+      return;
+    }
+
+    if (!config.anthropicApiKey) {
+      res.status(503).json({ error: "No ANTHROPIC_API_KEY configured" });
+      return;
+    }
+
+    // Run in background — respond immediately
+    res.json({ message: "Verification started" });
+
+    try {
+      await verifyAllStoredEvents(store, verifyProgress);
+    } catch (err: any) {
+      console.error("[verify-all] Fatal error:", err);
+      verifyProgress.phase = "error";
+      verifyProgress.active = false;
+      verifyProgress.errorMessage = err?.message || String(err);
+    }
+
+    // Reset to idle after 15s
+    setTimeout(() => {
+      if (verifyProgress.phase === "done" || verifyProgress.phase === "error") {
+        verifyProgress.phase = "idle";
+      }
+    }, 15000);
   });
 
   // Seed sample events for testing the UI

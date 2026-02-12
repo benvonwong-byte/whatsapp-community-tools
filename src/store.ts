@@ -129,6 +129,47 @@ export class EventStore {
       .run(hash, name, date, startTime, endTime, endDate, location, description, url, category, sourceChat, sourceMessageId, sourceText);
   }
 
+  /** Update an event's fields by hash. Returns true if a row was updated. */
+  updateEvent(hash: string, fields: {
+    name?: string;
+    date?: string;
+    startTime?: string | null;
+    endTime?: string | null;
+    endDate?: string | null;
+    location?: string | null;
+  }): boolean {
+    const sets: string[] = [];
+    const values: any[] = [];
+    if (fields.name !== undefined) { sets.push("name = ?"); values.push(fields.name); }
+    if (fields.date !== undefined) { sets.push("date = ?"); values.push(fields.date); }
+    if (fields.startTime !== undefined) { sets.push("start_time = ?"); values.push(fields.startTime); }
+    if (fields.endTime !== undefined) { sets.push("end_time = ?"); values.push(fields.endTime); }
+    if (fields.endDate !== undefined) { sets.push("end_date = ?"); values.push(fields.endDate); }
+    if (fields.location !== undefined) { sets.push("location = ?"); values.push(fields.location); }
+    if (sets.length === 0) return false;
+    values.push(hash);
+    const result = this.db
+      .prepare(`UPDATE events SET ${sets.join(", ")} WHERE hash = ?`)
+      .run(...values);
+    return result.changes > 0;
+  }
+
+  deleteEvent(hash: string): boolean {
+    const result = this.db
+      .prepare("DELETE FROM events WHERE hash = ?")
+      .run(hash);
+    return result.changes > 0;
+  }
+
+  /** Get all future events (date >= today). */
+  getFutureEvents(): StoredEvent[] {
+    const today = new Date().toISOString().split("T")[0];
+    const rows = this.db
+      .prepare("SELECT * FROM events WHERE date >= ? OR end_date >= ? ORDER BY date ASC, start_time ASC")
+      .all(today, today) as any[];
+    return rows.map(this.mapRow);
+  }
+
   getAllEvents(): StoredEvent[] {
     const rows = this.db
       .prepare("SELECT * FROM events ORDER BY date ASC, start_time ASC")
