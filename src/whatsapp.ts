@@ -40,6 +40,7 @@ export class WhatsAppClient {
     "--disable-sync",
     "--disable-translate",
     "--metrics-recording-only",
+    "--single-process",
   ];
 
   constructor() {
@@ -71,9 +72,10 @@ export class WhatsAppClient {
       // Wait for WhatsApp Web to fully sync chat list before triggering backfill
       await new Promise(resolve => setTimeout(resolve, 30000));
       // Verify page is actually responsive before proceeding
+      console.log("[ready] Running page health check...");
       const alive = await this.isPageAlive();
       if (!alive) {
-        console.error("[ready] Page not responsive after 30s wait. Triggering reconnect.");
+        console.error("[ready] Page not responsive after 30s wait (health check timed out at 30s). Triggering reconnect.");
         this.ready = false;
         this.stopTimers();
         await this.reconnect();
@@ -258,7 +260,7 @@ export class WhatsAppClient {
   }
 
   /** Quick check: is the Puppeteer page still alive and responsive? */
-  private async isPageAlive(timeoutMs = 15000): Promise<boolean> {
+  private async isPageAlive(timeoutMs = 30000): Promise<boolean> {
     try {
       const page = (this.client as any).pupPage;
       if (!page) return false;
