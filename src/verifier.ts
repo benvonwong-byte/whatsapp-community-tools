@@ -420,6 +420,119 @@ JSON:`;
   }
 }
 
+/** Normalize an event name for comparison: lowercase, strip punctuation, collapse whitespace. */
+function normalizeName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^\w\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Compute word-level Jaccard similarity between two names (0–1). Only considers words with 3+ chars. */
+function nameSimilarity(a: string, b: string): number {
+  const na = normalizeName(a);
+  const nb = normalizeName(b);
+
+  // Exact match after normalization
+  if (na === nb) return 1;
+
+  // One contains the other
+  if (na.includes(nb) || nb.includes(na)) return 0.9;
+
+  const wordsA = new Set(na.split(" ").filter((w) => w.length >= 3));
+  const wordsB = new Set(nb.split(" ").filter((w) => w.length >= 3));
+
+  if (wordsA.size === 0 && wordsB.size === 0) return 1;
+  if (wordsA.size === 0 || wordsB.size === 0) return 0;
+
+  let intersection = 0;
+  for (const w of wordsA) {
+    if (wordsB.has(w)) intersection++;
+  }
+  const union = new Set([...wordsA, ...wordsB]).size;
+  return intersection / union;
+}
+
+/** Score an event for "keeper" priority — higher score = more info = better to keep. */
+function eventQuality(event: StoredEvent): number {
+  let score = 0;
+  if (event.url) score += 3;
+  if (event.location) score += 2;
+  if (event.description && event.description.length > 50) score += 2;
+  if (event.startTime) score += 1;
+  if (event.endTime) score += 1;
+  return score;
+}
+
+/** Find and remove duplicate events (similar name + same or adjacent date). */
+function deduplicateEvents(store: EventStore, progress: VerifyProgress): number {
+  const events = store.getAllEvents();
+  const deleted = new Set<string>();
+
+  // Group events by date
+  const byDate = new Map<string, StoredEvent[]>();
+  for (const event of events) {
+    if (!byDate.has(event.date)) byDate.set(event.date, []);
+    byDate.get(event.date)!.push(event);
+  }
+
+  // Compare within same-date groups
+  for (const [, group] of byDate) {
+    if (group.length < 2) continue;
+    for (let i = 0; i < group.length; i++) {
+      if (deleted.has(group[i].hash)) continue;
+      for (let j = i + 1; j < group.length; j++) {
+        if (deleted.has(group[j].hash)) continue;
+        const sim = nameSimilarity(group[i].name, group[j].name);
+        if (sim >= 0.5) {
+          const qi = eventQuality(group[i]);
+          const qj = eventQuality(group[j]);
+          const [keeper, dup] = qi >= qj ? [group[i], group[j]] : [group[j], group[i]];
+          store.deleteEvent(dup.hash);
+          deleted.add(dup.hash);
+          progress.deleted++;
+          console.log(
+            `[verify-all] DEDUP deleted "${dup.name}" (${dup.date}) — duplicate of "${keeper.name}" (similarity: ${(sim * 100).toFixed(0)}%)`
+          );
+        }
+      }
+    }
+  }
+
+  // Also check adjacent dates (off-by-one day)
+  const sortedDates = [...byDate.keys()].sort();
+  for (let d = 0; d < sortedDates.length - 1; d++) {
+    const date1 = sortedDates[d];
+    const date2 = sortedDates[d + 1];
+    const diffMs = new Date(date2).getTime() - new Date(date1).getTime();
+    if (diffMs > 86400000) continue; // more than 1 day apart
+
+    const group1 = byDate.get(date1)!;
+    const group2 = byDate.get(date2)!;
+    for (const e1 of group1) {
+      if (deleted.has(e1.hash)) continue;
+      for (const e2 of group2) {
+        if (deleted.has(e2.hash)) continue;
+        const sim = nameSimilarity(e1.name, e2.name);
+        if (sim >= 0.5) {
+          const q1 = eventQuality(e1);
+          const q2 = eventQuality(e2);
+          const [keeper, dup] = q1 >= q2 ? [e1, e2] : [e2, e1];
+          store.deleteEvent(dup.hash);
+          deleted.add(dup.hash);
+          progress.deleted++;
+          console.log(
+            `[verify-all] DEDUP deleted "${dup.name}" (${dup.date}) — duplicate of "${keeper.name}" (${keeper.date}, similarity: ${(sim * 100).toFixed(0)}%)`
+          );
+        }
+      }
+    }
+  }
+
+  return deleted.size;
+}
+
 /** Check if an event is likely in the NYC area based on its location string. */
 function isLikelyOnline(event: StoredEvent): boolean {
   const cat = event.category?.toLowerCase() || "";
@@ -539,7 +652,15 @@ export async function verifyAllStoredEvents(
     );
   }
 
-  console.log(`[verify-all] Done! Checked ${progress.checked}, updated ${progress.updated}, deleted ${progress.deleted}.`);
+  // Deduplication pass — remove fuzzy duplicates (similar name + same/adjacent date)
+  progress.currentEvent = "Checking for duplicates...";
+  console.log(`[verify-all] Running deduplication pass...`);
+  const dedupCount = deduplicateEvents(store, progress);
+  if (dedupCount > 0) {
+    console.log(`[verify-all] Deduplication removed ${dedupCount} duplicate events.`);
+  }
+
+  console.log(`[verify-all] Done! Checked ${progress.checked}, updated ${progress.updated}, deleted ${progress.deleted} (incl. ${dedupCount} duplicates).`);
   progress.phase = "done";
   progress.active = false;
   progress.currentEvent = undefined;
