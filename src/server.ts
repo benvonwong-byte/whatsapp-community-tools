@@ -130,6 +130,16 @@ export function startServer(store: EventStore, statusChecker?: () => { whatsappC
     res.json(events);
   });
 
+  // Delete event (admin only)
+  app.delete("/api/events/:hash", requireAdmin, (req, res) => {
+    const deleted = store.deleteEvent(req.params.hash);
+    if (deleted) {
+      res.json({ ok: true });
+    } else {
+      res.status(404).json({ error: "Event not found" });
+    }
+  });
+
   // Toggle favorite (harmless user action)
   app.post("/api/events/:hash/favorite", (req, res) => {
     const favorited = store.toggleFavorite(req.params.hash);

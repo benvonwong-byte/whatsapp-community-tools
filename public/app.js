@@ -2008,9 +2008,12 @@ function eventCardHTML(event) {
           </div>
           <span class="category-badge" data-category="${event.category}">${escapeHtml(catName)}</span>
         </div>
-        ${isAdmin ? `<button class="fav-btn ${event.favorited ? "favorited" : ""}" data-hash="${event.hash}" title="Toggle favorite">
-          ${event.favorited ? "\u2665" : "\u2661"}
-        </button>` : ""}
+        <div class="card-actions">
+          ${isAdmin ? `<button class="delete-btn" data-hash="${event.hash}" title="Delete event">&times;</button>` : ""}
+          ${isAdmin ? `<button class="fav-btn ${event.favorited ? "favorited" : ""}" data-hash="${event.hash}" title="Toggle favorite">
+            ${event.favorited ? "\u2665" : "\u2661"}
+          </button>` : ""}
+        </div>
       </div>
     </div>`;
 }
@@ -2030,6 +2033,23 @@ function attachCardListeners(container) {
         renderCurrentView();
       } catch (err) {
         console.error("Failed to toggle favorite:", err);
+      }
+    });
+  });
+
+  // Delete buttons (admin)
+  container.querySelectorAll(".delete-btn").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const hash = btn.dataset.hash;
+      const ev = allEvents.find((e) => e.hash === hash);
+      if (!ev || !confirm(`Delete "${ev.name}"?`)) return;
+      try {
+        await adminFetch(`/api/events/${hash}`, { method: "DELETE" });
+        allEvents = allEvents.filter((e) => e.hash !== hash);
+        renderCurrentView();
+      } catch (err) {
+        console.error("Failed to delete event:", err);
       }
     });
   });
