@@ -74,7 +74,7 @@ function isSafeUrl(url: string): boolean {
 }
 
 /** Fetch a URL with timeout and return its text content. */
-export async function fetchPageText(url: string): Promise<string | null> {
+async function fetchPageText(url: string): Promise<string | null> {
   if (!isSafeUrl(url)) {
     console.log(`[verifier] Blocked unsafe URL: ${url}`);
     return null;
