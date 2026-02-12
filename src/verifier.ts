@@ -44,20 +44,22 @@ async function fetchPageText(url: string): Promise<string | null> {
       },
       redirect: "follow",
     });
-    clearTimeout(timeout);
 
     if (!res.ok) {
+      clearTimeout(timeout);
       console.log(`[verifier] HTTP ${res.status} for ${url}`);
       return null;
     }
 
     const contentType = res.headers.get("content-type") || "";
     if (!contentType.includes("text/html") && !contentType.includes("text/plain") && !contentType.includes("application/xhtml")) {
+      clearTimeout(timeout);
       console.log(`[verifier] Non-HTML content type for ${url}: ${contentType}`);
       return null;
     }
 
     const html = await res.text();
+    clearTimeout(timeout);
     const text = htmlToText(html);
 
     // Truncate to ~6000 chars to keep Claude call small
