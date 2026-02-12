@@ -15,6 +15,14 @@ export interface BufferedMessage {
 type FlushCallback = (messages: BufferedMessage[]) => Promise<void>;
 type ReadyCallback = () => Promise<void>;
 
+// Private chats to monitor in addition to group chats (e.g. self-chat for testing/forwarding links)
+const ALLOWED_PRIVATE_CHATS = ["benjamin von wong"];
+
+function isAllowedPrivateChat(chatName: string): boolean {
+  const lower = chatName.toLowerCase();
+  return ALLOWED_PRIVATE_CHATS.some((name) => lower.includes(name));
+}
+
 export class WhatsAppClient {
   private client: Client;
   private buffer: BufferedMessage[] = [];
@@ -158,12 +166,14 @@ export class WhatsAppClient {
     // Skip non-text messages
     if (!msg.body || msg.body.trim() === "") return;
 
-    // Only process group chat messages with >10 participants
+    // Process group chats with >10 participants, plus allowed private chats
     const chat = await msg.getChat();
-    if (!chat.isGroup) return;
-    const participants = (chat as any).participants;
-    if (participants && participants.length <= 10) return;
-    if (this.isGroupBlocked && this.isGroupBlocked(chat.name)) return;
+    if (!chat.isGroup && !isAllowedPrivateChat(chat.name)) return;
+    if (chat.isGroup) {
+      const participants = (chat as any).participants;
+      if (participants && participants.length <= 10) return;
+      if (this.isGroupBlocked && this.isGroupBlocked(chat.name)) return;
+    }
 
     const buffered: BufferedMessage = {
       id: msg.id._serialized,
@@ -260,7 +270,8 @@ export class WhatsAppClient {
 
     const chats = await this.client.getChats();
     let blockedCount = 0;
-    const groupChats = chats.filter((c) => {
+    const monitoredChats = chats.filter((c) => {
+      if (isAllowedPrivateChat(c.name)) return true;
       if (!c.isGroup) return false;
       const participants = (c as any).participants;
       if (participants && participants.length <= 10) return false;
@@ -270,13 +281,13 @@ export class WhatsAppClient {
       }
       return true;
     });
-    console.log(`[backfill] Found ${groupChats.length} group chats (>10 members)${blockedCount > 0 ? `, skipped ${blockedCount} blocked` : ""}.`);
-    if (onGroupProgress) onGroupProgress(0, groupChats.length);
+    console.log(`[backfill] Found ${monitoredChats.length} monitored chats${blockedCount > 0 ? `, skipped ${blockedCount} blocked` : ""}.`);
+    if (onGroupProgress) onGroupProgress(0, monitoredChats.length);
 
     let groupIndex = 0;
-    for (const chat of groupChats) {
+    for (const chat of monitoredChats) {
       groupIndex++;
-      if (onGroupProgress) onGroupProgress(groupIndex, groupChats.length);
+      if (onGroupProgress) onGroupProgress(groupIndex, monitoredChats.length);
       try {
         // Fetch up to 500 messages per chat
         const messages = await chat.fetchMessages({ limit: 500 });
