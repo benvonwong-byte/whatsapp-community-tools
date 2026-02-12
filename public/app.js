@@ -384,9 +384,9 @@ function renderBackfillProgress(progress) {
   if (!el) return;
 
   // When idle (or unknown), hide and reset flags for next backfill
-  if (!progress.active && progress.phase !== "done") {
+  if (!progress.active && progress.phase !== "done" && progress.phase !== "error") {
     el.classList.add("hidden");
-    el.classList.remove("done");
+    el.classList.remove("done", "error");
     backfillDoneDismissed = false;
     if (backfillDismissTimer) { clearTimeout(backfillDismissTimer); backfillDismissTimer = null; }
     return;
@@ -421,7 +421,7 @@ function renderBackfillProgress(progress) {
     fill.style.width = `${Math.max(fetchPct, 5)}%`;
     detail.textContent = groupInfo;
     eventsEl.textContent = "";
-    el.classList.remove("done");
+    el.classList.remove("done", "error");
   } else if (progress.phase === "processing") {
     const pct = progress.totalMessages > 0
       ? Math.round((progress.processedMessages / progress.totalMessages) * 100)
@@ -430,12 +430,20 @@ function renderBackfillProgress(progress) {
     fill.style.width = `${pct}%`;
     detail.textContent = `${progress.processedMessages} / ${progress.totalMessages} messages`;
     eventsEl.textContent = `${progress.eventsFound} event${progress.eventsFound !== 1 ? "s" : ""} found`;
+    el.classList.remove("done", "error");
+  } else if (progress.phase === "error") {
+    label.textContent = "Scan failed";
+    fill.style.width = "100%";
+    detail.textContent = progress.errorMessage || "Unknown error";
+    eventsEl.textContent = isAdmin ? "Check Logs for details" : "";
     el.classList.remove("done");
+    el.classList.add("error");
   } else if (progress.phase === "done") {
     label.textContent = "Scan complete!";
     fill.style.width = "100%";
     detail.textContent = `${progress.totalMessages} messages scanned`;
     eventsEl.textContent = `${progress.eventsFound} event${progress.eventsFound !== 1 ? "s" : ""} found`;
+    el.classList.remove("error");
     el.classList.add("done");
 
     // Auto-hide after 8 seconds, reload data
@@ -501,6 +509,60 @@ function setupAdminMode() {
       loadData();
     }
   });
+
+  // Logs button
+  const logsBtn = document.getElementById("logs-btn");
+  logsBtn.classList.remove("hidden");
+  logsBtn.addEventListener("click", () => openLogsModal());
+
+  // Logs modal close
+  document.getElementById("logs-close").addEventListener("click", () => {
+    document.getElementById("logs-overlay").classList.add("hidden");
+  });
+  document.getElementById("logs-overlay").addEventListener("click", (e) => {
+    if (e.target.id === "logs-overlay") document.getElementById("logs-overlay").classList.add("hidden");
+  });
+  document.getElementById("logs-refresh").addEventListener("click", () => fetchAndRenderLogs());
+  document.getElementById("logs-copy").addEventListener("click", () => copyLogs());
+  document.getElementById("logs-filter").addEventListener("change", () => fetchAndRenderLogs());
+}
+
+async function openLogsModal() {
+  document.getElementById("logs-overlay").classList.remove("hidden");
+  await fetchAndRenderLogs();
+}
+
+async function fetchAndRenderLogs() {
+  const container = document.getElementById("logs-content");
+  const filter = document.getElementById("logs-filter").value;
+  const url = filter ? `/api/logs?level=${filter}` : "/api/logs";
+  try {
+    const res = await adminFetch(url);
+    const logs = await res.json();
+    if (logs.length === 0) {
+      container.innerHTML = '<div style="color: var(--text-dim); padding: 20px; text-align: center;">No log entries.</div>';
+      return;
+    }
+    container.innerHTML = logs.map((entry) => {
+      const ts = entry.timestamp.replace("T", " ").replace(/\.\d+Z$/, "");
+      const cls = `log-entry log-${entry.level}`;
+      return `<div class="${cls}"><span class="log-ts">${escapeHtml(ts)}</span>${escapeHtml(entry.message)}</div>`;
+    }).join("");
+    // Scroll to bottom
+    container.scrollTop = container.scrollHeight;
+  } catch (err) {
+    container.innerHTML = `<div style="color: #d63031; padding: 20px;">Failed to load logs: ${escapeHtml(String(err))}</div>`;
+  }
+}
+
+function copyLogs() {
+  const container = document.getElementById("logs-content");
+  const text = container.innerText;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById("logs-copy");
+    btn.textContent = "Copied!";
+    setTimeout(() => { btn.textContent = "Copy"; }, 2000);
+  }).catch(() => {});
 }
 
 function setupLogin() {

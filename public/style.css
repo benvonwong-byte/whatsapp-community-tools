@@ -84,6 +84,19 @@ header h1 {
 .refresh-btn:disabled { opacity: 0.35; cursor: not-allowed; border-color: var(--border); color: var(--text-dim); }
 .refresh-btn.scanning { animation: pulse-dot 1.5s infinite; }
 
+/* Logs button */
+.logs-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.logs-btn:hover { color: var(--text); border-color: var(--text-dim); }
+
 .login-btn:hover { color: var(--text); border-color: var(--text-dim); }
 .logout-btn { border-color: transparent; font-size: 10px; margin-left: 0; }
 .logout-btn:hover { color: var(--fav); }
@@ -1083,6 +1096,20 @@ main {
   border-color: #00b894;
 }
 
+.backfill-progress.error {
+  animation: none;
+  border-color: #d63031;
+}
+
+.backfill-progress.error .backfill-progress-icon {
+  animation: none;
+  color: #d63031;
+}
+
+.backfill-progress.error .backfill-progress-fill {
+  background: #d63031;
+}
+
 .backfill-progress-header {
   display: flex;
   align-items: center;
@@ -1401,6 +1428,72 @@ kbd {
 .qr-expired {
   color: #fdcb6e;
 }
+
+/* Server Logs Modal */
+.logs-modal {
+  max-width: 700px;
+  max-height: 85vh;
+}
+
+.logs-controls {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  align-items: center;
+}
+
+.logs-controls select {
+  background: var(--surface2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.logs-refresh-btn, .logs-copy-btn {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.logs-refresh-btn:hover, .logs-copy-btn:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+
+.logs-content {
+  background: var(--bg);
+  border-radius: 8px;
+  padding: 12px;
+  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  max-height: 60vh;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.log-entry {
+  padding: 2px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+}
+
+.log-entry .log-ts {
+  color: var(--text-dim);
+  margin-right: 8px;
+}
+
+.log-entry.log-error { color: #d63031; }
+.log-entry.log-warn { color: #fdcb6e; }
+.log-entry.log-log { color: var(--text-dim); }
 
 /* Responsive */
 @media (max-width: 600px) {

@@ -6,13 +6,38 @@ import { categories } from "./categories";
 
 export interface BackfillProgress {
   active: boolean;
-  phase: "idle" | "fetching" | "processing" | "done";
+  phase: "idle" | "fetching" | "processing" | "done" | "error";
   totalMessages: number;
   processedMessages: number;
   eventsFound: number;
   groupsScanned: number;
   totalGroups: number;
+  errorMessage?: string;
 }
+
+// In-memory ring buffer for server logs (last 200 entries)
+export interface LogEntry {
+  timestamp: string;
+  level: "log" | "warn" | "error";
+  message: string;
+}
+
+const logBuffer: LogEntry[] = [];
+const LOG_BUFFER_SIZE = 200;
+
+function captureLog(level: "log" | "warn" | "error", args: any[]) {
+  const message = args.map(a => typeof a === "string" ? a : JSON.stringify(a, null, 2)).join(" ");
+  logBuffer.push({ timestamp: new Date().toISOString(), level, message });
+  if (logBuffer.length > LOG_BUFFER_SIZE) logBuffer.shift();
+}
+
+// Intercept console to capture logs
+const origLog = console.log;
+const origWarn = console.warn;
+const origError = console.error;
+console.log = (...args: any[]) => { captureLog("log", args); origLog(...args); };
+console.warn = (...args: any[]) => { captureLog("warn", args); origWarn(...args); };
+console.error = (...args: any[]) => { captureLog("error", args); origError(...args); };
 
 // Admin auth middleware: checks ?token= query param or Authorization: Bearer header
 function requireAdmin(req: Request, res: Response, next: NextFunction): void {
@@ -124,6 +149,14 @@ export function startServer(store: EventStore, statusChecker?: () => { whatsappC
   });
 
   // ── Admin endpoints (require token) ──
+
+  // Get server logs (admin only)
+  app.get("/api/logs", requireAdmin, (req, res) => {
+    const level = req.query.level as string | undefined;
+    const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 100, 1), 200);
+    let logs = level ? logBuffer.filter(l => l.level === level) : [...logBuffer];
+    res.json(logs.slice(-limit));
+  });
 
   // Get QR code for WhatsApp auth
   app.get("/api/qr", requireAdmin, (_req, res) => {

@@ -87,11 +87,24 @@ async function main() {
     backfillProgress.eventsFound = 0;
     backfillProgress.groupsScanned = 0;
     backfillProgress.totalGroups = 0;
+    backfillProgress.errorMessage = undefined;
 
-    const messages = await whatsapp.fetchRecentMessages(hours, (scanned, total) => {
-      backfillProgress.groupsScanned = scanned;
-      backfillProgress.totalGroups = total;
-    });
+    let messages: BufferedMessage[];
+    try {
+      messages = await whatsapp.fetchRecentMessages(hours, (scanned, total) => {
+        backfillProgress.groupsScanned = scanned;
+        backfillProgress.totalGroups = total;
+      });
+    } catch (err: any) {
+      const errMsg = err?.message || String(err);
+      console.error(`[backfill] Fetch failed: ${errMsg}`);
+      backfillProgress.phase = "error";
+      backfillProgress.active = false;
+      backfillProgress.errorMessage = errMsg;
+      setTimeout(() => { if (backfillProgress.phase === "error") backfillProgress.phase = "idle"; }, 60000);
+      return 0;
+    }
+
     if (messages.length === 0) {
       console.log("[backfill] No messages to process.");
       backfillProgress.phase = "done";

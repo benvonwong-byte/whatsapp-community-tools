@@ -15,6 +15,7 @@
         <span class="wa-label">Checking...</span>
       </span>
       <button id="refresh-btn" class="refresh-btn hidden" title="Scan for new events">&#8635; Scan</button>
+      <button id="logs-btn" class="logs-btn hidden" title="View server logs">Logs</button>
       <button id="login-btn" class="login-btn" title="Admin login">Login</button>
       <button id="logout-btn" class="logout-btn hidden" title="Logout">Logout</button>
     </h1>
@@ -193,6 +194,24 @@
     <div class="modal">
       <button id="modal-close" class="modal-close">&times;</button>
       <div id="modal-content"></div>
+    </div>
+  </div>
+
+  <!-- Server logs modal -->
+  <div id="logs-overlay" class="modal-overlay hidden">
+    <div class="modal logs-modal">
+      <button id="logs-close" class="modal-close">&times;</button>
+      <h2>Server Logs</h2>
+      <div class="logs-controls">
+        <select id="logs-filter">
+          <option value="">All</option>
+          <option value="error">Errors only</option>
+          <option value="warn">Warnings only</option>
+        </select>
+        <button id="logs-refresh" class="logs-refresh-btn">&#8635; Refresh</button>
+        <button id="logs-copy" class="logs-copy-btn">Copy</button>
+      </div>
+      <div id="logs-content" class="logs-content"></div>
     </div>
   </div>
 
