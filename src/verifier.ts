@@ -588,71 +588,73 @@ export async function verifyAllStoredEvents(
 
   console.log(`[verify-all] Starting verification of ${events.length} events...`);
 
-  const concurrency = 3;
+  // Worker pool — each worker grabs the next event as soon as it finishes
+  const concurrency = 10;
+  let cursor = 0;
 
-  for (let i = 0; i < events.length; i += concurrency) {
-    const batch = events.slice(i, i + concurrency);
+  async function processEvent(event: StoredEvent) {
+    progress.currentEvent = event.name;
+    try {
+      if (event.url) {
+        const result = await verifyStoredEventUrl(event);
 
-    await Promise.all(
-      batch.map(async (event) => {
-        progress.currentEvent = event.name;
-        try {
-          if (event.url) {
-            // Verify via URL (also checks NYC location)
-            const result = await verifyStoredEventUrl(event);
-
-            if (result.action === "delete") {
-              store.deleteEvent(event.hash);
-              progress.deleted++;
-              console.log(`[verify-all] DELETED "${event.name}" — URL invalid, no event info, or not in NYC`);
-            } else if (result.action === "update" && result.fields) {
-              store.updateEvent(event.hash, result.fields);
-              progress.updated++;
-              const changes = Object.entries(result.fields)
-                .filter(([k, v]) => v !== (event as any)[k])
-                .map(([k, v]) => `${k}: ${(event as any)[k]} → ${v}`)
-                .join(", ");
-              console.log(`[verify-all] UPDATED "${event.name}" — ${changes}`);
-            } else {
-              console.log(`[verify-all] OK "${event.name}" on ${event.date}`);
-            }
-          } else {
-            // No URL — verify from source text (also checks NYC location)
-            const result = await verifyFromSourceText(event);
-            if (result && result.action === "delete") {
-              store.deleteEvent(event.hash);
-              progress.deleted++;
-              console.log(`[verify-all] DELETED "${event.name}" — not in NYC area`);
-            } else if (result && result.action === "update" && result.fields) {
-              store.updateEvent(event.hash, result.fields);
-              progress.updated++;
-              const changes = Object.entries(result.fields)
-                .filter(([k, v]) => v !== (event as any)[k])
-                .map(([k, v]) => `${k}: ${(event as any)[k]} → ${v}`)
-                .join(", ");
-              console.log(`[verify-all] UPDATED "${event.name}" (from source text) — ${changes}`);
-            } else if (!result) {
-              // No source text or too short — check location with a separate call
-              const inNYC = await checkLocationNYC(event);
-              if (!inNYC) {
-                store.deleteEvent(event.hash);
-                progress.deleted++;
-                console.log(`[verify-all] DELETED "${event.name}" — location "${event.location}" not in NYC area`);
-              } else {
-                console.log(`[verify-all] OK "${event.name}" on ${event.date} (no URL, location confirmed NYC)`);
-              }
-            } else {
-              console.log(`[verify-all] OK "${event.name}" on ${event.date} (source text confirmed)`);
-            }
-          }
-        } catch (err: any) {
-          console.error(`[verify-all] Error verifying "${event.name}": ${err?.message || err}`);
+        if (result.action === "delete") {
+          store.deleteEvent(event.hash);
+          progress.deleted++;
+          console.log(`[verify-all] DELETED "${event.name}" — URL invalid, no event info, or not in NYC`);
+        } else if (result.action === "update" && result.fields) {
+          store.updateEvent(event.hash, result.fields);
+          progress.updated++;
+          const changes = Object.entries(result.fields)
+            .filter(([k, v]) => v !== (event as any)[k])
+            .map(([k, v]) => `${k}: ${(event as any)[k]} → ${v}`)
+            .join(", ");
+          console.log(`[verify-all] UPDATED "${event.name}" — ${changes}`);
+        } else {
+          console.log(`[verify-all] OK "${event.name}" on ${event.date}`);
         }
+      } else {
+        const result = await verifyFromSourceText(event);
+        if (result && result.action === "delete") {
+          store.deleteEvent(event.hash);
+          progress.deleted++;
+          console.log(`[verify-all] DELETED "${event.name}" — not in NYC area`);
+        } else if (result && result.action === "update" && result.fields) {
+          store.updateEvent(event.hash, result.fields);
+          progress.updated++;
+          const changes = Object.entries(result.fields)
+            .filter(([k, v]) => v !== (event as any)[k])
+            .map(([k, v]) => `${k}: ${(event as any)[k]} → ${v}`)
+            .join(", ");
+          console.log(`[verify-all] UPDATED "${event.name}" (from source text) — ${changes}`);
+        } else if (!result) {
+          const inNYC = await checkLocationNYC(event);
+          if (!inNYC) {
+            store.deleteEvent(event.hash);
+            progress.deleted++;
+            console.log(`[verify-all] DELETED "${event.name}" — location "${event.location}" not in NYC area`);
+          } else {
+            console.log(`[verify-all] OK "${event.name}" on ${event.date} (no URL, location confirmed NYC)`);
+          }
+        } else {
+          console.log(`[verify-all] OK "${event.name}" on ${event.date} (source text confirmed)`);
+        }
+      }
+    } catch (err: any) {
+      console.error(`[verify-all] Error verifying "${event.name}": ${err?.message || err}`);
+    }
 
-        progress.checked++;
-      })
-    );
+    progress.checked++;
   }
+
+  async function worker() {
+    while (cursor < events.length) {
+      const idx = cursor++;
+      await processEvent(events[idx]);
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, events.length) }, () => worker()));
 
   // Deduplication pass — remove fuzzy duplicates (similar name + same/adjacent date)
   progress.currentEvent = "Checking for duplicates...";
