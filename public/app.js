@@ -1435,7 +1435,20 @@ async function geocodeSearchResults(results) {
   for (let i = 0; i < toGeocode.length; i++) {
     if (geocodingAbort) break;
     status.textContent = `Geocoding ${i + 1} of ${toGeocode.length} locations...`;
-    await geocodeAddress(toGeocode[i]);
+    // Try with "NYC" context first for better results, fall back to raw location
+    let result = await geocodeAddress(toGeocode[i] + ", NYC");
+    if (!result) {
+      await new Promise(r => setTimeout(r, 1000));
+      result = await geocodeAddress(toGeocode[i]);
+    }
+    // If NYC variant succeeded, also cache under the raw key
+    if (result) {
+      const rawKey = toGeocode[i].toLowerCase().trim();
+      if (!(rawKey in geocodeCache)) {
+        geocodeCache[rawKey] = result;
+        saveGeocodeCache();
+      }
+    }
     // Rate limit: 1 request per second for Nominatim
     if (i < toGeocode.length - 1 && !geocodingAbort) {
       await new Promise(r => setTimeout(r, 1000));
@@ -1669,7 +1682,7 @@ function searchEvents(query) {
       // null distances sort to bottom
       if (a.distance == null && b.distance == null) return a.event.date.localeCompare(b.event.date);
       if (a.distance == null) return 1;
-      if (b.distance == null) return 1;
+      if (b.distance == null) return -1;
       const distCmp = a.distance - b.distance;
       if (Math.abs(distCmp) > 0.01) return distCmp;
       return a.event.date.localeCompare(b.event.date);
@@ -1730,8 +1743,26 @@ function renderSearchResults() {
       const lastClose = card.lastIndexOf("</div>");
       return card.slice(0, lastClose) + dateInline + card.slice(lastClose);
     }).join("");
+  } else if (searchSort === "relevance") {
+    // Flat list sorted by relevance with inline date + match hint
+    html = results.map(({ event, matchField }) => {
+      let matchHint = "";
+      if (matchField === "location" && event.location) matchHint = `Location: ${escapeHtml(event.location)}`;
+      else if (matchField === "group" && event.sourceChat) matchHint = `Group: ${escapeHtml(event.sourceChat)}`;
+      else if (matchField === "category") {
+        const cat = catMap[event.category];
+        if (cat) matchHint = `Category: ${escapeHtml(cat.name)}`;
+      }
+      else if (matchField === "description") matchHint = "Description match";
+      const d = new Date(event.date + "T00:00:00");
+      const dateLabel = d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+      const inlineInfo = `<span class="search-match-hint">${dateLabel}${matchHint ? " · " + matchHint : ""}</span>`;
+      const card = eventCardHTML(event);
+      const lastClose = card.lastIndexOf("</div>");
+      return card.slice(0, lastClose) + inlineInfo + card.slice(lastClose);
+    }).join("");
   } else {
-    // Group by date (relevance and date modes)
+    // Date mode: group by date
     const grouped = {};
     results.forEach(({ event: ev, matchField }) => {
       if (!grouped[ev.date]) grouped[ev.date] = [];
@@ -1748,18 +1779,8 @@ function renderSearchResults() {
       });
       html += `<div class="list-date-header">${label}</div>`;
       html += grouped[date].map(({ event, matchField }) => {
-        let matchHint = "";
-        if (matchField === "location" && event.location) matchHint = `<span class="search-match-hint">Location: ${escapeHtml(event.location)}</span>`;
-        else if (matchField === "group" && event.sourceChat) matchHint = `<span class="search-match-hint">Group: ${escapeHtml(event.sourceChat)}</span>`;
-        else if (matchField === "category") {
-          const cat = catMap[event.category];
-          if (cat) matchHint = `<span class="search-match-hint">Category: ${escapeHtml(cat.name)}</span>`;
-        }
-        else if (matchField === "description") matchHint = `<span class="search-match-hint">Description match</span>`;
         const card = eventCardHTML(event);
-        if (!matchHint) return card;
-        const lastClose = card.lastIndexOf("</div>");
-        return card.slice(0, lastClose) + matchHint + card.slice(lastClose);
+        return card;
       }).join("");
     });
   }
