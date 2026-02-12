@@ -14,6 +14,7 @@
         <span class="wa-dot"></span>
         <span class="wa-label">Checking...</span>
       </span>
+      <button id="refresh-btn" class="refresh-btn hidden" title="Scan for new events">&#8635; Scan</button>
       <button id="login-btn" class="login-btn" title="Admin login">Login</button>
       <button id="logout-btn" class="logout-btn hidden" title="Logout">Logout</button>
     </h1>
@@ -28,6 +29,21 @@
   <main>
     <!-- Calendar View -->
     <section id="view-calendar" class="view active">
+      <!-- Backfill Progress Bar -->
+      <div id="backfill-progress" class="backfill-progress hidden">
+        <div class="backfill-progress-header">
+          <span class="backfill-progress-icon">&#8635;</span>
+          <span id="backfill-progress-label" class="backfill-progress-label">Scanning WhatsApp messages...</span>
+        </div>
+        <div class="backfill-progress-bar">
+          <div id="backfill-progress-fill" class="backfill-progress-fill"></div>
+        </div>
+        <div class="backfill-progress-stats">
+          <span id="backfill-progress-detail"></span>
+          <span id="backfill-progress-events"></span>
+        </div>
+      </div>
+
       <!-- Latest Events Banner -->
       <div id="recent-banner" class="recent-banner">
         <div class="recent-banner-header">
@@ -112,9 +128,12 @@
         <div class="dash-sort-controls">
           <span class="dash-section-title">Group Signal-to-Noise</span>
           <select id="dash-sort">
-            <option value="ratio">Sort by Ratio</option>
-            <option value="events">Sort by Events</option>
-            <option value="lastActive">Sort by Last Active</option>
+            <option value="ratio-desc">Ratio: High to Low</option>
+            <option value="ratio-asc">Ratio: Low to High</option>
+            <option value="events-desc">Events: Most First</option>
+            <option value="events-asc">Events: Least First</option>
+            <option value="lastActive-desc">Last Active: Recent</option>
+            <option value="lastActive-asc">Last Active: Oldest</option>
           </select>
         </div>
         <div id="dash-monitor-summary" class="dash-monitor-summary"></div>

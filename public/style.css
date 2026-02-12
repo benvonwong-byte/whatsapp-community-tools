@@ -67,6 +67,23 @@ header h1 {
   margin-left: auto;
 }
 
+/* Refresh/Scan button */
+.refresh-btn {
+  background: none;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.refresh-btn:hover { background: var(--accent); color: #fff; }
+.refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.refresh-btn.scanning { animation: pulse-dot 1.5s infinite; }
+
 .login-btn:hover { color: var(--text); border-color: var(--text-dim); }
 .logout-btn { border-color: transparent; font-size: 10px; margin-left: 0; }
 .logout-btn:hover { color: var(--fav); }
@@ -1044,6 +1061,82 @@ main {
   border-color: #00b894;
   color: #00b894;
   background: rgba(0, 184, 148, 0.1);
+}
+
+/* ── Backfill Progress Bar ── */
+.backfill-progress {
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  animation: backfill-glow 2s ease-in-out infinite;
+}
+
+@keyframes backfill-glow {
+  0%, 100% { border-color: var(--accent); box-shadow: 0 0 0 rgba(124, 110, 240, 0); }
+  50% { border-color: var(--accent); box-shadow: 0 0 12px rgba(124, 110, 240, 0.25); }
+}
+
+.backfill-progress.done {
+  animation: none;
+  border-color: #00b894;
+}
+
+.backfill-progress-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.backfill-progress-icon {
+  font-size: 16px;
+  color: var(--accent);
+  animation: spin-icon 1.5s linear infinite;
+}
+
+.backfill-progress.done .backfill-progress-icon {
+  animation: none;
+  color: #00b894;
+}
+
+@keyframes spin-icon {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.backfill-progress-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.backfill-progress-bar {
+  height: 6px;
+  background: var(--surface2);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.backfill-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width 0.4s ease;
+  width: 0%;
+}
+
+.backfill-progress.done .backfill-progress-fill {
+  background: #00b894;
+}
+
+.backfill-progress-stats {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-dim);
 }
 
 /* ── Latest Events Banner (top of Calendar) ── */

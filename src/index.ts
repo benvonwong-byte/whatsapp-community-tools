@@ -1,7 +1,7 @@
 import { config } from "./config";
 import { WhatsAppClient, BufferedMessage } from "./whatsapp";
 import { extractEvents } from "./extractor";
-import { startServer } from "./server";
+import { startServer, BackfillProgress } from "./server";
 import { EventStore } from "./store";
 
 async function processBatch(
@@ -66,13 +66,42 @@ async function main() {
 
   const whatsapp = new WhatsAppClient();
 
+  // Backfill progress state (shared with server for the API)
+  const backfillProgress: BackfillProgress = {
+    active: false,
+    phase: "idle",
+    totalMessages: 0,
+    processedMessages: 0,
+    eventsFound: 0,
+    groupsScanned: 0,
+    totalGroups: 0,
+  };
+
   const runBackfill = async (days: number): Promise<number> => {
     console.log(`\n[backfill] Starting ${days}-day backfill...`);
-    const messages = await whatsapp.fetchRecentMessages(days);
+    backfillProgress.active = true;
+    backfillProgress.phase = "fetching";
+    backfillProgress.totalMessages = 0;
+    backfillProgress.processedMessages = 0;
+    backfillProgress.eventsFound = 0;
+    backfillProgress.groupsScanned = 0;
+    backfillProgress.totalGroups = 0;
+
+    const messages = await whatsapp.fetchRecentMessages(days, (scanned, total) => {
+      backfillProgress.groupsScanned = scanned;
+      backfillProgress.totalGroups = total;
+    });
     if (messages.length === 0) {
       console.log("[backfill] No messages to process.");
+      backfillProgress.phase = "done";
+      backfillProgress.active = false;
+      // Reset to idle after 15s so frontend stops showing "done"
+      setTimeout(() => { if (backfillProgress.phase === "done") backfillProgress.phase = "idle"; }, 15000);
       return 0;
     }
+
+    backfillProgress.phase = "processing";
+    backfillProgress.totalMessages = messages.length;
     let totalEvents = 0;
     const batchSize = 20;
     for (let i = 0; i < messages.length; i += batchSize) {
@@ -80,9 +109,17 @@ async function main() {
       console.log(`[backfill] Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(messages.length / batchSize)}...`);
       const before = store.getTotalStats().totalEvents;
       await processBatch(batch, store);
-      totalEvents += store.getTotalStats().totalEvents - before;
+      const newEvents = store.getTotalStats().totalEvents - before;
+      totalEvents += newEvents;
+      backfillProgress.processedMessages = Math.min(i + batchSize, messages.length);
+      backfillProgress.eventsFound = totalEvents;
     }
+
     console.log(`[backfill] Done! Found ${totalEvents} new events.\n`);
+    backfillProgress.phase = "done";
+    backfillProgress.active = false;
+    // Reset to idle after 15s so frontend stops showing "done"
+    setTimeout(() => { if (backfillProgress.phase === "done") backfillProgress.phase = "idle"; }, 15000);
     return totalEvents;
   };
 
@@ -90,7 +127,8 @@ async function main() {
     store,
     () => ({ whatsappConnected: whatsapp.isConnected() }),
     () => whatsapp.getQrCode(),
-    runBackfill
+    runBackfill,
+    () => backfillProgress
   );
 
   // WhatsApp + Claude are optional — skip if no API key

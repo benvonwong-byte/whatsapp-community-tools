@@ -27,6 +27,9 @@ let dashboardExpanded = false;
 let calCategoryFilter = null; // null = "All", or a category id string
 let qrPollTimer = null;
 let lastRenderedQr = null;
+let backfillPollTimer = null;
+let backfillDismissTimer = null;
+let backfillDoneDismissed = false; // prevents re-showing after dismiss
 
 // Keyboard focus state
 let focusedEventIndex = -1;
@@ -67,11 +70,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupRecentBanner();
   setupQrOverlay();
   pollStatus();
+  pollBackfillStatus();
   renderCurrentView();
   // Poll for new events every 30s
   setInterval(loadData, 30000);
   // Poll WhatsApp status every 10s
   setInterval(pollStatus, 10000);
+  // Poll backfill status every 2s
+  backfillPollTimer = setInterval(pollBackfillStatus, 2000);
 });
 
 // Helper: fetch an admin-protected endpoint with the token
@@ -198,17 +204,24 @@ function renderDashboard() {
   }
   empty.classList.add("hidden");
 
-  // Sort
-  const sortBy = document.getElementById("dash-sort").value;
+  // Sort — blocked groups always go to the bottom
+  const sortVal = document.getElementById("dash-sort").value;
+  const [sortBy, sortDir] = sortVal.split("-");
+  const dir = sortDir === "asc" ? 1 : -1;
   const sorted = [...groups].sort((a, b) => {
-    if (sortBy === "events") return b.eventCount - a.eventCount;
+    // Blocked groups always sink to bottom
+    const aBlocked = blockedGroups.has(a.chatName) ? 1 : 0;
+    const bBlocked = blockedGroups.has(b.chatName) ? 1 : 0;
+    if (aBlocked !== bBlocked) return aBlocked - bBlocked;
+
+    if (sortBy === "events") return (a.eventCount - b.eventCount) * dir;
     if (sortBy === "lastActive") {
       if (!a.lastActive && !b.lastActive) return 0;
       if (!a.lastActive) return 1;
       if (!b.lastActive) return -1;
-      return b.lastActive.localeCompare(a.lastActive);
+      return a.lastActive.localeCompare(b.lastActive) * dir;
     }
-    return b.ratio - a.ratio;
+    return (a.ratio - b.ratio) * dir;
   });
 
   // Find max ratio for scaling bars
@@ -307,14 +320,18 @@ async function pollStatus() {
 
 function renderStatus() {
   const el = document.getElementById("wa-status");
+  const refreshBtn = document.getElementById("refresh-btn");
   if (waConnected === null) {
     el.className = "wa-status checking";
     el.title = "WhatsApp: checking...";
     el.querySelector(".wa-label").textContent = "Checking...";
+    if (refreshBtn) refreshBtn.classList.add("hidden");
   } else if (waConnected) {
     el.className = "wa-status connected";
     el.title = "WhatsApp: connected";
     el.querySelector(".wa-label").textContent = "Connected";
+    // Show refresh button when connected + admin
+    if (refreshBtn && isAdmin) refreshBtn.classList.remove("hidden");
     // Stop QR polling when connected
     if (qrPollTimer) {
       clearInterval(qrPollTimer);
@@ -325,6 +342,91 @@ function renderStatus() {
     el.className = "wa-status disconnected" + (isAdmin ? " admin-clickable" : "");
     el.title = isAdmin ? "Click to connect WhatsApp" : "WhatsApp: disconnected";
     el.querySelector(".wa-label").textContent = "Disconnected";
+    if (refreshBtn) refreshBtn.classList.add("hidden");
+  }
+}
+
+// ── Backfill Progress ──
+
+async function pollBackfillStatus() {
+  try {
+    const res = await apiFetch("/api/backfill-status");
+    const progress = await res.json();
+    renderBackfillProgress(progress);
+  } catch {
+    // silently ignore
+  }
+}
+
+function renderBackfillProgress(progress) {
+  const el = document.getElementById("backfill-progress");
+  if (!el) return;
+
+  // When idle (or unknown), hide and reset flags for next backfill
+  if (!progress.active && progress.phase !== "done") {
+    el.classList.add("hidden");
+    el.classList.remove("done");
+    backfillDoneDismissed = false;
+    if (backfillDismissTimer) { clearTimeout(backfillDismissTimer); backfillDismissTimer = null; }
+    return;
+  }
+
+  // If we already dismissed the "done" state, don't re-show
+  if (progress.phase === "done" && backfillDoneDismissed) {
+    return;
+  }
+
+  // Active backfill resets the dismissed flag
+  if (progress.active) {
+    backfillDoneDismissed = false;
+    if (backfillDismissTimer) { clearTimeout(backfillDismissTimer); backfillDismissTimer = null; }
+  }
+
+  el.classList.remove("hidden");
+
+  const label = document.getElementById("backfill-progress-label");
+  const fill = document.getElementById("backfill-progress-fill");
+  const detail = document.getElementById("backfill-progress-detail");
+  const eventsEl = document.getElementById("backfill-progress-events");
+
+  if (progress.phase === "fetching") {
+    const groupInfo = progress.totalGroups > 0
+      ? `Scanning group ${progress.groupsScanned} of ${progress.totalGroups}...`
+      : "Connecting to chats...";
+    const fetchPct = progress.totalGroups > 0
+      ? Math.round((progress.groupsScanned / progress.totalGroups) * 100)
+      : 5;
+    label.textContent = "Fetching WhatsApp messages...";
+    fill.style.width = `${Math.max(fetchPct, 5)}%`;
+    detail.textContent = groupInfo;
+    eventsEl.textContent = "";
+    el.classList.remove("done");
+  } else if (progress.phase === "processing") {
+    const pct = progress.totalMessages > 0
+      ? Math.round((progress.processedMessages / progress.totalMessages) * 100)
+      : 0;
+    label.textContent = `Scanning for events... ${pct}%`;
+    fill.style.width = `${pct}%`;
+    detail.textContent = `${progress.processedMessages} / ${progress.totalMessages} messages`;
+    eventsEl.textContent = `${progress.eventsFound} event${progress.eventsFound !== 1 ? "s" : ""} found`;
+    el.classList.remove("done");
+  } else if (progress.phase === "done") {
+    label.textContent = "Scan complete!";
+    fill.style.width = "100%";
+    detail.textContent = `${progress.totalMessages} messages scanned`;
+    eventsEl.textContent = `${progress.eventsFound} event${progress.eventsFound !== 1 ? "s" : ""} found`;
+    el.classList.add("done");
+
+    // Auto-hide after 8 seconds, reload data
+    if (!backfillDismissTimer) {
+      loadData();
+      backfillDismissTimer = setTimeout(() => {
+        el.classList.add("hidden");
+        el.classList.remove("done");
+        backfillDoneDismissed = true;
+        backfillDismissTimer = null;
+      }, 8000);
+    }
   }
 }
 
@@ -356,6 +458,26 @@ function setupAdminMode() {
   document.getElementById("wa-status").addEventListener("click", () => {
     if (!waConnected && isAdmin) {
       openQrOverlay();
+    }
+  });
+
+  // Refresh/Scan button: triggers a backfill
+  const refreshBtn = document.getElementById("refresh-btn");
+  refreshBtn.addEventListener("click", async () => {
+    if (refreshBtn.disabled) return;
+    refreshBtn.disabled = true;
+    refreshBtn.classList.add("scanning");
+    refreshBtn.textContent = "Scanning...";
+    backfillDoneDismissed = false; // Reset so progress bar shows
+    try {
+      await adminFetch("/api/backfill?days=2", { method: "POST" });
+    } catch (err) {
+      console.error("Backfill trigger failed:", err);
+    } finally {
+      refreshBtn.disabled = false;
+      refreshBtn.classList.remove("scanning");
+      refreshBtn.innerHTML = "&#8635; Scan";
+      loadData();
     }
   });
 }

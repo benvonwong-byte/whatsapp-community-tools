@@ -252,7 +252,7 @@ export class WhatsAppClient {
     return this.ready;
   }
 
-  async fetchRecentMessages(days: number = 7): Promise<BufferedMessage[]> {
+  async fetchRecentMessages(days: number = 7, onGroupProgress?: (scanned: number, total: number) => void): Promise<BufferedMessage[]> {
     if (!this.ready) {
       console.log("[backfill] Client not ready, skipping backfill.");
       return [];
@@ -271,8 +271,12 @@ export class WhatsAppClient {
       return true;
     });
     console.log(`[backfill] Found ${groupChats.length} group chats (>10 members).`);
+    if (onGroupProgress) onGroupProgress(0, groupChats.length);
 
+    let groupIndex = 0;
     for (const chat of groupChats) {
+      groupIndex++;
+      if (onGroupProgress) onGroupProgress(groupIndex, groupChats.length);
       try {
         // Fetch up to 500 messages per chat
         const messages = await chat.fetchMessages({ limit: 500 });

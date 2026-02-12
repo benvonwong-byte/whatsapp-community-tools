@@ -4,6 +4,16 @@ import { config } from "./config";
 import { EventStore } from "./store";
 import { categories } from "./categories";
 
+export interface BackfillProgress {
+  active: boolean;
+  phase: "idle" | "fetching" | "processing" | "done";
+  totalMessages: number;
+  processedMessages: number;
+  eventsFound: number;
+  groupsScanned: number;
+  totalGroups: number;
+}
+
 // Admin auth middleware: checks ?token= query param or Authorization: Bearer header
 function requireAdmin(req: Request, res: Response, next: NextFunction): void {
   const token = (req.query.token as string) || req.headers.authorization?.replace("Bearer ", "");
@@ -14,7 +24,7 @@ function requireAdmin(req: Request, res: Response, next: NextFunction): void {
   next();
 }
 
-export function startServer(store: EventStore, statusChecker?: () => { whatsappConnected: boolean }, qrCodeGetter?: () => string | null, backfillTrigger?: (days: number) => Promise<number>): void {
+export function startServer(store: EventStore, statusChecker?: () => { whatsappConnected: boolean }, qrCodeGetter?: () => string | null, backfillTrigger?: (days: number) => Promise<number>, backfillProgressGetter?: () => BackfillProgress): void {
   const app = express();
   app.use(express.json({ limit: "2mb" }));
 
@@ -98,6 +108,12 @@ export function startServer(store: EventStore, statusChecker?: () => { whatsappC
   app.get("/api/events/group/:chatName", (req, res) => {
     const events = store.getEventsByGroup(decodeURIComponent(req.params.chatName));
     res.json(events);
+  });
+
+  // Backfill progress (public — frontend polls this for the progress bar)
+  app.get("/api/backfill-status", (_req, res) => {
+    const progress = backfillProgressGetter ? backfillProgressGetter() : { active: false, phase: "idle", totalMessages: 0, processedMessages: 0, eventsFound: 0, groupsScanned: 0, totalGroups: 0 };
+    res.json(progress);
   });
 
   // Get dashboard stats
