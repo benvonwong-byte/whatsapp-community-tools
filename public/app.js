@@ -34,6 +34,12 @@ let searchQuery = "";
 let searchActive = false;
 let previousView = null; // view to restore when search is cleared
 let verifyPollTimer = null;
+let searchSort = "relevance"; // "relevance" | "date" | "proximity"
+let proximityAddress = "";
+let proximityCoords = null; // { lat, lng }
+let geocodeCache = {}; // location string → { lat, lng } | null
+let geocodingInProgress = false;
+let geocodingAbort = false;
 
 // Keyboard focus state
 let focusedEventIndex = -1;
@@ -134,8 +140,16 @@ function setupTabs() {
       if (searchActive) {
         searchActive = false;
         searchQuery = "";
+        searchSort = "relevance";
+        geocodingAbort = true;
         document.getElementById("search-input").value = "";
         document.getElementById("search-clear").classList.add("hidden");
+        const sc = document.getElementById("search-sort");
+        if (sc) sc.value = "relevance";
+        const pw = document.getElementById("proximity-input-wrap");
+        if (pw) pw.classList.remove("active");
+        const scControls = document.getElementById("search-sort-controls");
+        if (scControls) scControls.classList.add("hidden");
       }
       document.querySelector(".tab.active")?.classList.remove("active");
       tab.classList.add("active");
@@ -1355,6 +1369,84 @@ function renderFavorites() {
 
 // ── Search ──
 
+// Geocoding utilities
+function loadGeocodeCache() {
+  try {
+    const raw = localStorage.getItem("geocodeCache");
+    if (raw) geocodeCache = JSON.parse(raw);
+  } catch {}
+}
+
+function saveGeocodeCache() {
+  try {
+    localStorage.setItem("geocodeCache", JSON.stringify(geocodeCache));
+  } catch {}
+}
+
+async function geocodeAddress(address) {
+  if (!address) return null;
+  const key = address.toLowerCase().trim();
+  if (key in geocodeCache) return geocodeCache[key];
+
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1`;
+    const res = await fetch(url, { headers: { "User-Agent": "NYCEventsApp/1.0" } });
+    const data = await res.json();
+    if (data.length > 0) {
+      const result = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+      geocodeCache[key] = result;
+      saveGeocodeCache();
+      return result;
+    }
+    geocodeCache[key] = null;
+    saveGeocodeCache();
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function haversineDistance(lat1, lng1, lat2, lng2) {
+  const R = 3959; // Earth radius in miles
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function formatDistance(miles) {
+  if (miles < 0.1) return "< 0.1 mi";
+  if (miles < 10) return miles.toFixed(1) + " mi";
+  return Math.round(miles) + " mi";
+}
+
+async function geocodeSearchResults(results) {
+  geocodingInProgress = true;
+  geocodingAbort = false;
+  const uniqueLocations = [...new Set(results.map(r => r.event.location).filter(Boolean))];
+  const toGeocode = uniqueLocations.filter(loc => !(loc.toLowerCase().trim() in geocodeCache));
+  const status = document.getElementById("proximity-status");
+
+  for (let i = 0; i < toGeocode.length; i++) {
+    if (geocodingAbort) break;
+    status.textContent = `Geocoding ${i + 1} of ${toGeocode.length} locations...`;
+    await geocodeAddress(toGeocode[i]);
+    // Rate limit: 1 request per second for Nominatim
+    if (i < toGeocode.length - 1 && !geocodingAbort) {
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    // Re-render incrementally so distances appear as they're resolved
+    if (!geocodingAbort && searchActive) renderSearchResults();
+  }
+
+  geocodingInProgress = false;
+  if (!geocodingAbort && status) {
+    status.textContent = toGeocode.length > 0 ? "Done" : "";
+  }
+}
+
 function setupSearch() {
   const input = document.getElementById("search-input");
   const clearBtn = document.getElementById("search-clear");
@@ -1398,11 +1490,71 @@ function setupSearch() {
       e.preventDefault();
     }
   });
+
+  // Load geocode cache from localStorage
+  loadGeocodeCache();
+
+  // Sort dropdown
+  const sortSelect = document.getElementById("search-sort");
+  const proximityWrap = document.getElementById("proximity-input-wrap");
+  const proximityInput = document.getElementById("proximity-address");
+  const proximityGoBtn = document.getElementById("proximity-go");
+
+  sortSelect.addEventListener("change", () => {
+    searchSort = sortSelect.value;
+    if (searchSort === "proximity") {
+      proximityWrap.classList.add("active");
+      proximityInput.focus();
+    } else {
+      proximityWrap.classList.remove("active");
+      geocodingAbort = true;
+    }
+    if (searchActive) renderSearchResults();
+  });
+
+  const triggerProximitySearch = async () => {
+    const addr = proximityInput.value.trim();
+    if (!addr) return;
+    proximityAddress = addr;
+    const status = document.getElementById("proximity-status");
+    status.textContent = "Geocoding address...";
+    status.classList.remove("error");
+    proximityCoords = await geocodeAddress(addr + " NYC");
+    if (!proximityCoords) {
+      // Try without NYC suffix
+      proximityCoords = await geocodeAddress(addr);
+    }
+    if (!proximityCoords) {
+      status.textContent = "Address not found";
+      status.classList.add("error");
+      return;
+    }
+    status.textContent = "";
+    status.classList.remove("error");
+    renderSearchResults();
+    // Start batch geocoding event locations
+    const results = searchEvents(searchQuery);
+    geocodeSearchResults(results);
+  };
+
+  proximityGoBtn.addEventListener("click", triggerProximitySearch);
+  proximityInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); triggerProximitySearch(); }
+  });
 }
 
 function exitSearch() {
   if (!searchActive) return;
   searchActive = false;
+  // Reset sort state
+  searchSort = "relevance";
+  geocodingAbort = true;
+  const sortSelect = document.getElementById("search-sort");
+  if (sortSelect) sortSelect.value = "relevance";
+  const proximityWrap = document.getElementById("proximity-input-wrap");
+  if (proximityWrap) proximityWrap.classList.remove("active");
+  const sortControls = document.getElementById("search-sort-controls");
+  if (sortControls) sortControls.classList.add("hidden");
   // Restore previous view
   const viewName = previousView || "calendar";
   currentView = viewName;
@@ -1485,12 +1637,45 @@ function searchEvents(query) {
       for (const [field, s] of Object.entries(scores)) {
         if (s > best) { best = s; matchField = field; }
       }
-      results.push({ event: ev, score: totalScore, matchField });
+
+      // Calculate distance if in proximity mode
+      let distance = null;
+      if (searchSort === "proximity" && proximityCoords && ev.location) {
+        const locKey = ev.location.toLowerCase().trim();
+        const locCoords = geocodeCache[locKey];
+        if (locCoords) {
+          distance = haversineDistance(proximityCoords.lat, proximityCoords.lng, locCoords.lat, locCoords.lng);
+        }
+      }
+
+      results.push({ event: ev, score: totalScore, matchField, distance });
     }
   }
 
-  // Sort by score descending, then by date ascending
-  results.sort((a, b) => b.score - a.score || a.event.date.localeCompare(b.event.date));
+  // Sort based on current mode
+  if (searchSort === "date") {
+    results.sort((a, b) => {
+      const dateCmp = a.event.date.localeCompare(b.event.date);
+      if (dateCmp !== 0) return dateCmp;
+      const aTime = a.event.startTime || "99:99";
+      const bTime = b.event.startTime || "99:99";
+      return aTime.localeCompare(bTime);
+    });
+  } else if (searchSort === "proximity") {
+    results.sort((a, b) => {
+      // null distances sort to bottom
+      if (a.distance == null && b.distance == null) return a.event.date.localeCompare(b.event.date);
+      if (a.distance == null) return 1;
+      if (b.distance == null) return 1;
+      const distCmp = a.distance - b.distance;
+      if (Math.abs(distCmp) > 0.01) return distCmp;
+      return a.event.date.localeCompare(b.event.date);
+    });
+  } else {
+    // Relevance: score desc, then date asc
+    results.sort((a, b) => b.score - a.score || a.event.date.localeCompare(b.event.date));
+  }
+
   return results;
 }
 
@@ -1499,6 +1684,7 @@ function renderSearchResults() {
   const container = document.getElementById("search-events");
   const empty = document.getElementById("search-empty");
   const summary = document.getElementById("search-summary");
+  const sortControls = document.getElementById("search-sort-controls");
 
   summary.textContent = results.length > 0
     ? `${results.length} event${results.length !== 1 ? "s" : ""} matching "${searchQuery}"`
@@ -1507,21 +1693,50 @@ function renderSearchResults() {
   if (results.length === 0) {
     container.innerHTML = "";
     empty.classList.remove("hidden");
+    sortControls.classList.add("hidden");
     return;
   }
   empty.classList.add("hidden");
-
-  // Group by date
-  const grouped = {};
-  results.forEach(({ event: ev, matchField }) => {
-    if (!grouped[ev.date]) grouped[ev.date] = [];
-    grouped[ev.date].push({ event: ev, matchField });
-  });
+  sortControls.classList.remove("hidden");
 
   let html = "";
-  Object.keys(grouped)
-    .sort()
-    .forEach((date) => {
+
+  if (searchSort === "proximity") {
+    // Flat list (no date grouping) with distance badges
+    html = results.map(({ event, matchField, distance }) => {
+      const card = eventCardHTML(event);
+      // Build distance badge
+      let distBadge = "";
+      if (!event.location) {
+        distBadge = `<span class="event-distance no-location">No location</span>`;
+      } else if (distance != null) {
+        distBadge = `<span class="event-distance">${formatDistance(distance)}</span>`;
+      } else {
+        const locKey = event.location.toLowerCase().trim();
+        if (locKey in geocodeCache && geocodeCache[locKey] === null) {
+          distBadge = `<span class="event-distance no-location">Location not found</span>`;
+        } else {
+          distBadge = `<span class="event-distance calculating">Calculating...</span>`;
+        }
+      }
+      // Build date label for inline display
+      const d = new Date(event.date + "T00:00:00");
+      const dateLabel = d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+      const dateInline = `<span class="search-match-hint">${dateLabel}${distBadge}</span>`;
+      // Insert date + distance before the last closing </div>
+      const lastClose = card.lastIndexOf("</div>");
+      return card.slice(0, lastClose) + dateInline + card.slice(lastClose);
+    }).join("");
+  } else {
+    // Group by date (relevance and date modes)
+    const grouped = {};
+    results.forEach(({ event: ev, matchField }) => {
+      if (!grouped[ev.date]) grouped[ev.date] = [];
+      grouped[ev.date].push({ event: ev, matchField });
+    });
+
+    const sortedDates = Object.keys(grouped).sort();
+    sortedDates.forEach((date) => {
       const d = new Date(date + "T00:00:00");
       const label = d.toLocaleDateString("en-US", {
         weekday: "short",
@@ -1540,11 +1755,11 @@ function renderSearchResults() {
         else if (matchField === "description") matchHint = `<span class="search-match-hint">Description match</span>`;
         const card = eventCardHTML(event);
         if (!matchHint) return card;
-        // Insert hint before the last closing </div> of the card
         const lastClose = card.lastIndexOf("</div>");
         return card.slice(0, lastClose) + matchHint + card.slice(lastClose);
       }).join("");
     });
+  }
 
   container.innerHTML = html;
   attachCardListeners(container);

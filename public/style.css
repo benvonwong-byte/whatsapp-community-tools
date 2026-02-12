@@ -295,6 +295,83 @@ nav#view-tabs {
   font-style: italic;
 }
 
+/* Search Sort Controls */
+.search-sort-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.search-sort-controls select {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  width: fit-content;
+}
+.proximity-input-wrap {
+  display: none;
+  align-items: center;
+  gap: 8px;
+}
+.proximity-input-wrap.active {
+  display: flex;
+}
+.proximity-input-wrap input {
+  flex: 1;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+.proximity-go {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 16px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.proximity-go:hover {
+  opacity: 0.85;
+}
+.proximity-status {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.proximity-status.error {
+  color: #d63031;
+}
+.event-distance {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-left: 8px;
+}
+.event-distance.calculating {
+  color: var(--text-dim);
+  font-weight: 400;
+  font-style: italic;
+}
+.event-distance.no-location {
+  color: var(--text-dim);
+  font-weight: 400;
+  font-style: italic;
+}
+@media (max-width: 600px) {
+  .proximity-input-wrap.active {
+    flex-direction: column;
+  }
+  .proximity-go {
+    width: 100%;
+  }
+}
+
 main {
   padding: 20px;
   max-width: 900px;

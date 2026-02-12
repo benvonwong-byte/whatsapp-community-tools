@@ -36,6 +36,20 @@
     <!-- Search Results (shown when search is active) -->
     <section id="view-search" class="view">
       <div id="search-summary" class="search-summary"></div>
+      <div id="search-sort-controls" class="search-sort-controls hidden">
+        <select id="search-sort">
+          <option value="relevance">Sort: Relevance</option>
+          <option value="date">Sort: Date (Soonest)</option>
+          <option value="proximity">Sort: Nearest to Address</option>
+        </select>
+        <div id="proximity-input-wrap" class="proximity-input-wrap">
+          <input type="text" id="proximity-address"
+                 placeholder="Enter address or neighborhood..."
+                 autocomplete="street-address">
+          <button id="proximity-go" class="proximity-go">Go</button>
+          <span id="proximity-status" class="proximity-status"></span>
+        </div>
+      </div>
       <div id="search-events" class="event-list"></div>
       <div id="search-empty" class="empty-state hidden">No events match your search.</div>
     </section>
