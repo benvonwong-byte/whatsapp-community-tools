@@ -289,6 +289,7 @@ export class WhatsAppClient {
     const groups: { id: string; name: string; participantCount: number }[] = await Promise.race([
       page.evaluate(`(async () => {
         const chats = window.Store.Chat.getModelsArray();
+        const totalCount = chats.length;
         const results = [];
         for (const chat of chats) {
           if (!chat.isGroup) continue;
@@ -300,12 +301,15 @@ export class WhatsAppClient {
             participantCount: pCount,
           });
         }
+        // Log total for debugging
+        if (typeof console !== 'undefined') console.log('[Store] Total chats: ' + totalCount + ', groups: ' + results.length);
         return results;
       })()`),
       new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error("getGroupChatIds timed out after 30s")), 30000)
       ),
     ]);
+    console.log(`[backfill] Store returned ${groups.length} groups`);
 
     return groups;
   }
@@ -332,11 +336,19 @@ export class WhatsAppClient {
     }
 
     // Get lightweight group chat list directly from Store (avoids getChats() crash)
-    let groupInfos: { id: string; name: string; participantCount: number }[];
-    try {
-      groupInfos = await this.getGroupChatIds();
-    } catch (err: any) {
-      throw new Error(`Failed to list group chats: ${err?.message || err}`);
+    // Retry up to 5 times with 10s waits — Store may not be populated yet after ready
+    let groupInfos: { id: string; name: string; participantCount: number }[] = [];
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      try {
+        groupInfos = await this.getGroupChatIds();
+      } catch (err: any) {
+        throw new Error(`Failed to list group chats: ${err?.message || err}`);
+      }
+      if (groupInfos.length > 0) break;
+      if (attempt < 5) {
+        console.log(`[backfill] Store returned 0 groups (attempt ${attempt}/5). Waiting 10s for sync...`);
+        await new Promise(resolve => setTimeout(resolve, 10000));
+      }
     }
 
     // Filter: groups with >10 participants, not blocked
