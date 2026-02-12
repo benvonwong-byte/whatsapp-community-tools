@@ -109,9 +109,19 @@ async function main() {
 
   whatsapp.setGroupBlockedCheck((chatName: string) => store.isGroupBlocked(chatName));
 
-  // On ready, backfill last 7 days of messages
+  // On ready (initial connect or reconnect), backfill since last processed message
   whatsapp.setReadyHandler(async () => {
-    await runBackfill(7);
+    const lastTs = store.getLastProcessedTimestamp();
+    if (lastTs) {
+      const gapMs = Date.now() - lastTs * 1000;
+      const gapDays = Math.ceil(gapMs / (24 * 60 * 60 * 1000));
+      const days = Math.max(1, Math.min(gapDays + 1, 30)); // +1 for overlap, cap at 30
+      console.log(`[ready] Last processed message: ${new Date(lastTs * 1000).toISOString()} (${gapDays}d ago). Backfilling ${days} days.`);
+      await runBackfill(days);
+    } else {
+      console.log("[ready] No previous messages found. Backfilling 7 days.");
+      await runBackfill(7);
+    }
   });
 
   const shutdown = async () => {

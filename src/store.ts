@@ -257,6 +257,13 @@ export class EventStore {
     return { totalMessages: msgs.cnt, totalEvents: evts.cnt };
   }
 
+  getLastProcessedTimestamp(): number | null {
+    const row = this.db
+      .prepare("SELECT MAX(timestamp) as ts FROM processed_messages")
+      .get() as any;
+    return row?.ts ?? null;
+  }
+
   getAllProcessedMessages(): { message_id: string; chat_name: string; body: string; timestamp: number }[] {
     return this.db
       .prepare("SELECT message_id, chat_name, body, timestamp FROM processed_messages")
