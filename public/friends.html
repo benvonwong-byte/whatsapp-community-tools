@@ -1,0 +1,958 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Friends Network Dashboard</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👥</text></svg>">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #121212;
+      --surface: #1e1e1e;
+      --surface2: #2a2a2a;
+      --border: #333;
+      --text: #e0e0e0;
+      --text-dim: #888;
+      --accent: #4fc3f7;
+      --green: #00b894;
+      --yellow: #fdcb6e;
+      --red: #d63031;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Header */
+    .header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .header h1 { font-size: 18px; font-weight: 700; letter-spacing: -0.5px; flex: 1; }
+    .back-link { color: var(--accent); text-decoration: none; font-size: 13px; flex-shrink: 0; }
+    .back-link:hover { text-decoration: underline; }
+
+    .header-btn {
+      background: var(--accent);
+      color: #000;
+      border: none;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 6px 16px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: opacity 0.15s;
+      white-space: nowrap;
+    }
+    .header-btn:hover { opacity: 0.85; }
+    .header-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .header-btn.secondary {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .header-btn.secondary:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* Tabs */
+    .tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+      padding: 0 20px;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .tab {
+      padding: 10px 18px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-dim);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: color 0.15s, border-color 0.15s;
+      white-space: nowrap;
+      user-select: none;
+    }
+    .tab:hover { color: var(--text); }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* Main container */
+    .container { max-width: 1100px; margin: 0 auto; padding: 16px 20px; }
+
+    /* Login gate */
+    .login-gate { text-align: center; padding: 80px 20px; color: var(--text-dim); font-size: 15px; line-height: 1.6; }
+    .login-gate a { color: var(--accent); text-decoration: none; }
+    .login-gate a:hover { text-decoration: underline; }
+
+    /* Section panels */
+    .section { background: var(--surface); border-radius: 10px; padding: 16px; margin-bottom: 14px; }
+    .section-title { font-size: 12px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 14px; }
+
+    /* Stats grid */
+    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
+    .stat-card { background: var(--surface); border-radius: 10px; padding: 12px; text-align: center; }
+    .stat-value { font-size: 22px; font-weight: 700; color: var(--accent); }
+    .stat-label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
+
+    /* Chart container */
+    .chart-container { position: relative; width: 100%; height: 220px; }
+    .chart-container canvas { width: 100% !important; height: 100% !important; }
+    .chart-empty { text-align: center; color: var(--text-dim); font-size: 12px; padding: 50px 0; }
+
+    /* Neglected cards */
+    .neglected-card {
+      background: var(--surface2);
+      border-radius: 8px;
+      padding: 12px 14px;
+      margin-bottom: 6px;
+      border-left: 3px solid var(--red);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .neglected-card .name { font-size: 13px; font-weight: 600; color: var(--text); }
+    .neglected-card .days { font-size: 11px; color: var(--red); }
+    .neglected-card .group-tag { font-size: 10px; color: var(--text-dim); margin-left: 8px; }
+
+    /* Initiators list */
+    .initiator-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+    .initiator-row:last-child { border-bottom: none; }
+    .initiator-name { font-size: 13px; font-weight: 500; flex: 1; }
+    .initiator-bar-bg { width: 120px; height: 6px; background: var(--surface2); border-radius: 3px; overflow: hidden; }
+    .initiator-bar-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.4s; }
+    .initiator-value { font-size: 11px; color: var(--text-dim); width: 36px; text-align: right; }
+
+    /* Filter bar */
+    .filter-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      margin-bottom: 14px;
+      flex-wrap: wrap;
+    }
+
+    .filter-select {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-family: inherit;
+      outline: none;
+      cursor: pointer;
+    }
+    .filter-select:focus { border-color: var(--accent); }
+
+    .filter-search {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-family: inherit;
+      outline: none;
+      flex: 1;
+      min-width: 140px;
+    }
+    .filter-search::placeholder { color: var(--text-dim); }
+    .filter-search:focus { border-color: var(--accent); }
+
+    /* Contacts table */
+    .contacts-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    .contacts-table th {
+      text-align: left;
+      padding: 8px 10px;
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+      transition: color 0.15s;
+    }
+    .contacts-table th:hover { color: var(--accent); }
+    .contacts-table th.sorted-asc::after { content: " \u25B2"; font-size: 8px; }
+    .contacts-table th.sorted-desc::after { content: " \u25BC"; font-size: 8px; }
+    .contacts-table td {
+      padding: 8px 10px;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+      color: var(--text);
+    }
+    .contacts-table tr { cursor: pointer; transition: background 0.1s; }
+    .contacts-table tbody tr:hover { background: var(--surface2); }
+
+    /* Quality badges */
+    .quality-badge {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 999px;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+    .quality-badge.high { background: rgba(0,184,148,0.15); color: var(--green); }
+    .quality-badge.medium { background: rgba(253,203,110,0.15); color: var(--yellow); }
+    .quality-badge.low { background: rgba(214,48,49,0.15); color: var(--red); }
+
+    /* Group Lanes (Kanban-style) */
+    .group-lanes {
+      display: flex;
+      gap: 14px;
+      overflow-x: auto;
+      padding-bottom: 10px;
+      -webkit-overflow-scrolling: touch;
+      min-height: 300px;
+    }
+
+    .group-lane {
+      background: var(--surface);
+      border-radius: 10px;
+      min-width: 220px;
+      max-width: 280px;
+      flex: 1 0 220px;
+      display: flex;
+      flex-direction: column;
+      border: 2px solid transparent;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .group-lane.drag-over {
+      border-color: var(--accent);
+      background: rgba(79, 195, 247, 0.05);
+    }
+
+    .group-lane-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+    }
+    .group-lane-header .color-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .group-lane-header .lane-title {
+      font-size: 13px;
+      font-weight: 600;
+      flex: 1;
+    }
+    .group-lane-header .lane-count {
+      font-size: 10px;
+      color: var(--text-dim);
+      background: var(--surface2);
+      padding: 1px 6px;
+      border-radius: 999px;
+    }
+    .group-lane-header .lane-btn {
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      font-size: 14px;
+      cursor: pointer;
+      padding: 0 2px;
+      transition: color 0.15s;
+    }
+    .group-lane-header .lane-btn:hover { color: var(--accent); }
+    .group-lane-header .lane-btn.delete:hover { color: var(--red); }
+
+    .group-lane-body {
+      flex: 1;
+      padding: 8px;
+      min-height: 60px;
+    }
+
+    /* Contact chip (draggable item in lanes) */
+    .contact-chip {
+      background: var(--surface2);
+      border-radius: 6px;
+      padding: 8px 10px;
+      margin-bottom: 4px;
+      font-size: 12px;
+      cursor: grab;
+      transition: opacity 0.15s, transform 0.15s, box-shadow 0.15s;
+      user-select: none;
+    }
+    .contact-chip:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+    .contact-chip.dragging {
+      opacity: 0.4;
+      transform: scale(0.95);
+    }
+    .contact-chip .chip-name { font-weight: 500; color: var(--text); }
+    .contact-chip .chip-meta { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+
+    /* Messaging tab */
+    .recipient-section {
+      background: var(--surface);
+      border-radius: 10px;
+      padding: 16px;
+      margin-bottom: 14px;
+    }
+
+    .recipient-groups {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+    }
+
+    .recipient-pill {
+      background: var(--surface2);
+      color: var(--text-dim);
+      border: 1px solid var(--border);
+      font-size: 11px;
+      font-weight: 500;
+      padding: 4px 12px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: all 0.15s;
+      user-select: none;
+    }
+    .recipient-pill:hover { border-color: var(--accent); color: var(--text); }
+    .recipient-pill.selected {
+      background: var(--accent);
+      color: #000;
+      border-color: var(--accent);
+    }
+
+    .recipient-contacts {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+      max-height: 120px;
+      overflow-y: auto;
+    }
+
+    .recipient-count {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-top: 8px;
+    }
+
+    .composer {
+      width: 100%;
+      min-height: 100px;
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+      resize: vertical;
+      transition: border-color 0.15s;
+    }
+    .composer:focus { border-color: var(--accent); }
+    .composer::placeholder { color: var(--text-dim); }
+
+    .media-upload {
+      border: 2px dashed var(--border);
+      border-radius: 8px;
+      padding: 20px;
+      text-align: center;
+      color: var(--text-dim);
+      font-size: 12px;
+      cursor: pointer;
+      margin-top: 10px;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .media-upload:hover { border-color: var(--accent); }
+    .media-upload.has-file {
+      border-color: var(--green);
+      border-style: solid;
+      background: rgba(0,184,148,0.05);
+    }
+
+    .media-preview {
+      margin-top: 10px;
+      text-align: center;
+    }
+    .media-preview img {
+      max-width: 200px;
+      max-height: 200px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+
+    .send-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .send-btn {
+      background: var(--green);
+      color: #fff;
+      border: none;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 8px 24px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .send-btn:hover { opacity: 0.85; }
+    .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .send-progress-container {
+      flex: 1;
+      display: none;
+    }
+    .send-progress-container.active { display: block; }
+
+    .send-progress-bar {
+      height: 4px;
+      background: var(--surface2);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .send-progress-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 2px;
+      transition: width 0.4s ease;
+      width: 0%;
+    }
+    .send-progress-label {
+      font-size: 10px;
+      color: var(--text-dim);
+      margin-top: 4px;
+    }
+
+    .send-status-text {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-top: 8px;
+    }
+
+    /* Manage Chats tab */
+    .chats-list {
+      list-style: none;
+    }
+    .chats-list li {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+      font-size: 13px;
+    }
+    .chats-list li:last-child { border-bottom: none; }
+    .chats-list label {
+      flex: 1;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .chats-list input[type="checkbox"] {
+      accent-color: var(--accent);
+      width: 16px;
+      height: 16px;
+      cursor: pointer;
+    }
+
+    /* Contact Detail Panel (slide-in from right) */
+    .detail-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 199;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s;
+    }
+    .detail-overlay.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .contact-detail {
+      position: fixed;
+      top: 0;
+      right: 0;
+      width: 400px;
+      max-width: 90vw;
+      height: 100vh;
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+      z-index: 200;
+      transform: translateX(100%);
+      transition: transform 0.3s ease;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+    .contact-detail.open {
+      transform: translateX(0);
+    }
+
+    .detail-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+    .detail-header .close-btn {
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      font-size: 20px;
+      cursor: pointer;
+      transition: color 0.15s;
+    }
+    .detail-header .close-btn:hover { color: var(--text); }
+
+    .detail-body { padding: 20px; flex: 1; }
+
+    .detail-name {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .detail-groups {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-bottom: 16px;
+    }
+
+    .detail-stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .detail-stat {
+      background: var(--surface2);
+      border-radius: 8px;
+      padding: 10px;
+      text-align: center;
+    }
+    .detail-stat .value { font-size: 18px; font-weight: 700; color: var(--accent); }
+    .detail-stat .label { font-size: 9px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
+
+    .detail-chart-section {
+      margin-bottom: 16px;
+    }
+    .detail-chart-section canvas {
+      width: 100% !important;
+      height: 150px !important;
+    }
+
+    .detail-notes textarea {
+      width: 100%;
+      min-height: 80px;
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      font-size: 12px;
+      font-family: inherit;
+      outline: none;
+      resize: vertical;
+    }
+    .detail-notes textarea:focus { border-color: var(--accent); }
+
+    .detail-notes .save-notes-btn {
+      margin-top: 8px;
+      background: var(--accent);
+      color: #000;
+      border: none;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 5px 14px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .detail-notes .save-notes-btn:hover { opacity: 0.85; }
+
+    /* Group Modal */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.7);
+      z-index: 300;
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-overlay.open { display: flex; }
+
+    .modal-dialog {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      width: 90%;
+      max-width: 400px;
+    }
+    .modal-title {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 16px;
+    }
+    .modal-field {
+      margin-bottom: 14px;
+    }
+    .modal-field label {
+      display: block;
+      font-size: 11px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 4px;
+    }
+    .modal-field input[type="text"] {
+      width: 100%;
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+    }
+    .modal-field input[type="text"]:focus { border-color: var(--accent); }
+    .modal-field input[type="color"] {
+      width: 40px;
+      height: 32px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      cursor: pointer;
+      background: var(--surface2);
+      padding: 2px;
+    }
+    .modal-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      margin-top: 20px;
+    }
+    .modal-actions button {
+      font-size: 12px;
+      font-weight: 600;
+      padding: 6px 16px;
+      border-radius: 999px;
+      cursor: pointer;
+      border: none;
+      transition: opacity 0.15s;
+    }
+    .modal-actions .modal-save {
+      background: var(--accent);
+      color: #000;
+    }
+    .modal-actions .modal-cancel {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .modal-actions button:hover { opacity: 0.85; }
+
+    /* Loading & error states */
+    .loading-state { text-align: center; padding: 60px 20px; color: var(--text-dim); font-size: 15px; }
+    .error-state { text-align: center; padding: 40px 20px; color: var(--red); font-size: 14px; }
+    .hidden { display: none !important; }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+      .header { padding: 10px 14px; }
+      .container { padding: 12px; }
+      .tabs { padding: 0 12px; }
+      .tab { padding: 10px 12px; font-size: 12px; }
+      .group-lanes { flex-direction: column; }
+      .group-lane { max-width: none; min-width: 0; }
+      .contacts-table { font-size: 11px; }
+      .contacts-table th, .contacts-table td { padding: 6px 6px; }
+      .contact-detail { width: 100%; max-width: 100vw; }
+      .filter-bar { gap: 6px; }
+      .detail-stats { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <a href="/" class="back-link">&larr; Events</a>
+    <h1>Friends Network</h1>
+    <button id="scan-btn" class="header-btn">Scan Chats</button>
+    <button id="backfill-btn" class="header-btn secondary">Backfill</button>
+  </div>
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <div class="tab active" data-tab="dashboard">Dashboard</div>
+    <div class="tab" data-tab="contacts">Contacts</div>
+    <div class="tab" data-tab="groups">Groups</div>
+    <div class="tab" data-tab="messaging">Messaging</div>
+    <div class="tab" data-tab="chats">Manage Chats</div>
+  </div>
+
+  <!-- Login gate -->
+  <div id="login-gate" class="login-gate hidden">
+    <p>Admin access required.</p>
+    <p>Please <a href="/">log in via the main app</a> first, then return here.</p>
+  </div>
+
+  <!-- Main content container -->
+  <div id="main-content" class="container hidden">
+
+    <!-- ==================== Dashboard Tab ==================== -->
+    <div id="tab-dashboard" class="tab-content active">
+
+      <!-- Summary cards -->
+      <div id="summary-cards" class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-value" id="stat-total-contacts">0</div>
+          <div class="stat-label">Total Contacts</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-active-chats">0</div>
+          <div class="stat-label">Active Chats</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-messages-30d">0</div>
+          <div class="stat-label">Messages (30d)</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-avg-response">--</div>
+          <div class="stat-label">Avg Response</div>
+        </div>
+      </div>
+
+      <!-- Weekly chart -->
+      <div class="section">
+        <div class="section-title">Weekly Interaction Volume</div>
+        <div class="chart-container">
+          <canvas id="weekly-chart"></canvas>
+        </div>
+      </div>
+
+      <!-- Neglected friends -->
+      <div class="section">
+        <div class="section-title">Neglected Friends (30+ days)</div>
+        <div id="neglected-list">
+          <div class="chart-empty">No neglected friends found.</div>
+        </div>
+      </div>
+
+      <!-- Who initiates most -->
+      <div class="section">
+        <div class="section-title">Who Initiates Most</div>
+        <div id="initiators-list">
+          <div class="chart-empty">No data yet.</div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ==================== Contacts Tab ==================== -->
+    <div id="tab-contacts" class="tab-content">
+
+      <!-- Filter bar -->
+      <div class="filter-bar">
+        <select id="filter-group" class="filter-select">
+          <option value="">All Groups</option>
+        </select>
+        <select id="filter-quality" class="filter-select">
+          <option value="">All Quality</option>
+          <option value="high">High</option>
+          <option value="medium">Medium</option>
+          <option value="low">Low</option>
+        </select>
+        <input type="text" id="filter-search" class="filter-search" placeholder="Search contacts...">
+      </div>
+
+      <!-- Contacts table -->
+      <div class="section" style="padding: 0; overflow-x: auto;">
+        <table class="contacts-table">
+          <thead>
+            <tr>
+              <th data-sort="name">Name</th>
+              <th data-sort="group">Group</th>
+              <th data-sort="lastContact">Last Contact</th>
+              <th data-sort="messages30d">30d Msgs</th>
+              <th data-sort="initRatio">Init Ratio</th>
+              <th data-sort="avgResponse">Avg Response</th>
+              <th data-sort="quality">Quality</th>
+            </tr>
+          </thead>
+          <tbody id="contacts-tbody">
+            <tr><td colspan="7" style="text-align:center;color:var(--text-dim);padding:40px;">No contacts loaded.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+
+    <!-- ==================== Groups Tab ==================== -->
+    <div id="tab-groups" class="tab-content">
+
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+        <div class="section-title" style="margin-bottom:0;">Friend Groups</div>
+        <button id="create-group-btn" class="header-btn" style="font-size:11px;padding:5px 14px;">+ New Group</button>
+      </div>
+
+      <div id="group-lanes" class="group-lanes">
+        <div class="chart-empty" style="flex:1;display:flex;align-items:center;justify-content:center;">
+          No groups created yet. Click "New Group" to get started.
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ==================== Messaging Tab ==================== -->
+    <div id="tab-messaging" class="tab-content">
+
+      <!-- Recipients -->
+      <div class="recipient-section">
+        <div class="section-title">Select Recipients</div>
+
+        <!-- Group select buttons -->
+        <div id="recipient-groups" class="recipient-groups"></div>
+
+        <!-- Individual contacts -->
+        <div id="recipient-contacts" class="recipient-contacts"></div>
+
+        <div id="recipient-count" class="recipient-count">0 recipients selected</div>
+      </div>
+
+      <!-- Compose -->
+      <div class="section">
+        <div class="section-title">Compose Message</div>
+        <textarea id="message-text" class="composer" placeholder="Type your message..."></textarea>
+
+        <!-- Media upload -->
+        <div id="media-upload" class="media-upload">
+          Click or drag an image here to attach
+        </div>
+        <input type="file" id="media-file" accept="image/*" style="display:none;">
+        <div id="media-preview" class="media-preview"></div>
+
+        <!-- Send -->
+        <div class="send-actions">
+          <button id="send-btn" class="send-btn" disabled>Send to <span id="send-count">0</span></button>
+
+          <div id="send-progress-container" class="send-progress-container">
+            <div class="send-progress-bar">
+              <div id="send-progress-fill" class="send-progress-fill"></div>
+            </div>
+            <div id="send-progress-label" class="send-progress-label"></div>
+          </div>
+        </div>
+
+        <div id="send-status-text" class="send-status-text"></div>
+      </div>
+
+    </div>
+
+    <!-- ==================== Manage Chats Tab ==================== -->
+    <div id="tab-chats" class="tab-content">
+
+      <div class="section">
+        <div class="section-title">Monitored Chats</div>
+        <ul id="chats-list" class="chats-list">
+          <li style="color:var(--text-dim);justify-content:center;">No chats found. Click "Scan Chats" to discover conversations.</li>
+        </ul>
+      </div>
+
+    </div>
+
+  </div>
+
+  <!-- ==================== Contact Detail Panel ==================== -->
+  <div id="detail-overlay" class="detail-overlay"></div>
+  <div id="contact-detail" class="contact-detail">
+    <div class="detail-header">
+      <span style="font-size:14px;font-weight:600;">Contact Details</span>
+      <button class="close-btn" id="detail-close">&times;</button>
+    </div>
+    <div class="detail-body">
+      <div id="detail-name" class="detail-name">--</div>
+      <div id="detail-groups" class="detail-groups">No groups</div>
+
+      <div id="detail-stats" class="detail-stats"></div>
+
+      <div class="detail-chart-section">
+        <div class="section-title">Activity (30 days)</div>
+        <canvas id="detail-chart"></canvas>
+      </div>
+
+      <div class="detail-notes">
+        <div class="section-title">Notes</div>
+        <textarea id="detail-notes" placeholder="Add notes about this contact..."></textarea>
+        <button id="detail-save-notes" class="save-notes-btn">Save Notes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== Create/Edit Group Modal ==================== -->
+  <div id="group-modal" class="modal-overlay">
+    <div class="modal-dialog">
+      <div class="modal-title">New Group</div>
+      <div class="modal-field">
+        <label for="group-modal-name">Group Name</label>
+        <input type="text" id="group-modal-name" placeholder="e.g. Close Friends">
+      </div>
+      <div class="modal-field">
+        <label for="group-modal-color">Color</label>
+        <input type="color" id="group-modal-color" value="#4fc3f7">
+      </div>
+      <div class="modal-actions">
+        <button class="modal-cancel" id="group-modal-cancel">Cancel</button>
+        <button class="modal-save" id="group-modal-save">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <script src="friends.js"></script>
+</body>
+</html>

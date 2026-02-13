@@ -13,6 +13,9 @@ import { MetacrisisStore } from "./apps/metacrisis/store";
 import { createMetacrisisHandler, categorizeUrl } from "./apps/metacrisis/handler";
 import { runDailySummary, formatSummaryForWhatsApp } from "./apps/metacrisis/summarizer";
 import { createMetacrisisRouter } from "./apps/metacrisis/routes";
+import { FriendsStore } from "./apps/friends/store";
+import { createFriendsHandler } from "./apps/friends/handler";
+import { createFriendsRouter, SendProgress } from "./apps/friends/routes";
 
 // ── Event link enrichment ──
 
@@ -452,6 +455,149 @@ async function main() {
   appRouters.push({
     path: "/api/metacrisis",
     router: createMetacrisisRouter(metacrisisStore, metacrisisSummarize, pushToWhatsApp, metacrisisBackfill),
+  });
+
+  // Friends/Network app: monitor private chats + small groups, track interaction frequency
+  const friendsStore = new FriendsStore();
+  console.log("Friends store initialized.");
+
+  whatsapp.addRawMessageListener(createFriendsHandler(friendsStore));
+
+  const friendsSendProgress: SendProgress = {
+    active: false,
+    phase: "idle",
+    total: 0,
+    sent: 0,
+    failed: 0,
+  };
+
+  const friendsScan = async (): Promise<number> => {
+    const allChats = await whatsapp.getClient().getChats();
+    let count = 0;
+    for (const chat of allChats) {
+      const isPrivate = !chat.isGroup;
+      const participants = (chat as any).participants;
+      const participantCount = participants ? participants.length : 1;
+      const isSmallGroup = chat.isGroup && participantCount >= 2 && participantCount <= 6;
+
+      if (!isPrivate && !isSmallGroup) continue;
+      // Skip the relationship chat
+      if (isPrivate && chat.name.toLowerCase().includes(config.relationshipChatName.toLowerCase())) continue;
+
+      const chatId = chat.id._serialized;
+      friendsStore.upsertChat(chatId, chat.name, chat.isGroup, participantCount);
+      count++;
+    }
+    console.log(`[friends-scan] Found ${count} private chats and small groups.`);
+    return count;
+  };
+
+  const friendsBackfill = async (): Promise<number> => {
+    const monitoredChats = friendsStore.getChats().filter(c => c.monitored);
+    console.log(`[friends-backfill] Backfilling ${monitoredChats.length} monitored chats...`);
+
+    let totalSaved = 0;
+    const allChats = await whatsapp.getClient().getChats();
+
+    for (const chatInfo of monitoredChats) {
+      try {
+        const chat = allChats.find((c: any) => c.id._serialized === chatInfo.chat_id);
+        if (!chat) {
+          console.log(`[friends-backfill] Chat "${chatInfo.chat_name}" not found, skipping`);
+          continue;
+        }
+
+        const messages = await chat.fetchMessages({ limit: 500 });
+        let saved = 0;
+        for (const msg of messages) {
+          if (friendsStore.isDuplicate(msg.id._serialized)) continue;
+          if (!msg.body && !msg.hasMedia) continue;
+
+          const senderId = msg.fromMe ? "self" : ((msg as any).author || chat.id._serialized);
+          let senderName = "";
+          if (!msg.fromMe) {
+            try {
+              const contact = await msg.getContact();
+              senderName = contact?.pushname || contact?.name || "";
+            } catch { senderName = ""; }
+            friendsStore.upsertContact(senderId, senderName, msg.timestamp);
+          }
+
+          friendsStore.saveMessage({
+            id: msg.id._serialized,
+            chat_id: chatInfo.chat_id,
+            sender_id: senderId,
+            sender_name: senderName,
+            timestamp: msg.timestamp,
+            is_from_me: msg.fromMe,
+            message_type: (msg as any).type || "text",
+            char_count: msg.body?.length || 0,
+          });
+          saved++;
+        }
+        if (saved > 0) {
+          console.log(`[friends-backfill] "${chatInfo.chat_name}": ${saved} messages`);
+        }
+        totalSaved += saved;
+      } catch (err: any) {
+        console.error(`[friends-backfill] Error on "${chatInfo.chat_name}":`, err?.message || err);
+      }
+    }
+
+    console.log(`[friends-backfill] Done! ${totalSaved} messages imported.`);
+    return totalSaved;
+  };
+
+  const friendsSendMessage = async (
+    contactIds: string[],
+    message: string,
+    media: { base64: string; mimetype: string; filename: string } | null
+  ): Promise<void> => {
+    friendsSendProgress.active = true;
+    friendsSendProgress.phase = "sending";
+    friendsSendProgress.total = contactIds.length;
+    friendsSendProgress.sent = 0;
+    friendsSendProgress.failed = 0;
+    friendsSendProgress.errorMessage = undefined;
+
+    const allChats = await whatsapp.getClient().getChats();
+    const { MessageMedia } = await import("whatsapp-web.js");
+
+    for (const contactId of contactIds) {
+      try {
+        const chat = allChats.find((c: any) => c.id._serialized === contactId);
+        if (!chat) {
+          console.log(`[friends-send] Chat not found for ${contactId}, skipping`);
+          friendsSendProgress.failed++;
+          continue;
+        }
+
+        if (media) {
+          const mediaObj = new MessageMedia(media.mimetype, media.base64, media.filename);
+          await chat.sendMessage(mediaObj, { caption: message });
+        } else {
+          await chat.sendMessage(message);
+        }
+
+        friendsSendProgress.sent++;
+        console.log(`[friends-send] Sent to "${chat.name}" (${friendsSendProgress.sent}/${friendsSendProgress.total})`);
+
+        // Small delay between sends to avoid rate-limiting
+        await new Promise(r => setTimeout(r, 2000));
+      } catch (err: any) {
+        console.error(`[friends-send] Failed for ${contactId}:`, err?.message || err);
+        friendsSendProgress.failed++;
+      }
+    }
+
+    friendsSendProgress.phase = "done";
+    friendsSendProgress.active = false;
+    setTimeout(() => { if (friendsSendProgress.phase === "done") friendsSendProgress.phase = "idle"; }, 15000);
+  };
+
+  appRouters.push({
+    path: "/api/friends",
+    router: createFriendsRouter(friendsStore, friendsScan, friendsBackfill, friendsSendMessage, friendsSendProgress),
   });
 
   startServer({

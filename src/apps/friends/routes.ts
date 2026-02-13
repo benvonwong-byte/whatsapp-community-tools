@@ -1,0 +1,248 @@
+import { Router, Request, Response } from "express";
+import { FriendsStore } from "./store";
+
+export interface SendProgress {
+  active: boolean;
+  phase: "idle" | "sending" | "done" | "error";
+  total: number;
+  sent: number;
+  failed: number;
+  errorMessage?: string;
+}
+
+export function createFriendsRouter(
+  store: FriendsStore,
+  scanTrigger: () => Promise<number>,
+  backfillTrigger: () => Promise<number>,
+  sendMessageTrigger: (
+    contactIds: string[],
+    message: string,
+    media: { base64: string; mimetype: string; filename: string } | null
+  ) => Promise<void>,
+  sendProgress: SendProgress
+): Router {
+  const router = Router();
+
+  // ── Dashboard ──
+
+  router.get("/dashboard", (_req: Request, res: Response) => {
+    const stats = store.getDashboardStats();
+    const weeklyVolume = store.getWeeklyVolume(12);
+    const neglected = store.getNeglectedContacts(30);
+    const topInitiators = store.getTopInitiators(10);
+    const health = store.getHealth();
+    res.json({ stats, weeklyVolume, neglected, topInitiators, health });
+  });
+
+  // ── Contacts ──
+
+  router.get("/contacts", (req: Request, res: Response) => {
+    let contacts = store.getContactsWithStats();
+
+    // Filter by group name
+    const groupFilter = req.query.group as string;
+    if (groupFilter) {
+      contacts = contacts.filter(c => c.group_names?.includes(groupFilter));
+    }
+
+    // Filter by minimum quality score
+    const minScore = parseInt(req.query.minScore as string);
+    if (!isNaN(minScore)) {
+      contacts = contacts.filter(c => c.quality_score >= minScore);
+    }
+
+    // Filter by search term
+    const search = (req.query.search as string || "").toLowerCase();
+    if (search) {
+      contacts = contacts.filter(c => c.name.toLowerCase().includes(search));
+    }
+
+    // Sort
+    const sort = (req.query.sort as string) || "last_seen";
+    const dir = req.query.dir === "asc" ? 1 : -1;
+    contacts.sort((a: any, b: any) => ((a[sort] ?? 0) - (b[sort] ?? 0)) * dir);
+
+    res.json(contacts);
+  });
+
+  router.get("/contacts/:id", (req: Request, res: Response) => {
+    const contact = store.getContact(decodeURIComponent(req.params.id as string));
+    if (!contact) { res.status(404).json({ error: "Contact not found" }); return; }
+
+    const now = Math.floor(Date.now() / 1000);
+    const ninetyDaysAgo = now - 90 * 86400;
+    const stats = store.getContactStats(contact.id, ninetyDaysAgo, now);
+    const groups = store.getContactGroups(contact.id);
+    res.json({ contact, stats, groups });
+  });
+
+  router.get("/contacts/:id/activity", (req: Request, res: Response) => {
+    const granularity = (req.query.granularity as string) || "week";
+    const activity = store.getContactActivity(
+      decodeURIComponent(req.params.id as string),
+      granularity as "day" | "week" | "month"
+    );
+    res.json(activity);
+  });
+
+  router.put("/contacts/:id/notes", (req: Request, res: Response) => {
+    store.updateContactNotes(decodeURIComponent(req.params.id as string), req.body.notes || "");
+    res.json({ ok: true });
+  });
+
+  // ── Chats ──
+
+  router.get("/chats", (_req: Request, res: Response) => {
+    res.json(store.getChats());
+  });
+
+  router.post("/chats/:chatId/monitor", (req: Request, res: Response) => {
+    store.setChatMonitored(decodeURIComponent(req.params.chatId as string), true);
+    res.json({ ok: true });
+  });
+
+  router.delete("/chats/:chatId/monitor", (req: Request, res: Response) => {
+    store.setChatMonitored(decodeURIComponent(req.params.chatId as string), false);
+    res.json({ ok: true });
+  });
+
+  router.post("/scan", async (_req: Request, res: Response) => {
+    try {
+      const count = await scanTrigger();
+      res.json({ ok: true, chatsFound: count });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || "Scan failed" });
+    }
+  });
+
+  // ── Groups ──
+
+  router.get("/groups", (_req: Request, res: Response) => {
+    const groups = store.getGroups();
+    const withMembers = groups.map(g => ({
+      ...g,
+      members: store.getGroupMembers(g.id),
+      memberCount: store.getGroupMembers(g.id).length,
+    }));
+    res.json(withMembers);
+  });
+
+  router.post("/groups", (req: Request, res: Response) => {
+    const { name, color } = req.body;
+    if (!name) { res.status(400).json({ error: "Name required" }); return; }
+    const id = store.createGroup(name, color || "#4fc3f7");
+    res.json({ ok: true, id });
+  });
+
+  router.put("/groups/:id", (req: Request, res: Response) => {
+    const { name, color, sort_order } = req.body;
+    store.updateGroup(parseInt(req.params.id as string), name, color, sort_order ?? 0);
+    res.json({ ok: true });
+  });
+
+  router.delete("/groups/:id", (req: Request, res: Response) => {
+    store.deleteGroup(parseInt(req.params.id as string));
+    res.json({ ok: true });
+  });
+
+  router.post("/groups/:id/members", (req: Request, res: Response) => {
+    const { contactIds } = req.body;
+    if (!Array.isArray(contactIds)) { res.status(400).json({ error: "contactIds array required" }); return; }
+    const groupId = parseInt(req.params.id as string);
+    for (const cid of contactIds) {
+      store.addContactToGroup(cid, groupId);
+    }
+    res.json({ ok: true, added: contactIds.length });
+  });
+
+  router.delete("/groups/:id/members/:contactId", (req: Request, res: Response) => {
+    store.removeContactFromGroup(
+      decodeURIComponent(req.params.contactId as string),
+      parseInt(req.params.id as string)
+    );
+    res.json({ ok: true });
+  });
+
+  // ── Messaging Portal ──
+
+  router.post("/send", async (req: Request, res: Response) => {
+    if (sendProgress.active) {
+      res.status(409).json({ error: "Send already in progress" });
+      return;
+    }
+
+    const { contactIds, groupIds, message, mediaBase64, mediaMimetype, mediaFilename } = req.body;
+    if (!message && !mediaBase64) {
+      res.status(400).json({ error: "Message or media required" });
+      return;
+    }
+
+    // Resolve all contact IDs (expand group IDs to member contacts)
+    let allContactIds: string[] = [...(contactIds || [])];
+    if (groupIds && Array.isArray(groupIds)) {
+      for (const gid of groupIds) {
+        const members = store.getGroupMembers(gid);
+        allContactIds.push(...members.map(m => m.id));
+      }
+    }
+    allContactIds = [...new Set(allContactIds)];
+
+    if (allContactIds.length === 0) {
+      res.status(400).json({ error: "No recipients selected" });
+      return;
+    }
+
+    const media = mediaBase64
+      ? { base64: mediaBase64, mimetype: mediaMimetype || "image/jpeg", filename: mediaFilename || "image.jpg" }
+      : null;
+
+    res.json({ ok: true, recipients: allContactIds.length });
+
+    sendMessageTrigger(allContactIds, message || "", media).catch((err: any) => {
+      console.error("[friends-send] Background error:", err);
+    });
+  });
+
+  router.get("/send-status", (_req: Request, res: Response) => {
+    res.json(sendProgress);
+  });
+
+  // ── Backfill ──
+
+  router.post("/backfill", async (_req: Request, res: Response) => {
+    try {
+      const count = await backfillTrigger();
+      res.json({ ok: true, messagesImported: count });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || "Backfill failed" });
+    }
+  });
+
+  // ── Settings ──
+
+  router.get("/settings", (_req: Request, res: Response) => {
+    res.json({
+      autoMonitorPrivate: store.getSetting("auto_monitor_private") || "true",
+      autoMonitorSmallGroups: store.getSetting("auto_monitor_small_groups") || "true",
+      maxGroupSize: store.getSetting("max_group_size") || "6",
+    });
+  });
+
+  router.post("/settings", (req: Request, res: Response) => {
+    const allowed = ["auto_monitor_private", "auto_monitor_small_groups", "max_group_size"];
+    for (const [key, value] of Object.entries(req.body)) {
+      if (allowed.includes(key) && typeof value === "string") {
+        store.setSetting(key, value);
+      }
+    }
+    res.json({ ok: true });
+  });
+
+  // ── Health ──
+
+  router.get("/health", (_req: Request, res: Response) => {
+    res.json(store.getHealth());
+  });
+
+  return router;
+}
