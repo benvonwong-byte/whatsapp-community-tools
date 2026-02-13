@@ -125,7 +125,9 @@ export class WhatsAppClient {
       console.log(`[state] WhatsApp state: ${state}`);
     });
 
-    this.client.on("message", async (msg: Message) => {
+    // message_create fires for BOTH incoming AND outgoing messages
+    // Raw listeners (relationship, friends, metacrisis) need outgoing messages too
+    this.client.on("message_create", async (msg: Message) => {
       try {
         const chat = await msg.getChat();
 
@@ -134,14 +136,16 @@ export class WhatsAppClient {
           try {
             await listener(msg, chat);
           } catch (err) {
-            console.error("[message] Error in raw listener:", err);
+            console.error("[message_create] Error in raw listener:", err);
           }
         }
 
-        // Existing event scraper buffer logic
-        await this.handleMessage(msg, chat);
+        // Existing event scraper only cares about incoming messages
+        if (!msg.fromMe) {
+          await this.handleMessage(msg, chat);
+        }
       } catch (err) {
-        console.error("[message] Error handling message:", err);
+        console.error("[message_create] Error handling message:", err);
       }
     });
   }

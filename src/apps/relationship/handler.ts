@@ -52,21 +52,10 @@ export function createRelationshipHandler(store: RelationshipStore) {
     // Determine speaker
     const speaker = msg.fromMe ? "self" : "hope";
 
-    // Handle text messages
-    if (msg.body && msg.body.trim() !== "") {
-      store.saveMessage({
-        id: msg.id._serialized,
-        speaker,
-        body: msg.body,
-        transcript: "",
-        timestamp: msg.timestamp,
-        type: "text",
-      });
-      console.log(`[relationship] Text from ${speaker}: ${msg.body.slice(0, 60)}...`);
-    }
+    const msgType = (msg.type as string) || "chat";
 
     // Handle voice notes (ptt = push-to-talk)
-    if (msg.hasMedia && (msg.type as string) === "ptt") {
+    if (msg.hasMedia && msgType === "ptt") {
       try {
         const media = await msg.downloadMedia();
         if (media) {
@@ -80,10 +69,10 @@ export function createRelationshipHandler(store: RelationshipStore) {
             type: "voice",
           });
           console.log(`[relationship] Voice from ${speaker}: "${transcript.slice(0, 60)}..."`);
+          return;
         }
       } catch (err: any) {
         console.error(`[relationship] Voice note failed:`, err?.message || err);
-        // Save a placeholder so we know the voice note existed
         store.saveMessage({
           id: msg.id._serialized,
           speaker,
@@ -92,7 +81,37 @@ export function createRelationshipHandler(store: RelationshipStore) {
           timestamp: msg.timestamp,
           type: "voice",
         });
+        return;
       }
+    }
+
+    // Handle text messages (including captions on media)
+    if (msg.body && msg.body.trim() !== "") {
+      store.saveMessage({
+        id: msg.id._serialized,
+        speaker,
+        body: msg.body,
+        transcript: "",
+        timestamp: msg.timestamp,
+        type: "text",
+      });
+      console.log(`[relationship] Text from ${speaker}: ${msg.body.slice(0, 60)}...`);
+      return;
+    }
+
+    // Handle media without text (images, videos, stickers, etc.)
+    // Save a placeholder so the message count and "last message" timestamp stay current
+    if (msg.hasMedia || msgType === "sticker" || msgType === "image" || msgType === "video" || msgType === "document") {
+      const label = msgType === "sticker" ? "[sticker]" : `[${msgType}]`;
+      store.saveMessage({
+        id: msg.id._serialized,
+        speaker,
+        body: label,
+        transcript: "",
+        timestamp: msg.timestamp,
+        type: "media",
+      });
+      console.log(`[relationship] Media (${msgType}) from ${speaker}`);
     }
   };
 }
