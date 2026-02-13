@@ -250,6 +250,108 @@
     .error-state { text-align: center; padding: 40px 20px; color: var(--red); font-size: 14px; }
     .hidden { display: none !important; }
 
+    /* Action Card */
+    .action-card {
+      background: linear-gradient(135deg, #1a2a1a, #1e1e1e);
+      border: 1px solid var(--green);
+      border-left: 4px solid var(--green);
+    }
+    .action-card-label {
+      font-size: 10px; text-transform: uppercase; letter-spacing: 1px;
+      color: var(--green); font-weight: 600; margin-bottom: 8px;
+    }
+    .action-card-text {
+      font-size: 16px; font-weight: 500; line-height: 1.5; color: var(--text);
+    }
+    .action-card-context {
+      font-size: 11px; color: var(--text-dim); margin-top: 8px; line-height: 1.4;
+    }
+
+    /* Emotional Bank Account */
+    .bank-layout { display: flex; align-items: center; gap: 24px; }
+    .bank-visual { text-align: center; min-width: 160px; }
+    .bank-ratio { font-size: 36px; font-weight: 800; }
+    .bank-ratio.healthy { color: var(--green); }
+    .bank-ratio.watch { color: var(--yellow); }
+    .bank-ratio.overdrawn { color: var(--red); }
+    .bank-status {
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+      padding: 2px 10px; border-radius: 999px; display: inline-block; margin-top: 4px;
+    }
+    .bank-status.healthy { background: rgba(0,184,148,0.15); color: var(--green); }
+    .bank-status.watch { background: rgba(253,203,110,0.15); color: var(--yellow); }
+    .bank-status.overdrawn { background: rgba(214,48,49,0.15); color: var(--red); }
+    .bank-details { flex: 1; }
+    .bank-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; font-size: 14px; }
+    .bank-icon {
+      width: 24px; height: 24px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 16px;
+    }
+    .bank-row.deposits .bank-icon { background: rgba(0,184,148,0.2); color: var(--green); }
+    .bank-row.withdrawals .bank-icon { background: rgba(214,48,49,0.2); color: var(--red); }
+    .bank-label { flex: 1; color: var(--text-dim); }
+    .bank-count { font-size: 20px; font-weight: 700; color: var(--text); }
+    .bank-target { font-size: 10px; color: var(--text-dim); margin-top: 8px; }
+
+    /* Connection Grid */
+    .connection-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+    .connection-grid .section { margin-bottom: 0; }
+
+    /* Bids */
+    .bid-bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .bid-label { font-size: 11px; width: 50px; color: var(--text-dim); }
+    .bid-bar-bg { flex: 1; height: 6px; background: var(--surface2); border-radius: 3px; overflow: hidden; }
+    .bid-bar-fill { height: 100%; border-radius: 3px; transition: width 0.4s; }
+    .bid-bar-fill.toward { background: var(--green); }
+    .bid-bar-fill.away { background: var(--yellow); }
+    .bid-bar-fill.against { background: var(--red); }
+    .bid-value { font-size: 11px; color: var(--text-dim); width: 24px; text-align: right; }
+    .bid-summary { font-size: 10px; color: var(--text-dim); margin-top: 6px; line-height: 1.4; }
+
+    /* Pursue-Withdraw */
+    .pursue-pattern { font-size: 18px; font-weight: 700; text-align: center; padding: 16px 0 8px; }
+    .pursue-pattern.balanced { color: var(--green); }
+    .pursue-pattern.pursuing { color: var(--yellow); }
+    .pursue-pattern.withdrawal { color: var(--red); }
+    .pursue-description { font-size: 11px; color: var(--text-dim); text-align: center; line-height: 1.4; }
+
+    /* Balance */
+    .balance-item { margin-bottom: 10px; }
+    .balance-label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+    .balance-values { font-size: 12px; color: var(--text); }
+
+    /* Recommendations */
+    .recs-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+    .rec-column {}
+    .rec-header {
+      font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+      padding-bottom: 8px; border-bottom: 2px solid var(--border); margin-bottom: 8px;
+    }
+    .rec-header.ben { color: var(--accent); border-color: var(--accent); }
+    .rec-header.hope { color: var(--pink); border-color: var(--pink); }
+    .rec-header.both { color: var(--green); border-color: var(--green); }
+    .rec-list { list-style: none; padding: 0; margin: 0; }
+    .rec-list li {
+      font-size: 12px; line-height: 1.5; color: var(--text);
+      padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+    .rec-list li:last-child { border-bottom: none; }
+
+    /* Score + Trend row */
+    .score-trend-row { display: grid; grid-template-columns: 280px 1fr; gap: 10px; margin-bottom: 14px; }
+    .score-compact { margin-bottom: 0; }
+    .trend-compact { margin-bottom: 0; }
+
+    /* Collapsible metrics */
+    .collapsible-section { }
+    .collapsible-body { display: none; margin-top: 14px; }
+    .collapsible-body.open { display: block; }
+    .section-title.clickable { cursor: pointer; display: flex; align-items: center; gap: 6px; user-select: none; }
+    .section-title.clickable:hover { color: var(--text); }
+    .collapse-arrow { font-size: 8px; transition: transform 0.2s; display: inline-block; }
+    .collapse-arrow.open { transform: rotate(90deg); }
+
     /* Responsive */
     @media (max-width: 768px) {
       .stats-grid { grid-template-columns: repeat(2, 1fr); }
@@ -261,6 +363,10 @@
       .health-score-number { font-size: 44px; }
       .toolbar { gap: 8px; }
       .perel-gauges { flex-wrap: wrap; }
+      .connection-grid { grid-template-columns: 1fr; }
+      .recs-grid { grid-template-columns: 1fr; }
+      .score-trend-row { grid-template-columns: 1fr; }
+      .bank-layout { flex-direction: column; }
     }
   </style>
 </head>
@@ -296,7 +402,7 @@
 
     <div id="dashboard" class="hidden">
 
-      <!-- Compact toolbar: monitor + date range + actions -->
+      <!-- 1. Toolbar (UNCHANGED) -->
       <div class="toolbar">
         <span id="monitor-dot" class="monitor-dot red"></span>
         <span id="monitor-last-msg" class="monitor-item">Last: <strong>--</strong></span>
@@ -316,89 +422,182 @@
         </div>
       </div>
 
-      <!-- Stats -->
-      <div class="stats-grid">
-        <div class="stat-card">
-          <div class="stat-value" id="stat-total-messages">0</div>
-          <div class="stat-label">Messages</div>
-          <canvas id="spark-messages" class="sparkline"></canvas>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value" id="stat-voice-minutes">0</div>
-          <div class="stat-label">Voice Min</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value" id="stat-days-tracked">0</div>
-          <div class="stat-label">Days Tracked</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value" id="stat-avg-per-day">0</div>
-          <div class="stat-label">Avg / Day</div>
-          <canvas id="spark-health" class="sparkline"></canvas>
+      <!-- 2. Action Card -->
+      <div class="section action-card" id="action-card-section">
+        <div class="action-card-label">What to do next</div>
+        <div class="action-card-text" id="action-card-text">Run an analysis to get your first recommendation.</div>
+        <div class="action-card-context" id="action-card-context"></div>
+      </div>
+
+      <!-- 3. Emotional Bank Account -->
+      <div class="section" id="bank-account-section">
+        <div class="section-title">Emotional Bank Account</div>
+        <div class="bank-layout">
+          <div class="bank-visual">
+            <div class="bank-ratio" id="bank-ratio">--</div>
+            <div class="bank-status" id="bank-status">No data</div>
+          </div>
+          <div class="bank-details">
+            <div class="bank-row deposits">
+              <span class="bank-icon">+</span>
+              <span class="bank-label">Deposits</span>
+              <span class="bank-count" id="bank-deposits">0</span>
+            </div>
+            <div class="bank-row withdrawals">
+              <span class="bank-icon">&minus;</span>
+              <span class="bank-label">Withdrawals</span>
+              <span class="bank-count" id="bank-withdrawals">0</span>
+            </div>
+            <div class="bank-target">Gottman target: 5:1 ratio</div>
+          </div>
         </div>
       </div>
 
-      <!-- Message ratio -->
-      <div class="ratio-bar-container">
-        <div class="ratio-label">
-          <span id="ratio-left-label">Ben: 50%</span>
-          <span id="ratio-right-label">Hope: 50%</span>
-        </div>
-        <div class="ratio-bar">
-          <div id="ratio-fill-left" class="ratio-fill-left" style="width: 50%"></div>
-          <div id="ratio-fill-right" class="ratio-fill-right" style="width: 50%"></div>
-        </div>
-      </div>
-
-      <!-- Latest Analysis: score + radar chart -->
-      <div class="section" id="analysis-section">
-        <div class="section-title">Latest Analysis</div>
-        <div class="analysis-layout">
-          <div class="analysis-left">
-            <div class="health-score-display">
-              <div id="health-score" class="health-score-number">--</div>
-              <div>
-                <div id="health-summary" class="health-summary">No analysis available yet. Click "Analyze Now" to generate one.</div>
-                <div id="health-date" class="health-date"></div>
+      <!-- 4. Connection Patterns (3-column grid) -->
+      <div class="connection-grid">
+        <!-- Bids for Connection -->
+        <div class="section" id="bids-section">
+          <div class="section-title">Bids for Connection</div>
+          <div id="bids-content">
+            <div class="bid-bars">
+              <div class="bid-bar-row">
+                <span class="bid-label">Toward</span>
+                <div class="bid-bar-bg"><div class="bid-bar-fill toward" id="bid-toward-fill"></div></div>
+                <span class="bid-value" id="bid-toward-val">0</span>
+              </div>
+              <div class="bid-bar-row">
+                <span class="bid-label">Away</span>
+                <div class="bid-bar-bg"><div class="bid-bar-fill away" id="bid-away-fill"></div></div>
+                <span class="bid-value" id="bid-away-val">0</span>
+              </div>
+              <div class="bid-bar-row">
+                <span class="bid-label">Against</span>
+                <div class="bid-bar-bg"><div class="bid-bar-fill against" id="bid-against-fill"></div></div>
+                <span class="bid-value" id="bid-against-val">0</span>
               </div>
             </div>
+            <div class="bid-summary" id="bid-summary"></div>
           </div>
-          <div class="analysis-right">
-            <div class="radar-chart-container">
-              <canvas id="radar-chart"></canvas>
+        </div>
+        <!-- Pursue-Withdraw -->
+        <div class="section" id="pursue-section">
+          <div class="section-title">Pursue-Withdraw</div>
+          <div class="pursue-pattern" id="pursue-pattern">--</div>
+          <div class="pursue-description" id="pursue-description"></div>
+        </div>
+        <!-- Communication Balance -->
+        <div class="section" id="balance-section">
+          <div class="section-title">Communication Balance</div>
+          <div id="balance-content">
+            <div class="balance-item">
+              <div class="ratio-label">
+                <span id="bal-ratio-left">Ben: 50%</span>
+                <span id="bal-ratio-right">Hope: 50%</span>
+              </div>
+              <div class="ratio-bar">
+                <div id="bal-ratio-fill-left" class="ratio-fill-left" style="width:50%"></div>
+                <div id="bal-ratio-fill-right" class="ratio-fill-right" style="width:50%"></div>
+              </div>
+            </div>
+            <div class="balance-item">
+              <div class="balance-label">Initiates conversations</div>
+              <div class="balance-values" id="initiator-stats">--</div>
+            </div>
+            <div class="balance-item">
+              <div class="balance-label">Avg response time</div>
+              <div class="balance-values" id="response-time-stats">--</div>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- Gottman metrics: horsemen + positives side by side -->
-      <div class="metrics-grid">
-        <div class="section" id="horsemen-section">
-          <div class="section-title">Four Horsemen (lower is better)</div>
-          <div id="horsemen-bars"></div>
-        </div>
-        <div class="section" id="positives-section">
-          <div class="section-title">Positives (higher is better)</div>
-          <div id="positives-bars"></div>
-        </div>
-      </div>
-
-      <!-- Perel Dimensions: gauges -->
-      <div class="section" id="perel-section">
-        <div class="section-title">Perel Dimensions</div>
-        <div id="perel-gauges" class="perel-gauges"></div>
-      </div>
-
-      <!-- Health Score Trend Chart -->
-      <div class="section">
-        <div class="section-title">Health Score Trend</div>
-        <div class="chart-container">
-          <canvas id="trend-chart"></canvas>
-          <div id="chart-empty" class="chart-empty hidden">Not enough data for a trend chart yet.</div>
+      <!-- 5. Recommendations (3-column grid) -->
+      <div class="section" id="recommendations-section">
+        <div class="section-title">Specific Recommendations</div>
+        <div class="recs-grid">
+          <div class="rec-column">
+            <div class="rec-header ben">For Ben</div>
+            <ul class="rec-list" id="recs-ben"></ul>
+          </div>
+          <div class="rec-column">
+            <div class="rec-header hope">For Hope</div>
+            <ul class="rec-list" id="recs-hope"></ul>
+          </div>
+          <div class="rec-column">
+            <div class="rec-header both">Together</div>
+            <ul class="rec-list" id="recs-both"></ul>
+          </div>
         </div>
       </div>
 
-      <!-- Daily Cards -->
+      <!-- 6. Health Score + Trend (side by side) -->
+      <div class="score-trend-row">
+        <div class="section score-compact" id="analysis-section">
+          <div class="section-title">Health Score</div>
+          <div class="health-score-display">
+            <div id="health-score" class="health-score-number">--</div>
+            <div>
+              <div id="health-summary" class="health-summary">No analysis yet.</div>
+              <div id="health-date" class="health-date"></div>
+            </div>
+          </div>
+        </div>
+        <div class="section trend-compact">
+          <div class="section-title">Trend</div>
+          <div class="chart-container" style="height: 120px;">
+            <canvas id="trend-chart"></canvas>
+            <div id="chart-empty" class="chart-empty hidden">Not enough data yet.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 7. Detailed Metrics (collapsed by default) -->
+      <div class="section collapsible-section" id="detailed-metrics-section">
+        <div class="section-title clickable" id="metrics-toggle">
+          Detailed Metrics <span id="metrics-toggle-arrow" class="collapse-arrow">&#9654;</span>
+        </div>
+        <div id="detailed-metrics-body" class="collapsible-body">
+          <div class="stats-grid" style="margin-bottom:14px">
+            <div class="stat-card">
+              <div class="stat-value" id="stat-total-messages">0</div>
+              <div class="stat-label">Messages</div>
+              <canvas id="spark-messages" class="sparkline"></canvas>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value" id="stat-voice-minutes">0</div>
+              <div class="stat-label">Voice Min</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value" id="stat-days-tracked">0</div>
+              <div class="stat-label">Days Tracked</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value" id="stat-avg-per-day">0</div>
+              <div class="stat-label">Avg / Day</div>
+              <canvas id="spark-health" class="sparkline"></canvas>
+            </div>
+          </div>
+          <div class="radar-chart-container" style="text-align:center;margin-bottom:14px">
+            <canvas id="radar-chart"></canvas>
+          </div>
+          <div class="metrics-grid">
+            <div class="section" id="horsemen-section" style="margin-bottom:0">
+              <div class="section-title">Four Horsemen (lower is better)</div>
+              <div id="horsemen-bars"></div>
+            </div>
+            <div class="section" id="positives-section" style="margin-bottom:0">
+              <div class="section-title">Positives (higher is better)</div>
+              <div id="positives-bars"></div>
+            </div>
+          </div>
+          <div style="margin-top:14px">
+            <div class="section-title">Perel Dimensions</div>
+            <div id="perel-gauges" class="perel-gauges"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 8. Daily History (UNCHANGED) -->
       <div class="section">
         <div class="section-title">Daily Analyses</div>
         <div id="daily-cards"></div>

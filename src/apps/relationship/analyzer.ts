@@ -65,9 +65,33 @@ ANALYSIS FRAMEWORKS:
    - Ratio of message volume (Ben vs Hope)
    - Emotional tone (positive, neutral, negative, mixed)
 
-5. **Overall Health Score** (0-100): composite assessment
+5. **Emotional Bank Account** (Gottman):
+   - Count distinct "deposits": expressions of affection, appreciation, humor, interest, support, agreement, empathy, encouragement
+   - Count distinct "withdrawals": criticism, complaint, dismissal, sarcasm, ignoring, negativity, hostility
+   - Calculate ratio: deposits / max(withdrawals, 1)
+   - Status: "healthy" if ratio >= 5.0, "watch" if ratio >= 2.0, "overdrawn" if < 2.0
 
-6. **Evidence**: For each metric, provide 1-2 direct quotes or short paraphrases from the conversation that best illustrate why you gave that score. If a metric scores 0 (absent), use an empty array. Keep each quote under 120 characters.
+6. **Bids for Connection**:
+   - A "bid" is any attempt to get the other's attention, affirmation, or engagement (question, sharing something, request for input, phatic expression like "look at this")
+   - Count bids made by Ben and by Hope
+   - For each bid, classify the response: "toward" (engaged positively), "away" (ignored or missed), "against" (hostile rejection)
+   - Count total turned toward, turned away, turned against
+
+7. **Pursue-Withdraw Pattern** (Sue Johnson / EFT):
+   - Detect if one person consistently initiates, pushes for engagement, or escalates while the other withdraws, gives brief responses, or disengages
+   - Pattern: "balanced", "ben-pursues", "hope-pursues", or "mutual-withdrawal"
+   - Provide a one-sentence description of the dynamic observed
+
+8. **Actionable Recommendations**:
+   - Based on ALL the above analysis, provide specific, concrete, actionable suggestions
+   - For Ben: 1-3 things Ben could do differently tomorrow based on today's observed patterns
+   - For Hope: 1-3 things Hope could do differently
+   - For both: 1-2 shared activities or practices to try together
+   - Each recommendation MUST reference a specific observed pattern from this conversation (not generic relationship advice)
+
+9. **Overall Health Score** (0-100): composite assessment
+
+10. **Evidence**: For each metric, provide 1-2 direct quotes or short paraphrases from the conversation that best illustrate why you gave that score. If a metric scores 0 (absent), use an empty array. Keep each quote under 120 characters.
 
 Respond with ONLY a JSON object (no markdown):
 {
@@ -84,6 +108,28 @@ Respond with ONLY a JSON object (no markdown):
     "autonomyTogetherness": <0-10>,
     "overallHealthScore": <0-100>,
     "emotionalTone": "positive" | "neutral" | "negative" | "mixed"
+  },
+  "emotionalBankAccount": {
+    "deposits": <integer count>,
+    "withdrawals": <integer count>,
+    "ratio": <float>,
+    "status": "healthy" | "watch" | "overdrawn"
+  },
+  "bids": {
+    "benMade": <integer>,
+    "hopeMade": <integer>,
+    "turnedToward": <integer>,
+    "turnedAway": <integer>,
+    "turnedAgainst": <integer>
+  },
+  "pursueWithdraw": {
+    "pattern": "balanced" | "ben-pursues" | "hope-pursues" | "mutual-withdrawal",
+    "description": "<one sentence describing the observed dynamic>"
+  },
+  "recommendations": {
+    "forBen": ["specific action referencing today's pattern..."],
+    "forHope": ["specific action referencing today's pattern..."],
+    "forBoth": ["shared practice or activity..."]
   },
   "evidence": {
     "criticism": ["quote or paraphrase...", "..."],
@@ -182,10 +228,14 @@ export async function runDailyAnalysis(
     const voiceCount = messages.filter((m) => m.type === "voice").length;
     const estimatedVoiceMinutes = voiceCount * 0.5;
 
-    // Store metrics + evidence together in metrics_json
+    // Store metrics + evidence + new analysis fields together in metrics_json
     const metricsWithEvidence = {
       ...parsed.metrics,
       evidence: parsed.evidence || {},
+      emotionalBankAccount: parsed.emotionalBankAccount || null,
+      bids: parsed.bids || null,
+      pursueWithdraw: parsed.pursueWithdraw || null,
+      recommendations: parsed.recommendations || null,
     };
 
     store.saveAnalysis(

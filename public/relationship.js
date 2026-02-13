@@ -84,6 +84,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupAnalyzeButton();
   setupBackfillButton();
   setupImportButton();
+  setupMetricsToggle();
   loadDashboard();
   refreshTimer = setInterval(loadDashboard, 60000);
 });
@@ -312,15 +313,20 @@ function renderDashboard() {
 
   const d = dashboardData;
   renderMonitorBar(d);
+  renderActionCard(d);
+  renderBankAccount(d);
+  renderBids(d);
+  renderPursueWithdraw(d);
+  renderCommunicationBalance(d);
+  renderRecommendations(d);
+  renderLatestAnalysis(d);
+  renderTrendChart(d);
   renderStats(d);
   renderSparklines(d);
-  renderRatio(d);
-  renderLatestAnalysis(d);
   renderRadarChart(d);
   renderHorsemen(d);
   renderPositives(d);
   renderPerelGauges(d);
-  renderTrendChart(d);
   renderDailyCards(d);
 }
 
@@ -391,20 +397,6 @@ function drawSparkline(id, data, color) {
     if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
   });
   ctx.stroke();
-}
-
-// ── Message Ratio ──
-
-function renderRatio(d) {
-  const r = d.stats?.messageRatio || {};
-  const ben = r.benPercent ?? 50;
-  const hope = r.hopePercent ?? 50;
-  const ll = $("ratio-left-label"), rl = $("ratio-right-label");
-  const lf = $("ratio-fill-left"), rf = $("ratio-fill-right");
-  if (ll) ll.textContent = `Ben: ${Math.round(ben)}%`;
-  if (rl) rl.textContent = `Hope: ${Math.round(hope)}%`;
-  if (lf) lf.style.width = ben + "%";
-  if (rf) rf.style.width = hope + "%";
 }
 
 // ── Latest Analysis ──
@@ -847,6 +839,218 @@ async function toggleDailyCard(card) {
   } catch (err) {
     messagesEl.innerHTML = `<div class="loading-messages" style="color:var(--red)">Failed: ${escapeHtml(err.message)}</div>`;
   }
+}
+
+// ── Action-Oriented Dashboard Renderers ──
+
+function renderActionCard(d) {
+  const textEl = $("action-card-text");
+  const ctxEl = $("action-card-context");
+  if (!textEl || !ctxEl) return;
+
+  const a = d.latestAnalysis;
+  if (!a || !a.recommendations) {
+    textEl.textContent = 'Run an analysis to get your first recommendation.';
+    ctxEl.textContent = '';
+    return;
+  }
+
+  const recs = a.recommendations;
+  var primary = '';
+  var context = '';
+
+  if (a.emotionalBankAccount && a.emotionalBankAccount.status === 'overdrawn') {
+    primary = (recs.forBoth && recs.forBoth[0]) || (recs.forBen && recs.forBen[0]) || 'Keep connecting!';
+    context = 'Your emotional bank account is overdrawn (ratio: ' + a.emotionalBankAccount.ratio.toFixed(1) + '). Focus on deposits.';
+  } else if (a.pursueWithdraw && a.pursueWithdraw.pattern !== 'balanced') {
+    primary = (recs.forBen && recs.forBen[0]) || (recs.forBoth && recs.forBoth[0]) || '';
+    context = a.pursueWithdraw.description || '';
+  } else {
+    primary = (recs.forBen && recs.forBen[0]) || (recs.forBoth && recs.forBoth[0]) || 'Things look good. Keep it up!';
+    context = a.summary ? 'Based on: ' + a.summary.split('.')[0] + '.' : '';
+  }
+
+  textEl.textContent = primary;
+  ctxEl.textContent = context;
+}
+
+function renderBankAccount(d) {
+  const a = d.latestAnalysis;
+  const bank = a ? a.emotionalBankAccount : null;
+  const ratioEl = $("bank-ratio");
+  const statusEl = $("bank-status");
+  const depEl = $("bank-deposits");
+  const withEl = $("bank-withdrawals");
+
+  if (!ratioEl) return;
+
+  if (!bank) {
+    ratioEl.textContent = "--";
+    ratioEl.className = "bank-ratio";
+    if (statusEl) { statusEl.textContent = "No data"; statusEl.className = "bank-status"; }
+    if (depEl) depEl.textContent = "0";
+    if (withEl) withEl.textContent = "0";
+    return;
+  }
+
+  ratioEl.textContent = bank.ratio.toFixed(1) + ":1";
+  ratioEl.className = "bank-ratio " + bank.status;
+  if (statusEl) {
+    statusEl.textContent = bank.status === "healthy" ? "Healthy" : bank.status === "watch" ? "Watch" : "Overdrawn";
+    statusEl.className = "bank-status " + bank.status;
+  }
+  if (depEl) depEl.textContent = String(bank.deposits);
+  if (withEl) withEl.textContent = String(bank.withdrawals);
+}
+
+function renderBids(d) {
+  const bids = d.latestAnalysis ? d.latestAnalysis.bids : null;
+  const towardFill = $("bid-toward-fill");
+  const awayFill = $("bid-away-fill");
+  const againstFill = $("bid-against-fill");
+  const towardVal = $("bid-toward-val");
+  const awayVal = $("bid-away-val");
+  const againstVal = $("bid-against-val");
+  const summaryEl = $("bid-summary");
+
+  if (!towardFill) return;
+
+  if (!bids) {
+    if (towardFill) towardFill.style.width = "0%";
+    if (awayFill) awayFill.style.width = "0%";
+    if (againstFill) againstFill.style.width = "0%";
+    if (towardVal) towardVal.textContent = "0";
+    if (awayVal) awayVal.textContent = "0";
+    if (againstVal) againstVal.textContent = "0";
+    if (summaryEl) summaryEl.textContent = "";
+    return;
+  }
+
+  var total = (bids.turnedToward || 0) + (bids.turnedAway || 0) + (bids.turnedAgainst || 0);
+  var maxVal = Math.max(total, 1);
+
+  if (towardFill) towardFill.style.width = ((bids.turnedToward || 0) / maxVal * 100) + "%";
+  if (awayFill) awayFill.style.width = ((bids.turnedAway || 0) / maxVal * 100) + "%";
+  if (againstFill) againstFill.style.width = ((bids.turnedAgainst || 0) / maxVal * 100) + "%";
+
+  if (towardVal) towardVal.textContent = String(bids.turnedToward || 0);
+  if (awayVal) awayVal.textContent = String(bids.turnedAway || 0);
+  if (againstVal) againstVal.textContent = String(bids.turnedAgainst || 0);
+
+  if (summaryEl) {
+    var totalBids = (bids.benMade || 0) + (bids.hopeMade || 0);
+    var towardPct = total > 0 ? Math.round((bids.turnedToward || 0) / total * 100) : 0;
+    summaryEl.textContent = totalBids + ' bids total (Ben: ' + (bids.benMade || 0) + ', Hope: ' + (bids.hopeMade || 0) + '). ' + towardPct + '% turned toward.';
+  }
+}
+
+function renderPursueWithdraw(d) {
+  const patternEl = $("pursue-pattern");
+  const descEl = $("pursue-description");
+  if (!patternEl) return;
+
+  const pw = d.latestAnalysis ? d.latestAnalysis.pursueWithdraw : null;
+  if (!pw) {
+    patternEl.textContent = "--";
+    patternEl.className = "pursue-pattern";
+    if (descEl) descEl.textContent = "";
+    return;
+  }
+
+  var labels = {
+    "balanced": "Balanced",
+    "ben-pursues": "Ben Pursues",
+    "hope-pursues": "Hope Pursues",
+    "mutual-withdrawal": "Mutual Withdrawal",
+  };
+  var cls = {
+    "balanced": "balanced",
+    "ben-pursues": "pursuing",
+    "hope-pursues": "pursuing",
+    "mutual-withdrawal": "withdrawal",
+  };
+
+  patternEl.textContent = labels[pw.pattern] || pw.pattern;
+  patternEl.className = "pursue-pattern " + (cls[pw.pattern] || "");
+  if (descEl) descEl.textContent = pw.description || "";
+}
+
+function renderCommunicationBalance(d) {
+  // Message ratio
+  var r = d.stats ? d.stats.messageRatio : null;
+  var ben = r ? (r.benPercent || 50) : 50;
+  var hope = r ? (r.hopePercent || 50) : 50;
+  var ll = $("bal-ratio-left"), rl = $("bal-ratio-right");
+  var lf = $("bal-ratio-fill-left"), rf = $("bal-ratio-fill-right");
+  if (ll) ll.textContent = 'Ben: ' + Math.round(ben) + '%';
+  if (rl) rl.textContent = 'Hope: ' + Math.round(hope) + '%';
+  if (lf) lf.style.width = ben + "%";
+  if (rf) rf.style.width = hope + "%";
+
+  // Initiator stats
+  var initEl = $("initiator-stats");
+  if (initEl) {
+    var inits = (d.stats && d.stats.initiators) || {};
+    var benInits = inits.self || 0;
+    var hopeInits = inits.hope || 0;
+    initEl.innerHTML = '<span style="color:var(--accent)">Ben: ' + benInits + '</span> &middot; <span style="color:var(--pink)">Hope: ' + hopeInits + '</span>';
+  }
+
+  // Response times
+  var rtEl = $("response-time-stats");
+  if (rtEl) {
+    var rt = (d.stats && d.stats.responseTimes) || {};
+    function fmtTime(sec) {
+      if (!sec) return "--";
+      if (sec < 60) return sec + "s";
+      if (sec < 3600) return Math.round(sec / 60) + "m";
+      return (sec / 3600).toFixed(1) + "h";
+    }
+    var benAvg = fmtTime(rt.self ? rt.self.avgSec : null);
+    var hopeAvg = fmtTime(rt.hope ? rt.hope.avgSec : null);
+    rtEl.innerHTML = '<span style="color:var(--accent)">Ben: ' + benAvg + '</span> &middot; <span style="color:var(--pink)">Hope: ' + hopeAvg + '</span>';
+  }
+}
+
+function renderRecommendations(d) {
+  var benEl = $("recs-ben");
+  var hopeEl = $("recs-hope");
+  var bothEl = $("recs-both");
+  var section = $("recommendations-section");
+  if (!benEl) return;
+
+  var recs = d.latestAnalysis ? d.latestAnalysis.recommendations : null;
+
+  if (!recs) {
+    if (section) section.classList.add("hidden");
+    return;
+  }
+  if (section) section.classList.remove("hidden");
+
+  function renderList(el, items) {
+    if (!el) return;
+    if (!items || items.length === 0) {
+      el.innerHTML = '<li style="color:var(--text-dim)">No specific suggestions</li>';
+      return;
+    }
+    el.innerHTML = items.map(function(item) { return '<li>' + escapeHtml(item) + '</li>'; }).join("");
+  }
+
+  renderList(benEl, recs.forBen);
+  renderList(hopeEl, recs.forHope);
+  renderList(bothEl, recs.forBoth);
+}
+
+function setupMetricsToggle() {
+  var toggle = $("metrics-toggle");
+  if (!toggle) return;
+  toggle.addEventListener("click", function() {
+    var body = $("detailed-metrics-body");
+    var arrow = $("metrics-toggle-arrow");
+    if (!body) return;
+    body.classList.toggle("open");
+    if (arrow) arrow.classList.toggle("open");
+  });
 }
 
 // ── Utilities ──

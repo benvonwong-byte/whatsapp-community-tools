@@ -39,6 +39,9 @@ export class RelationshipStore {
     getAnalysesByRange: Database.Statement;
     getLastTimestamp: Database.Statement;
     getTodayCount: Database.Statement;
+    getInitiatorStats: Database.Statement;
+    getResponseTimes: Database.Statement;
+    getVolumeByDay: Database.Statement;
   };
 
   constructor() {
@@ -129,6 +132,50 @@ export class RelationshipStore {
       getTodayCount: this.db.prepare(
         `SELECT COUNT(*) as count FROM relationship_messages WHERE date(datetime(timestamp, 'unixepoch')) = date('now')`
       ),
+      getInitiatorStats: this.db.prepare(`
+        WITH gaps AS (
+          SELECT
+            speaker,
+            timestamp,
+            LAG(timestamp) OVER (ORDER BY timestamp) as prev_ts
+          FROM relationship_messages
+          WHERE timestamp >= ? AND timestamp <= ?
+        )
+        SELECT speaker, COUNT(*) as initiations
+        FROM gaps
+        WHERE (timestamp - COALESCE(prev_ts, 0)) > 7200
+        GROUP BY speaker
+      `),
+      getResponseTimes: this.db.prepare(`
+        WITH ordered AS (
+          SELECT
+            speaker,
+            timestamp,
+            LAG(speaker) OVER (ORDER BY timestamp) as prev_speaker,
+            LAG(timestamp) OVER (ORDER BY timestamp) as prev_ts
+          FROM relationship_messages
+          WHERE timestamp >= ? AND timestamp <= ?
+        )
+        SELECT
+          speaker,
+          AVG(timestamp - prev_ts) as avg_response_sec,
+          COUNT(*) as responses
+        FROM ordered
+        WHERE speaker != prev_speaker
+          AND (timestamp - prev_ts) < 7200
+          AND (timestamp - prev_ts) > 0
+        GROUP BY speaker
+      `),
+      getVolumeByDay: this.db.prepare(`
+        SELECT
+          date(datetime(timestamp, 'unixepoch')) as day,
+          speaker,
+          COUNT(*) as count
+        FROM relationship_messages
+        WHERE timestamp >= ? AND timestamp <= ?
+        GROUP BY day, speaker
+        ORDER BY day ASC
+      `),
     };
   }
 
@@ -188,6 +235,18 @@ export class RelationshipStore {
 
   getAnalysesByRange(startDate: string, endDate: string): RelationshipAnalysis[] {
     return this.stmts.getAnalysesByRange.all(startDate, endDate) as RelationshipAnalysis[];
+  }
+
+  getInitiatorStats(startTs: number, endTs: number) {
+    return this.stmts.getInitiatorStats.all(startTs, endTs) as Array<{ speaker: string; initiations: number }>;
+  }
+
+  getResponseTimes(startTs: number, endTs: number) {
+    return this.stmts.getResponseTimes.all(startTs, endTs) as Array<{ speaker: string; avg_response_sec: number; responses: number }>;
+  }
+
+  getVolumeByDay(startTs: number, endTs: number) {
+    return this.stmts.getVolumeByDay.all(startTs, endTs) as Array<{ day: string; speaker: string; count: number }>;
   }
 
   getHealth() {

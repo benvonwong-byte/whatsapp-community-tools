@@ -31,6 +31,10 @@ function parseAnalysisForFrontend(a: RelationshipAnalysis) {
         autonomyBalance: (m.autonomyTogetherness ?? 0) * 10,
       },
       evidence: m.evidence || {},
+      emotionalBankAccount: m.emotionalBankAccount || null,
+      bids: m.bids || null,
+      pursueWithdraw: m.pursueWithdraw || null,
+      recommendations: m.recommendations || null,
     };
   } catch {
     return {
@@ -41,6 +45,10 @@ function parseAnalysisForFrontend(a: RelationshipAnalysis) {
       positives: { fondness: 0, turningToward: 0, repair: 0 },
       perel: { curiosity: 0, playfulness: 0, autonomyBalance: 0 },
       evidence: {},
+      emotionalBankAccount: null,
+      bids: null,
+      pursueWithdraw: null,
+      recommendations: null,
     };
   }
 }
@@ -208,6 +216,19 @@ export function createRelationshipRouter(
 
     const totalVoiceMinutes = analyses.reduce((sum, a) => sum + (a.voiceMinutes || 0), 0);
 
+    // Computed metrics from raw message data
+    const startTs = stats.firstTimestamp || 0;
+    const endTs = stats.lastTimestamp || Math.floor(Date.now() / 1000);
+    const initiatorRows = store.getInitiatorStats(startTs, endTs);
+    const initiators: Record<string, number> = {};
+    for (const row of initiatorRows) initiators[row.speaker] = row.initiations;
+
+    const responseTimeRows = store.getResponseTimes(startTs, endTs);
+    const responseTimes: Record<string, { avgSec: number; count: number }> = {};
+    for (const row of responseTimeRows) {
+      responseTimes[row.speaker] = { avgSec: Math.round(row.avg_response_sec), count: row.responses };
+    }
+
     res.json({
       monitoring: {
         lastMessageAt: health.lastMessageTimestamp
@@ -223,6 +244,8 @@ export function createRelationshipRouter(
           benPercent: (selfMessages / totalForRatio) * 100,
           hopePercent: (hopeMessages / totalForRatio) * 100,
         },
+        initiators,
+        responseTimes,
       },
       latestAnalysis,
       trend,
