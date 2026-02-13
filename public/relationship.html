@@ -248,6 +248,7 @@
     .health-score-number.yellow { color: var(--yellow); }
     .health-score-number.red { color: var(--red); }
     .health-summary { flex: 1; font-size: 13px; line-height: 1.5; color: var(--text-dim); }
+    .health-latest-summary { font-size: 12px; line-height: 1.5; color: var(--text-dim); margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--surface2); opacity: 0.8; }
     .health-date { font-size: 11px; color: var(--text-dim); margin-top: 6px; }
     .radar-chart-container { display: flex; justify-content: center; }
 
@@ -586,6 +587,7 @@
             <div class="health-score-meta">
               <div class="health-score-label">Relationship Health Score</div>
               <div id="health-summary" class="health-summary">No analysis yet.</div>
+              <div id="health-latest-summary" class="health-latest-summary hidden"></div>
               <div id="health-date" class="health-date"></div>
               <div class="health-tone" id="health-tone"></div>
             </div>

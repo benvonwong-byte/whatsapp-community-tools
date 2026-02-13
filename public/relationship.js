@@ -491,7 +491,8 @@ function computeRangeAnalysis(dailyAnalyses) {
   const ranged = {
     date: dailyAnalyses[0].date, // most recent
     overallScore: avg(dailyAnalyses.map(a => a.overallScore ?? 0)),
-    summary: `Average across ${n} days. Most recent: ${dailyAnalyses[0].summary || "No summary."}`,
+    summary: buildRangeSummary(dailyAnalyses, n),
+    latestDaySummary: dailyAnalyses[0].summary || null,
     messageCount: dailyAnalyses.reduce((s, a) => s + (a.messageCount || 0), 0),
     voiceMinutes: dailyAnalyses.reduce((s, a) => s + (a.voiceMinutes || 0), 0),
     emotionalTone: computeDominantTone(dailyAnalyses),
@@ -559,6 +560,36 @@ function aggregateBids(analyses) {
     turnedAway: valid.reduce((s, a) => s + (a.bids.turnedAway || 0), 0),
     turnedAgainst: valid.reduce((s, a) => s + (a.bids.turnedAgainst || 0), 0),
   };
+}
+
+function buildRangeSummary(dailyAnalyses, n) {
+  const scores = dailyAnalyses.map(a => a.overallScore ?? 0);
+  const avgScore = Math.round(scores.reduce((a, b) => a + b, 0) / n);
+  const minScore = Math.round(Math.min(...scores));
+  const maxScore = Math.round(Math.max(...scores));
+
+  // Determine overall trend
+  const recentHalf = scores.slice(0, Math.ceil(n / 2));
+  const olderHalf = scores.slice(Math.ceil(n / 2));
+  const recentAvg = recentHalf.reduce((a, b) => a + b, 0) / recentHalf.length;
+  const olderAvg = olderHalf.length > 0 ? olderHalf.reduce((a, b) => a + b, 0) / olderHalf.length : recentAvg;
+  const diff = recentAvg - olderAvg;
+  let trend = "stable";
+  if (diff > 5) trend = "improving";
+  else if (diff < -5) trend = "declining";
+
+  // Score-based descriptor
+  let descriptor;
+  if (avgScore >= 80) descriptor = "strong and healthy";
+  else if (avgScore >= 65) descriptor = "generally positive with room to grow";
+  else if (avgScore >= 45) descriptor = "mixed — some good patterns, some areas of concern";
+  else descriptor = "showing strain — several areas need attention";
+
+  let summary = `Over ${n} days, the relationship health averaged ${avgScore}/100 (range: ${minScore}–${maxScore}), ${descriptor}.`;
+  if (trend === "improving") summary += " The trend is improving — recent days score higher than earlier ones.";
+  else if (trend === "declining") summary += " The trend is declining — recent days score lower than earlier ones.";
+
+  return summary;
 }
 
 function renderDashboard() {
@@ -935,6 +966,21 @@ function renderHealthScoreHero(d) {
   scoreEl.textContent = Math.round(score);
   scoreEl.className = "health-score-number-big " + scoreColor(score);
   summaryEl.textContent = a.summary || "No summary available.";
+
+  // Show latest day's summary separately when viewing a range
+  const latestSumEl = $("health-latest-summary");
+  if (latestSumEl) {
+    const days = d.dailyAnalyses || [];
+    if (days.length > 1 && a.latestDaySummary) {
+      const latestDate = new Date(days[0].date + "T00:00:00");
+      const label = latestDate.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      latestSumEl.innerHTML = `<strong>Latest (${escapeHtml(label)}):</strong> ${escapeHtml(a.latestDaySummary)}`;
+      latestSumEl.classList.remove("hidden");
+    } else {
+      latestSumEl.classList.add("hidden");
+      latestSumEl.innerHTML = "";
+    }
+  }
 
   if (a.date) {
     const days = d.dailyAnalyses || [];
