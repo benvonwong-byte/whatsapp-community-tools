@@ -479,6 +479,88 @@ function setupImportButton() {
 
 function $(id) { return document.getElementById(id); }
 
+/** Aggregate metrics across all daily analyses in the range */
+function computeRangeAnalysis(dailyAnalyses) {
+  if (!dailyAnalyses || dailyAnalyses.length === 0) return null;
+  if (dailyAnalyses.length === 1) return dailyAnalyses[0];
+
+  const n = dailyAnalyses.length;
+  function avg(arr) { return arr.reduce((a, b) => a + b, 0) / arr.length; }
+
+  // Average numeric metrics
+  const ranged = {
+    date: dailyAnalyses[0].date, // most recent
+    overallScore: avg(dailyAnalyses.map(a => a.overallScore ?? 0)),
+    summary: `Average across ${n} days. Most recent: ${dailyAnalyses[0].summary || "No summary."}`,
+    messageCount: dailyAnalyses.reduce((s, a) => s + (a.messageCount || 0), 0),
+    voiceMinutes: dailyAnalyses.reduce((s, a) => s + (a.voiceMinutes || 0), 0),
+    emotionalTone: computeDominantTone(dailyAnalyses),
+    horsemen: {
+      criticism: avg(dailyAnalyses.map(a => a.horsemen?.criticism ?? 0)),
+      contempt: avg(dailyAnalyses.map(a => a.horsemen?.contempt ?? 0)),
+      stonewalling: avg(dailyAnalyses.map(a => a.horsemen?.stonewalling ?? 0)),
+      defensiveness: avg(dailyAnalyses.map(a => a.horsemen?.defensiveness ?? 0)),
+    },
+    positives: {
+      fondness: avg(dailyAnalyses.map(a => a.positives?.fondness ?? 0)),
+      turningToward: avg(dailyAnalyses.map(a => a.positives?.turningToward ?? 0)),
+      repair: avg(dailyAnalyses.map(a => a.positives?.repair ?? 0)),
+    },
+    perel: {
+      curiosity: avg(dailyAnalyses.map(a => a.perel?.curiosity ?? 0)),
+      playfulness: avg(dailyAnalyses.map(a => a.perel?.playfulness ?? 0)),
+      autonomyBalance: avg(dailyAnalyses.map(a => a.perel?.autonomyBalance ?? 0)),
+    },
+    // Aggregate bank account
+    emotionalBankAccount: aggregateBankAccount(dailyAnalyses),
+    // Aggregate bids
+    bids: aggregateBids(dailyAnalyses),
+    // Most recent pursue-withdraw pattern
+    pursueWithdraw: dailyAnalyses[0].pursueWithdraw,
+    // Most recent recommendations, quotes, language (per-day makes more sense)
+    recommendations: dailyAnalyses[0].recommendations,
+    notableQuotes: dailyAnalyses[0].notableQuotes,
+    languageEmotionAnalysis: dailyAnalyses[0].languageEmotionAnalysis,
+    evidence: dailyAnalyses[0].evidence || {},
+  };
+  return ranged;
+}
+
+function computeDominantTone(analyses) {
+  const counts = {};
+  for (const a of analyses) {
+    const t = a.emotionalTone || "neutral";
+    counts[t] = (counts[t] || 0) + 1;
+  }
+  let best = "neutral", bestCount = 0;
+  for (const [tone, count] of Object.entries(counts)) {
+    if (count > bestCount) { best = tone; bestCount = count; }
+  }
+  return best;
+}
+
+function aggregateBankAccount(analyses) {
+  const valid = analyses.filter(a => a.emotionalBankAccount);
+  if (valid.length === 0) return null;
+  const totalDeposits = valid.reduce((s, a) => s + (a.emotionalBankAccount.deposits || 0), 0);
+  const totalWithdrawals = valid.reduce((s, a) => s + (a.emotionalBankAccount.withdrawals || 0), 0);
+  const ratio = totalDeposits / Math.max(totalWithdrawals, 1);
+  const status = ratio >= 5.0 ? "healthy" : ratio >= 2.0 ? "watch" : "overdrawn";
+  return { deposits: totalDeposits, withdrawals: totalWithdrawals, ratio, status };
+}
+
+function aggregateBids(analyses) {
+  const valid = analyses.filter(a => a.bids);
+  if (valid.length === 0) return null;
+  return {
+    benMade: valid.reduce((s, a) => s + (a.bids.benMade || 0), 0),
+    hopeMade: valid.reduce((s, a) => s + (a.bids.hopeMade || 0), 0),
+    turnedToward: valid.reduce((s, a) => s + (a.bids.turnedToward || 0), 0),
+    turnedAway: valid.reduce((s, a) => s + (a.bids.turnedAway || 0), 0),
+    turnedAgainst: valid.reduce((s, a) => s + (a.bids.turnedAgainst || 0), 0),
+  };
+}
+
 function renderDashboard() {
   const loading = $("loading-state");
   const errEl = $("error-state");
@@ -488,14 +570,18 @@ function renderDashboard() {
   if (dash) dash.classList.remove("hidden");
 
   const d = dashboardData;
+
+  // Compute range-aggregated analysis from all daily analyses
+  d.rangeAnalysis = computeRangeAnalysis(d.dailyAnalyses || []);
+
   // Toolbar
   renderMonitorBar(d);
-  // Zone 1: Action
+  // Zone 1: Action (uses latest for actionable recs)
   renderActionCards(d);
   renderNotableQuotes(d);
   // Zone 2: Trend
   renderTrendChart(d);
-  // Zone 3: Overview
+  // Zone 3: Overview (uses range-aggregated metrics)
   renderHealthScoreHero(d);
   renderBankAccount(d);
   renderWaryOf(d);
@@ -504,7 +590,7 @@ function renderDashboard() {
   renderPursueWithdraw(d);
   renderCommunicationBalance(d);
   renderRadarChart(d);
-  // Zone 4: Granular
+  // Zone 4: Granular (uses range-aggregated metrics)
   renderStats(d);
   renderSparklines(d);
   renderHorsemen(d);
@@ -829,7 +915,7 @@ function hideTrendTooltip() {
 // ── ZONE 3: OVERVIEW ──
 
 function renderHealthScoreHero(d) {
-  const a = d.latestAnalysis;
+  const a = d.rangeAnalysis;
   const scoreEl = $("health-score");
   const summaryEl = $("health-summary");
   const dateEl = $("health-date");
@@ -851,8 +937,16 @@ function renderHealthScoreHero(d) {
   summaryEl.textContent = a.summary || "No summary available.";
 
   if (a.date) {
-    const dateObj = new Date(a.date + "T00:00:00");
-    dateEl.textContent = "Analysis from " + dateObj.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+    const days = d.dailyAnalyses || [];
+    if (days.length > 1) {
+      const oldest = new Date(days[days.length - 1].date + "T00:00:00");
+      const newest = new Date(days[0].date + "T00:00:00");
+      const fmtOpts = { month: "short", day: "numeric" };
+      dateEl.textContent = `Average across ${days.length} days (${oldest.toLocaleDateString("en-US", fmtOpts)} — ${newest.toLocaleDateString("en-US", fmtOpts)})`;
+    } else {
+      const dateObj = new Date(a.date + "T00:00:00");
+      dateEl.textContent = "Analysis from " + dateObj.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+    }
   }
 
   if (toneEl) {
@@ -865,7 +959,7 @@ function renderWaryOf(d) {
   const container = $("wary-content");
   if (!container) return;
 
-  const a = d.latestAnalysis;
+  const a = d.rangeAnalysis;
   if (!a) {
     container.innerHTML = '<div style="font-size:12px;color:var(--text-dim)">No data yet.</div>';
     return;
@@ -1006,7 +1100,7 @@ function drawSparkline(id, data, color) {
 function renderRadarChart(d) {
   const canvas = $("radar-chart");
   if (!canvas) return;
-  const a = d.latestAnalysis;
+  const a = d.rangeAnalysis;
   if (!a) { canvas.style.display = "none"; return; }
   canvas.style.display = "block";
 
@@ -1104,8 +1198,8 @@ function renderRadarChart(d) {
 function renderHorsemen(d) {
   const container = $("horsemen-bars");
   if (!container) return;
-  const h = d.latestAnalysis?.horsemen || {};
-  const ev = d.latestAnalysis?.evidence || {};
+  const h = d.rangeAnalysis?.horsemen || {};
+  const ev = d.rangeAnalysis?.evidence || {};
   const items = [
     { key: "criticism", label: "Criticism", evKey: "criticism" },
     { key: "contempt", label: "Contempt", evKey: "contempt" },
@@ -1124,8 +1218,8 @@ function renderHorsemen(d) {
 function renderPositives(d) {
   const container = $("positives-bars");
   if (!container) return;
-  const p = d.latestAnalysis?.positives || {};
-  const ev = d.latestAnalysis?.evidence || {};
+  const p = d.rangeAnalysis?.positives || {};
+  const ev = d.rangeAnalysis?.evidence || {};
   const items = [
     { key: "fondness", label: "Fondness", evKey: "fondnessAdmiration" },
     { key: "turningToward", label: "Turning Toward", evKey: "turningToward" },
@@ -1169,8 +1263,8 @@ function metricBarHTML(label, value, colorClass, evKey, evidence) {
 function renderPerelGauges(d) {
   const container = $("perel-gauges");
   if (!container) return;
-  const p = d.latestAnalysis?.perel || {};
-  const ev = d.latestAnalysis?.evidence || {};
+  const p = d.rangeAnalysis?.perel || {};
+  const ev = d.rangeAnalysis?.evidence || {};
   const items = [
     { key: "curiosity", label: "Curiosity", evKey: "curiosity" },
     { key: "playfulness", label: "Playfulness", evKey: "playfulness" },
@@ -1241,7 +1335,7 @@ function drawGauge(canvas, pct) {
 // ── Bank Account ──
 
 function renderBankAccount(d) {
-  const a = d.latestAnalysis;
+  const a = d.rangeAnalysis;
   const bank = a ? a.emotionalBankAccount : null;
   const ratioEl = $("bank-ratio");
   const statusEl = $("bank-status");
@@ -1272,7 +1366,7 @@ function renderBankAccount(d) {
 // ── Bids ──
 
 function renderBids(d) {
-  const bids = d.latestAnalysis ? d.latestAnalysis.bids : null;
+  const bids = d.rangeAnalysis ? d.rangeAnalysis.bids : null;
   const towardFill = $("bid-toward-fill");
   const awayFill = $("bid-away-fill");
   const againstFill = $("bid-against-fill");
@@ -1319,7 +1413,7 @@ function renderPursueWithdraw(d) {
   const descEl = $("pursue-description");
   if (!patternEl) return;
 
-  const pw = d.latestAnalysis ? d.latestAnalysis.pursueWithdraw : null;
+  const pw = d.rangeAnalysis ? d.rangeAnalysis.pursueWithdraw : null;
   if (!pw) {
     patternEl.textContent = "--";
     patternEl.className = "pursue-pattern";
