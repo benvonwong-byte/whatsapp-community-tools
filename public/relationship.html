@@ -422,6 +422,15 @@
           <button id="import-btn" class="action-btn" title="Import WhatsApp .txt export">Import .txt</button>
           <input type="file" id="import-file" accept=".txt,.text" style="display:none">
         </div>
+        <span class="toolbar-sep"></span>
+        <span class="monitor-item">Auto-update:</span>
+        <select id="update-frequency" class="range-date-input" style="width:80px;padding:2px 4px;">
+          <option value="off">Off</option>
+          <option value="daily">Daily</option>
+          <option value="weekly">Weekly</option>
+        </select>
+        <button id="send-update-btn" class="action-btn" title="Send dashboard update to Hope now">Send Now</button>
+        <button id="preview-update-btn" class="action-btn" title="Preview the update message">Preview</button>
       </div>
 
       <!-- 2. Action Card -->
@@ -606,6 +615,20 @@
         <div id="daily-empty" class="chart-empty hidden">No daily analyses yet.</div>
       </div>
 
+    </div>
+  </div>
+
+  <!-- Preview modal -->
+  <div id="preview-modal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.7);align-items:center;justify-content:center;">
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;max-width:500px;width:90%;max-height:80vh;overflow-y:auto;padding:20px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <span style="font-size:14px;font-weight:600;">Update Preview</span>
+        <button id="preview-close" style="background:none;border:none;color:var(--text-dim);font-size:18px;cursor:pointer;">&times;</button>
+      </div>
+      <pre id="preview-content" style="white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.5;color:var(--text);font-family:inherit;"></pre>
+      <div style="margin-top:14px;text-align:right;">
+        <button id="preview-send" class="analyze-btn" style="font-size:12px;padding:6px 16px;">Send to Hope</button>
+      </div>
     </div>
   </div>
 

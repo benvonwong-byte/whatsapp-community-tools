@@ -85,6 +85,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupBackfillButton();
   setupTranscribeButton();
   setupImportButton();
+  setupUpdateControls();
   setupMetricsToggle();
   loadDashboard();
   refreshTimer = setInterval(loadDashboard, 60000);
@@ -331,6 +332,111 @@ function setupTranscribeButton() {
       btn.textContent = "Transcribe Voice";
     }
   });
+}
+
+// ── Dashboard Update Controls ──
+
+function setupUpdateControls() {
+  const freqSelect = $("update-frequency");
+  const sendBtn = $("send-update-btn");
+  const previewBtn = $("preview-update-btn");
+  const modal = $("preview-modal");
+  const closeBtn = $("preview-close");
+  const previewContent = $("preview-content");
+  const previewSend = $("preview-send");
+
+  // Load current settings
+  adminFetch("/api/relationship/settings").then(r => r.json()).then(data => {
+    if (freqSelect) freqSelect.value = data.updateFrequency || "off";
+  }).catch(() => {});
+
+  // Save frequency when changed
+  if (freqSelect) {
+    freqSelect.addEventListener("change", async () => {
+      try {
+        await adminFetch("/api/relationship/settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ updateFrequency: freqSelect.value }),
+        });
+      } catch (err) {
+        alert("Failed to save setting: " + err.message);
+      }
+    });
+  }
+
+  // Send now
+  if (sendBtn) {
+    sendBtn.addEventListener("click", async () => {
+      if (sendBtn.disabled) return;
+      if (!confirm("Send a dashboard update to Hope via WhatsApp now?")) return;
+      sendBtn.disabled = true;
+      sendBtn.textContent = "Sending...";
+      try {
+        const freq = freqSelect ? freqSelect.value : "daily";
+        const res = await adminFetch("/api/relationship/send-update", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ frequency: freq === "off" ? "daily" : freq }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Send failed");
+        alert("Update sent to Hope!");
+      } catch (err) {
+        alert("Failed to send: " + err.message);
+      } finally {
+        sendBtn.disabled = false;
+        sendBtn.textContent = "Send Now";
+      }
+    });
+  }
+
+  // Preview
+  if (previewBtn && modal) {
+    previewBtn.addEventListener("click", async () => {
+      try {
+        const freq = freqSelect ? freqSelect.value : "daily";
+        const res = await adminFetch(`/api/relationship/preview-update?frequency=${freq === "off" ? "daily" : freq}`);
+        const data = await res.json();
+        if (previewContent) previewContent.textContent = data.message || "No data available.";
+        modal.style.display = "flex";
+      } catch (err) {
+        alert("Failed to load preview: " + err.message);
+      }
+    });
+  }
+
+  // Close modal
+  if (closeBtn && modal) {
+    closeBtn.addEventListener("click", () => { modal.style.display = "none"; });
+    modal.addEventListener("click", (e) => { if (e.target === modal) modal.style.display = "none"; });
+  }
+
+  // Send from preview
+  if (previewSend && modal) {
+    previewSend.addEventListener("click", async () => {
+      if (previewSend.disabled) return;
+      previewSend.disabled = true;
+      previewSend.textContent = "Sending...";
+      try {
+        const freq = freqSelect ? freqSelect.value : "daily";
+        const res = await adminFetch("/api/relationship/send-update", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ frequency: freq === "off" ? "daily" : freq }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Send failed");
+        alert("Update sent to Hope!");
+        modal.style.display = "none";
+      } catch (err) {
+        alert("Failed to send: " + err.message);
+      } finally {
+        previewSend.disabled = false;
+        previewSend.textContent = "Send to Hope";
+      }
+    });
+  }
 }
 
 // ── Import .txt ──

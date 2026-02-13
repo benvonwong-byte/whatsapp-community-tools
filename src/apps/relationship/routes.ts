@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { RelationshipStore, RelationshipAnalysis } from "./store";
 import { AnalyzeProgress } from "./analyzer";
+import { buildUpdateMessage } from "./updater";
 import { config } from "../../config";
 
 /** Parse a stored analysis into a frontend-friendly shape */
@@ -165,6 +166,7 @@ export function createRelationshipRouter(
   analyzeTrigger: () => Promise<void>,
   backfillTrigger: () => Promise<number>,
   transcribeTrigger: () => Promise<number>,
+  sendUpdateTrigger: (message: string) => Promise<void>,
   analyzeProgress: AnalyzeProgress
 ): Router {
   const router = Router();
@@ -367,6 +369,52 @@ export function createRelationshipRouter(
       total: parsed.length,
       duplicates: parsed.length - imported,
     });
+  });
+
+  // GET /api/relationship/settings — get update settings
+  router.get("/settings", (_req: Request, res: Response) => {
+    res.json({
+      updateFrequency: store.getSetting("update_frequency") || "off",
+      updateLastSent: store.getSetting("update_last_sent") || null,
+    });
+  });
+
+  // POST /api/relationship/settings — update settings
+  // Body: { updateFrequency: "daily" | "weekly" | "off" }
+  router.post("/settings", (req: Request, res: Response) => {
+    const { updateFrequency } = req.body;
+    if (updateFrequency && ["daily", "weekly", "off"].includes(updateFrequency)) {
+      store.setSetting("update_frequency", updateFrequency);
+    }
+    res.json({
+      ok: true,
+      updateFrequency: store.getSetting("update_frequency") || "off",
+    });
+  });
+
+  // POST /api/relationship/send-update — manually send a dashboard update to Hope
+  // Optional body: { frequency: "daily" | "weekly" } — defaults to current setting
+  router.post("/send-update", async (req: Request, res: Response) => {
+    const freq = req.body.frequency || store.getSetting("update_frequency") || "daily";
+    const message = buildUpdateMessage(store, freq as "daily" | "weekly");
+    if (!message) {
+      res.status(404).json({ error: "No analysis data available to send" });
+      return;
+    }
+    try {
+      await sendUpdateTrigger(message);
+      store.setSetting("update_last_sent", new Date().toISOString());
+      res.json({ ok: true, message });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || "Failed to send update" });
+    }
+  });
+
+  // GET /api/relationship/preview-update — preview the update message without sending
+  router.get("/preview-update", (req: Request, res: Response) => {
+    const freq = (req.query.frequency as string) || store.getSetting("update_frequency") || "daily";
+    const message = buildUpdateMessage(store, freq as "daily" | "weekly");
+    res.json({ message: message || "No analysis data available." });
   });
 
   return router;

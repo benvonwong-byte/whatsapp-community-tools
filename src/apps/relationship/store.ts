@@ -69,6 +69,11 @@ export class RelationshipStore {
       CREATE INDEX IF NOT EXISTS idx_rel_msgs_timestamp ON relationship_messages(timestamp);
       CREATE INDEX IF NOT EXISTS idx_rel_msgs_analyzed ON relationship_messages(analyzed);
 
+      CREATE TABLE IF NOT EXISTS relationship_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS relationship_analyses (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         date TEXT NOT NULL UNIQUE,
@@ -279,6 +284,15 @@ export class RelationshipStore {
 
   updateTranscript(id: string, transcript: string) {
     this.stmts.updateTranscript.run(transcript, id);
+  }
+
+  getSetting(key: string): string | null {
+    const row = this.db.prepare(`SELECT value FROM relationship_settings WHERE key = ?`).get(key) as { value: string } | undefined;
+    return row?.value ?? null;
+  }
+
+  setSetting(key: string, value: string) {
+    this.db.prepare(`INSERT OR REPLACE INTO relationship_settings (key, value) VALUES (?, ?)`).run(key, value);
   }
 
   getHealth() {

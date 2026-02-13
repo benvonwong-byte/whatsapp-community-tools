@@ -8,6 +8,7 @@ import { RelationshipStore } from "./apps/relationship/store";
 import { createRelationshipHandler, transcribeVoiceNote } from "./apps/relationship/handler";
 import { runDailyAnalysis, AnalyzeProgress } from "./apps/relationship/analyzer";
 import { createRelationshipRouter } from "./apps/relationship/routes";
+import { buildUpdateMessage, shouldSendUpdate } from "./apps/relationship/updater";
 import { MetacrisisStore } from "./apps/metacrisis/store";
 import { createMetacrisisHandler, categorizeUrl } from "./apps/metacrisis/handler";
 import { runDailySummary, formatSummaryForWhatsApp } from "./apps/metacrisis/summarizer";
@@ -364,9 +365,17 @@ async function main() {
     return success;
   };
 
+  // Send a WhatsApp message to Hope's chat
+  const relationshipSendUpdate = async (message: string): Promise<void> => {
+    const chat = await whatsapp.getChatByName(config.relationshipChatName);
+    if (!chat) throw new Error(`Chat "${config.relationshipChatName}" not found`);
+    await chat.sendMessage(message);
+    console.log(`[relationship-update] Sent update to "${config.relationshipChatName}"`);
+  };
+
   appRouters.push({
     path: "/api/relationship",
-    router: createRelationshipRouter(relationshipStore, relationshipAnalyze, relationshipBackfill, relationshipTranscribe, relationshipAnalyzeProgress),
+    router: createRelationshipRouter(relationshipStore, relationshipAnalyze, relationshipBackfill, relationshipTranscribe, relationshipSendUpdate, relationshipAnalyzeProgress),
   });
 
   // Metacrisis app: capture group messages, summarize, push to announcement channel
@@ -474,6 +483,22 @@ async function main() {
   scheduleDailyTask(config.analysisHour, async () => {
     console.log("[scheduler] Running daily relationship analysis...");
     await relationshipAnalyze();
+
+    // Auto-send dashboard update to Hope if enabled
+    if (shouldSendUpdate(relationshipStore)) {
+      const freq = (relationshipStore.getSetting("update_frequency") || "daily") as "daily" | "weekly";
+      const message = buildUpdateMessage(relationshipStore, freq);
+      if (message) {
+        try {
+          await relationshipSendUpdate(message);
+          relationshipStore.setSetting("update_last_sent", new Date().toISOString());
+          console.log(`[scheduler] Sent ${freq} relationship update to Hope.`);
+        } catch (err: any) {
+          console.error(`[scheduler] Failed to send relationship update:`, err?.message || err);
+        }
+      }
+    }
+
     console.log("[scheduler] Running daily metacrisis summary...");
     await metacrisisSummarize();
   });
