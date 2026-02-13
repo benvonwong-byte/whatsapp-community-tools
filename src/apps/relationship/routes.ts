@@ -1,5 +1,6 @@
 import { Router, Request, Response } from "express";
 import { RelationshipStore, RelationshipAnalysis } from "./store";
+import { AnalyzeProgress } from "./analyzer";
 import { config } from "../../config";
 
 /** Parse a stored analysis into a frontend-friendly shape */
@@ -29,6 +30,7 @@ function parseAnalysisForFrontend(a: RelationshipAnalysis) {
         playfulness: (m.playfulness ?? 0) * 10,
         autonomyBalance: (m.autonomyTogetherness ?? 0) * 10,
       },
+      evidence: m.evidence || {},
     };
   } catch {
     return {
@@ -38,6 +40,7 @@ function parseAnalysisForFrontend(a: RelationshipAnalysis) {
       horsemen: { criticism: 0, contempt: 0, stonewalling: 0, defensiveness: 0 },
       positives: { fondness: 0, turningToward: 0, repair: 0 },
       perel: { curiosity: 0, playfulness: 0, autonomyBalance: 0 },
+      evidence: {},
     };
   }
 }
@@ -152,7 +155,8 @@ function parseWhatsAppExport(text: string): Array<{
 export function createRelationshipRouter(
   store: RelationshipStore,
   analyzeTrigger: () => Promise<void>,
-  backfillTrigger: () => Promise<number>
+  backfillTrigger: () => Promise<number>,
+  analyzeProgress: AnalyzeProgress
 ): Router {
   const router = Router();
 
@@ -269,14 +273,24 @@ export function createRelationshipRouter(
     res.json(health);
   });
 
-  // POST /api/relationship/analyze — force immediate analysis
-  router.post("/analyze", async (req: Request, res: Response) => {
-    try {
-      await analyzeTrigger();
-      res.json({ ok: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err?.message || "Analysis failed" });
+  // GET /api/relationship/analyze-status — poll analysis progress
+  router.get("/analyze-status", (_req: Request, res: Response) => {
+    res.json(analyzeProgress);
+  });
+
+  // POST /api/relationship/analyze — start analysis in background
+  router.post("/analyze", (req: Request, res: Response) => {
+    if (analyzeProgress.active) {
+      res.status(409).json({ error: "Analysis already in progress" });
+      return;
     }
+
+    // Respond immediately, run in background
+    res.json({ ok: true, message: "Analysis started" });
+
+    analyzeTrigger().catch((err: any) => {
+      console.error("[relationship-analyze] Background error:", err);
+    });
   });
 
   // POST /api/relationship/backfill — fetch WhatsApp history for Hope's chat

@@ -4,6 +4,23 @@ import { RelationshipStore, RelationshipMessage } from "./store";
 
 const client = new Anthropic({ apiKey: config.anthropicApiKey });
 
+// ── Progress tracking ──
+
+export interface AnalyzeProgress {
+  active: boolean;
+  phase: "idle" | "collecting" | "analyzing" | "saving" | "done" | "error";
+  messageCount: number;
+  log: string[];
+  errorMessage?: string;
+}
+
+function logProgress(progress: AnalyzeProgress | undefined, msg: string) {
+  console.log(`[relationship-analysis] ${msg}`);
+  if (progress) progress.log.push(msg);
+}
+
+// ── Conversation formatting ──
+
 function formatConversation(messages: RelationshipMessage[]): string {
   return messages.map((m) => {
     const time = new Date(m.timestamp * 1000).toLocaleTimeString("en-US", {
@@ -50,6 +67,8 @@ ANALYSIS FRAMEWORKS:
 
 5. **Overall Health Score** (0-100): composite assessment
 
+6. **Evidence**: For each metric, provide 1-2 direct quotes or short paraphrases from the conversation that best illustrate why you gave that score. If a metric scores 0 (absent), use an empty array. Keep each quote under 120 characters.
+
 Respond with ONLY a JSON object (no markdown):
 {
   "metrics": {
@@ -66,31 +85,64 @@ Respond with ONLY a JSON object (no markdown):
     "overallHealthScore": <0-100>,
     "emotionalTone": "positive" | "neutral" | "negative" | "mixed"
   },
+  "evidence": {
+    "criticism": ["quote or paraphrase...", "..."],
+    "contempt": [],
+    "stonewalling": [],
+    "defensiveness": [],
+    "fondnessAdmiration": ["quote...", "..."],
+    "turningToward": ["quote..."],
+    "repairAttempts": ["quote..."],
+    "curiosity": ["quote..."],
+    "playfulness": ["quote..."],
+    "autonomyTogetherness": ["quote..."]
+  },
   "summary": "2-4 sentence analysis of today's communication patterns, noting strengths and areas of concern. Be specific about what you observed."
 }
 
 JSON:`;
 }
 
-export async function runDailyAnalysis(store: RelationshipStore): Promise<void> {
-  const messages = store.getUnanalyzedMessages();
-  if (messages.length === 0) {
-    console.log("[relationship-analysis] No new messages to analyze.");
-    return;
+export async function runDailyAnalysis(
+  store: RelationshipStore,
+  progress?: AnalyzeProgress
+): Promise<void> {
+  // Reset progress
+  if (progress) {
+    progress.active = true;
+    progress.phase = "collecting";
+    progress.messageCount = 0;
+    progress.log = [];
+    progress.errorMessage = undefined;
   }
 
-  const today = new Date().toISOString().split("T")[0];
-  const conversation = formatConversation(messages);
-
-  // Truncate if extremely long (cap at ~12K chars for cost efficiency)
-  const truncated = conversation.slice(0, 12000);
-
-  console.log(`[relationship-analysis] Analyzing ${messages.length} messages for ${today}...`);
-
   try {
+    logProgress(progress, "Collecting unanalyzed messages...");
+    const messages = store.getUnanalyzedMessages();
+
+    if (messages.length === 0) {
+      logProgress(progress, "No new messages to analyze.");
+      if (progress) {
+        progress.phase = "done";
+        progress.active = false;
+        setTimeout(() => { if (progress.phase === "done") progress.phase = "idle"; }, 15000);
+      }
+      return;
+    }
+
+    if (progress) progress.messageCount = messages.length;
+    logProgress(progress, `Found ${messages.length} unanalyzed messages.`);
+
+    const today = new Date().toISOString().split("T")[0];
+    const conversation = formatConversation(messages);
+    const truncated = conversation.slice(0, 12000);
+
+    if (progress) progress.phase = "analyzing";
+    logProgress(progress, `Sending ${messages.length} messages to Claude for analysis...`);
+
     const response = await client.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 2048,
+      max_tokens: 4096,
       messages: [{ role: "user", content: buildAnalysisPrompt(truncated, messages.length, today) }],
     });
 
@@ -102,25 +154,47 @@ export async function runDailyAnalysis(store: RelationshipStore): Promise<void> 
     }
 
     const parsed = JSON.parse(jsonStr);
+    logProgress(progress, `Analysis received. Health score: ${parsed.metrics.overallHealthScore}/100`);
 
-    // Calculate voice minutes
+    if (progress) progress.phase = "saving";
+    logProgress(progress, "Saving analysis results...");
+
     const voiceCount = messages.filter((m) => m.type === "voice").length;
-    const estimatedVoiceMinutes = voiceCount * 0.5; // rough estimate: 30s avg per voice note
+    const estimatedVoiceMinutes = voiceCount * 0.5;
+
+    // Store metrics + evidence together in metrics_json
+    const metricsWithEvidence = {
+      ...parsed.metrics,
+      evidence: parsed.evidence || {},
+    };
 
     store.saveAnalysis(
       today,
-      JSON.stringify(parsed.metrics),
+      JSON.stringify(metricsWithEvidence),
       parsed.summary,
       messages.length,
       estimatedVoiceMinutes
     );
 
-    // Mark messages as analyzed
     store.markAnalyzed(messages.map((m) => m.id));
 
-    console.log(`[relationship-analysis] Analysis complete. Score: ${parsed.metrics.overallHealthScore}/100`);
-    console.log(`[relationship-analysis] ${parsed.summary}`);
+    logProgress(progress, `Done! Score: ${parsed.metrics.overallHealthScore}/100`);
+    logProgress(progress, parsed.summary);
+
+    if (progress) {
+      progress.phase = "done";
+      progress.active = false;
+      setTimeout(() => { if (progress.phase === "done") progress.phase = "idle"; }, 15000);
+    }
   } catch (err: any) {
-    console.error(`[relationship-analysis] Failed:`, err?.message || err);
+    const errMsg = err?.message || String(err);
+    console.error(`[relationship-analysis] Failed:`, errMsg);
+    if (progress) {
+      progress.phase = "error";
+      progress.active = false;
+      progress.errorMessage = errMsg;
+      progress.log.push(`Error: ${errMsg}`);
+      setTimeout(() => { if (progress.phase === "error") progress.phase = "idle"; }, 60000);
+    }
   }
 }

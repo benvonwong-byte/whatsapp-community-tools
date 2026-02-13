@@ -6,7 +6,7 @@ import { startServer, BackfillProgress } from "./server";
 import { EventStore } from "./store";
 import { RelationshipStore } from "./apps/relationship/store";
 import { createRelationshipHandler } from "./apps/relationship/handler";
-import { runDailyAnalysis } from "./apps/relationship/analyzer";
+import { runDailyAnalysis, AnalyzeProgress } from "./apps/relationship/analyzer";
 import { createRelationshipRouter } from "./apps/relationship/routes";
 import { MetacrisisStore } from "./apps/metacrisis/store";
 import { createMetacrisisHandler, categorizeUrl } from "./apps/metacrisis/handler";
@@ -236,7 +236,13 @@ async function main() {
   const appRouters: { path: string; router: any }[] = [];
 
   // Relationship app: monitor private chat, transcribe voice notes, analyze communication
-  const relationshipAnalyze = () => runDailyAnalysis(relationshipStore);
+  const relationshipAnalyzeProgress: AnalyzeProgress = {
+    active: false,
+    phase: "idle",
+    messageCount: 0,
+    log: [],
+  };
+  const relationshipAnalyze = () => runDailyAnalysis(relationshipStore, relationshipAnalyzeProgress);
   whatsapp.addRawMessageListener(createRelationshipHandler(relationshipStore));
 
   const relationshipBackfill = async (): Promise<number> => {
@@ -269,7 +275,7 @@ async function main() {
 
   appRouters.push({
     path: "/api/relationship",
-    router: createRelationshipRouter(relationshipStore, relationshipAnalyze, relationshipBackfill),
+    router: createRelationshipRouter(relationshipStore, relationshipAnalyze, relationshipBackfill, relationshipAnalyzeProgress),
   });
 
   // Metacrisis app: capture group messages, summarize, push to announcement channel
