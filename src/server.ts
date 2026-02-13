@@ -95,7 +95,7 @@ export function startServer(opts: ServerOptions): void {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-Frame-Options", "DENY");
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
-    res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://whatsapp-events-nyc-production.up.railway.app https://nominatim.openstreetmap.org; img-src 'self' data:");
+    res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://whatsapp-events-nyc-production.up.railway.app https://whatsapp-events-nyc.web.app https://nominatim.openstreetmap.org; img-src 'self' data:");
     next();
   });
 
