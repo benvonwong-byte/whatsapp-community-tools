@@ -28,7 +28,7 @@ let expandedCards = new Set();
 let analyzePollTimer = null;
 
 // Date range state
-let dateRange = { startDate: null, endDate: null, preset: "30" };
+let dateRange = { startDate: null, endDate: null, preset: "7" };
 
 // Trend chart interactivity state
 let trendPoints = []; // [{x, y, score, date, summary, tone}]
@@ -82,7 +82,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   $("main-content")?.classList.remove("hidden");
-  setPresetRange("30");
+  setPresetRange("7");
   setupDateRangeControls();
   setupAnalyzeButton();
   setupBackfillButton();
