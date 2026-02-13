@@ -345,6 +345,21 @@ export function createRelationshipRouter(
     }
   });
 
+  // POST /api/relationship/fix-voice-minutes — recalculate voice_minutes in analyses from actual message data
+  router.post("/fix-voice-minutes", (_req: Request, res: Response) => {
+    const analyses = store.getAnalyses(999);
+    let fixed = 0;
+    for (const a of analyses) {
+      const counts = store.getDayMessageCounts(a.date);
+      const correctVoiceMin = counts.voice * 0.5;
+      if (a.voiceMinutes !== correctVoiceMin) {
+        store.saveAnalysis(a.date, a.metricsJson, a.summary, counts.total, correctVoiceMin);
+        fixed++;
+      }
+    }
+    res.json({ ok: true, fixed, total: analyses.length });
+  });
+
   // POST /api/relationship/import — import WhatsApp .txt export
   // Body: { text: "...raw .txt file content..." }
   router.post("/import", (req: Request, res: Response) => {

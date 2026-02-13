@@ -199,7 +199,8 @@ async function analyzeDay(
 
   logProgress(progress, `  ${date}: score ${parsed.metrics.overallHealthScore}/100`);
 
-  const voiceCount = messages.filter((m) => m.type === "voice").length;
+  // Use total counts for the ENTIRE day (not just this batch) since saveAnalysis uses INSERT OR REPLACE
+  const dayCounts = store.getDayMessageCounts(date);
   const metricsWithEvidence = {
     ...parsed.metrics,
     evidence: parsed.evidence || {},
@@ -213,8 +214,8 @@ async function analyzeDay(
     date,
     JSON.stringify(metricsWithEvidence),
     parsed.summary,
-    messages.length,
-    voiceCount * 0.5
+    dayCounts.total,
+    dayCounts.voice * 0.5
   );
 
   store.markAnalyzed(messages.map((m) => m.id));

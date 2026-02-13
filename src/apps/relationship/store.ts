@@ -278,6 +278,14 @@ export class RelationshipStore {
     return this.stmts.getVolumeByDay.all(startTs, endTs) as Array<{ day: string; speaker: string; count: number }>;
   }
 
+  getDayMessageCounts(date: string): { total: number; voice: number } {
+    const row = this.db.prepare(`
+      SELECT COUNT(*) as total, SUM(CASE WHEN type = 'voice' THEN 1 ELSE 0 END) as voice
+      FROM relationship_messages WHERE date(datetime(timestamp, 'unixepoch')) = ?
+    `).get(date) as { total: number; voice: number };
+    return { total: row?.total ?? 0, voice: row?.voice ?? 0 };
+  }
+
   getUntranscribedVoiceMessages(): RelationshipMessage[] {
     return this.stmts.getUntranscribedVoice.all() as RelationshipMessage[];
   }
