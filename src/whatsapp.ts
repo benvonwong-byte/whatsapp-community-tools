@@ -277,6 +277,10 @@ export class WhatsAppClient {
     return this.ready;
   }
 
+  getClient(): Client {
+    return this.client;
+  }
+
   async getChatByName(name: string): Promise<any | null> {
     if (!this.ready) return null;
     const chats = await this.client.getChats();

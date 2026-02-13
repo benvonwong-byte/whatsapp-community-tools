@@ -247,7 +247,16 @@ async function main() {
 
   const relationshipBackfill = async (): Promise<number> => {
     const chat = await whatsapp.getChatByName(config.relationshipChatName);
-    if (!chat) throw new Error(`Chat "${config.relationshipChatName}" not found. Is WhatsApp connected?`);
+    if (!chat) {
+      // List available private chats to help debug name mismatch
+      const allChats = await whatsapp.getClient().getChats();
+      const privateChatNames = allChats
+        .filter((c: any) => !c.isGroup)
+        .slice(0, 30)
+        .map((c: any) => c.name || c.id?.user || "unnamed");
+      console.log(`[relationship-backfill] Available private chats: ${privateChatNames.join(", ")}`);
+      throw new Error(`Chat "${config.relationshipChatName}" not found. Available: ${privateChatNames.join(", ")}`);
+    }
 
     console.log(`[relationship-backfill] Fetching messages from "${chat.name}"...`);
     const messages = await chat.fetchMessages({ limit: 10000 });
