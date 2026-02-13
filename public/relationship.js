@@ -1,6 +1,10 @@
-// Auth: check localStorage for admin token (same pattern as main app)
-const adminToken = localStorage.getItem("adminToken");
+// Auth: check URL params (?token= or ?admin=) then localStorage
+const _params = new URLSearchParams(window.location.search);
+const adminToken = _params.get("token") || _params.get("admin") || localStorage.getItem("adminToken");
 const isAdmin = !!adminToken;
+if (adminToken && !localStorage.getItem("adminToken")) {
+  localStorage.setItem("adminToken", adminToken);
+}
 
 // API base: use Railway URL when hosted on Firebase, relative path otherwise
 const API_BASE =
