@@ -9,7 +9,7 @@ import { createRelationshipHandler } from "./apps/relationship/handler";
 import { runDailyAnalysis } from "./apps/relationship/analyzer";
 import { createRelationshipRouter } from "./apps/relationship/routes";
 import { MetacrisisStore } from "./apps/metacrisis/store";
-import { createMetacrisisHandler } from "./apps/metacrisis/handler";
+import { createMetacrisisHandler, categorizeUrl } from "./apps/metacrisis/handler";
 import { runDailySummary, formatSummaryForWhatsApp } from "./apps/metacrisis/summarizer";
 import { createMetacrisisRouter } from "./apps/metacrisis/routes";
 
@@ -238,9 +238,38 @@ async function main() {
   // Relationship app: monitor private chat, transcribe voice notes, analyze communication
   const relationshipAnalyze = () => runDailyAnalysis(relationshipStore);
   whatsapp.addRawMessageListener(createRelationshipHandler(relationshipStore));
+
+  const relationshipBackfill = async (): Promise<number> => {
+    const chat = await whatsapp.getChatByName(config.relationshipChatName);
+    if (!chat) throw new Error(`Chat "${config.relationshipChatName}" not found. Is WhatsApp connected?`);
+
+    console.log(`[relationship-backfill] Fetching messages from "${chat.name}"...`);
+    const messages = await chat.fetchMessages({ limit: 10000 });
+
+    let saved = 0;
+    for (const msg of messages) {
+      if (!msg.body && (msg as any).type !== "ptt") continue;
+      if (relationshipStore.isDuplicate(msg.id._serialized)) continue;
+
+      const speaker = msg.fromMe ? "self" : "hope";
+      relationshipStore.saveMessage({
+        id: msg.id._serialized,
+        speaker,
+        body: msg.body || "",
+        transcript: "",
+        timestamp: msg.timestamp,
+        type: (msg as any).type === "ptt" ? "voice" : "text",
+      });
+      saved++;
+    }
+
+    console.log(`[relationship-backfill] Imported ${saved} messages (${messages.length - saved} skipped/duplicates).`);
+    return saved;
+  };
+
   appRouters.push({
     path: "/api/relationship",
-    router: createRelationshipRouter(relationshipStore, relationshipAnalyze),
+    router: createRelationshipRouter(relationshipStore, relationshipAnalyze, relationshipBackfill),
   });
 
   // Metacrisis app: capture group messages, summarize, push to announcement channel
@@ -263,9 +292,60 @@ async function main() {
     console.log(`[metacrisis] Pushed summary for ${date} to ${config.metacrisisAnnouncementChat}`);
   };
 
+  const URL_REGEX = /https?:\/\/[^\s<>"')\]]+/gi;
+  const metacrisisBackfill = async (): Promise<number> => {
+    const chat = await whatsapp.getChatByName(config.metacrisisChatName);
+    if (!chat) throw new Error(`Chat "${config.metacrisisChatName}" not found. Is WhatsApp connected?`);
+
+    const twoWeeksAgo = Math.floor(Date.now() / 1000) - 14 * 24 * 60 * 60;
+    console.log(`[metacrisis-backfill] Fetching messages from "${chat.name}" (last 2 weeks)...`);
+    const messages = await chat.fetchMessages({ limit: 5000 });
+
+    let saved = 0;
+    for (const msg of messages) {
+      if (msg.timestamp < twoWeeksAgo) continue;
+      if (!msg.body || msg.body.trim() === "") continue;
+      if (metacrisisStore.isDuplicate(msg.id._serialized)) continue;
+
+      let senderName = "";
+      try {
+        const contact = await msg.getContact();
+        senderName = contact?.pushname || contact?.name || (msg as any).author || "";
+      } catch {
+        senderName = (msg as any).author || "";
+      }
+
+      metacrisisStore.saveMessage({
+        id: msg.id._serialized,
+        sender: (msg as any).author || msg.from,
+        sender_name: senderName,
+        body: msg.body,
+        timestamp: msg.timestamp,
+      });
+      saved++;
+
+      // Extract links
+      const urls = msg.body.match(URL_REGEX);
+      if (urls) {
+        for (const url of urls) {
+          metacrisisStore.saveLink({
+            url,
+            category: categorizeUrl(url),
+            sender_name: senderName,
+            message_id: msg.id._serialized,
+            timestamp: msg.timestamp,
+          });
+        }
+      }
+    }
+
+    console.log(`[metacrisis-backfill] Imported ${saved} messages from last 2 weeks.`);
+    return saved;
+  };
+
   appRouters.push({
     path: "/api/metacrisis",
-    router: createMetacrisisRouter(metacrisisStore, metacrisisSummarize, pushToWhatsApp),
+    router: createMetacrisisRouter(metacrisisStore, metacrisisSummarize, pushToWhatsApp, metacrisisBackfill),
   });
 
   startServer({

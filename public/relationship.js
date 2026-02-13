@@ -23,6 +23,53 @@ let dashboardData = null;
 let refreshTimer = null;
 let expandedCards = new Set();
 
+// Date range state
+let dateRange = { startDate: null, endDate: null, preset: "30" };
+
+function toDateStr(d) {
+  return d.toISOString().split("T")[0];
+}
+
+function setPresetRange(days) {
+  dateRange.preset = String(days);
+  if (days === "all") {
+    dateRange.startDate = null;
+    dateRange.endDate = null;
+  } else {
+    const end = new Date();
+    const start = new Date();
+    start.setDate(start.getDate() - parseInt(days));
+    dateRange.startDate = toDateStr(start);
+    dateRange.endDate = toDateStr(end);
+  }
+  syncDateInputs();
+  updateChipHighlight();
+  loadDashboard();
+}
+
+function syncDateInputs() {
+  const startEl = document.getElementById("range-start");
+  const endEl = document.getElementById("range-end");
+  if (startEl && endEl) {
+    startEl.value = dateRange.startDate || "";
+    endEl.value = dateRange.endDate || "";
+  }
+}
+
+function updateChipHighlight() {
+  document.querySelectorAll(".range-chip").forEach((chip) => {
+    chip.classList.toggle("active", chip.dataset.range === dateRange.preset);
+  });
+}
+
+function buildDashboardUrl() {
+  let url = "/api/relationship/dashboard";
+  if (dateRange.startDate && dateRange.endDate) {
+    url += `?startDate=${dateRange.startDate}&endDate=${dateRange.endDate}`;
+  }
+  return url;
+}
+
 // ── Init ──
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -33,18 +80,53 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   document.getElementById("main-content").classList.remove("hidden");
+
+  // Set initial date range (last 30 days)
+  setPresetRange("30");
+
   setupAnalyzeButton();
+  setupDateRangeControls();
+  setupBackfillButton();
+  setupImportButton();
   loadDashboard();
 
   // Auto-refresh every 60 seconds
   refreshTimer = setInterval(loadDashboard, 60000);
 });
 
+// ── Date Range Controls ──
+
+function setupDateRangeControls() {
+  // Preset chips
+  document.querySelectorAll(".range-chip").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      setPresetRange(chip.dataset.range);
+    });
+  });
+
+  // Custom date inputs
+  const startEl = document.getElementById("range-start");
+  const endEl = document.getElementById("range-end");
+
+  function onCustomDate() {
+    if (startEl.value && endEl.value) {
+      dateRange.startDate = startEl.value;
+      dateRange.endDate = endEl.value;
+      dateRange.preset = "custom";
+      updateChipHighlight();
+      loadDashboard();
+    }
+  }
+
+  startEl.addEventListener("change", onCustomDate);
+  endEl.addEventListener("change", onCustomDate);
+}
+
 // ── Data Loading ──
 
 async function loadDashboard() {
   try {
-    const res = await adminFetch("/api/relationship/dashboard");
+    const res = await adminFetch(buildDashboardUrl());
     if (!res.ok) {
       throw new Error(`Server returned ${res.status}`);
     }
@@ -82,6 +164,74 @@ function setupAnalyzeButton() {
     } finally {
       btn.disabled = false;
       btn.textContent = "Analyze Now";
+    }
+  });
+}
+
+// ── Backfill ──
+
+function setupBackfillButton() {
+  const btn = document.getElementById("backfill-btn");
+  if (!btn) return;
+
+  btn.addEventListener("click", async () => {
+    if (btn.disabled) return;
+    if (!confirm("Fetch all available message history from WhatsApp?\nThis may take a moment.")) return;
+
+    btn.disabled = true;
+    btn.textContent = "Fetching...";
+    try {
+      const res = await adminFetch("/api/relationship/backfill", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Backfill failed");
+      alert(`Backfill complete! Imported ${data.messagesImported} messages.`);
+      await loadDashboard();
+    } catch (err) {
+      console.error("Backfill failed:", err);
+      alert("Backfill failed: " + err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Backfill";
+    }
+  });
+}
+
+// ── Import .txt ──
+
+function setupImportButton() {
+  const btn = document.getElementById("import-btn");
+  const fileInput = document.getElementById("import-file");
+  if (!btn || !fileInput) return;
+
+  btn.addEventListener("click", () => {
+    fileInput.click();
+  });
+
+  fileInput.addEventListener("change", async () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+
+    btn.disabled = true;
+    btn.textContent = "Importing...";
+
+    try {
+      const text = await file.text();
+      const res = await adminFetch("/api/relationship/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Import failed");
+      alert(`Import complete!\nImported: ${data.imported}\nDuplicates skipped: ${data.duplicates}\nTotal parsed: ${data.total}`);
+      await loadDashboard();
+    } catch (err) {
+      console.error("Import failed:", err);
+      alert("Import failed: " + err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Import .txt";
+      fileInput.value = "";
     }
   });
 }
@@ -190,7 +340,7 @@ function renderLatestAnalysis(d) {
   summaryEl.textContent = analysis.summary || "No summary available.";
 
   if (analysis.date) {
-    const dateObj = new Date(analysis.date);
+    const dateObj = new Date(analysis.date + "T00:00:00");
     dateEl.textContent =
       "Analysis from " +
       dateObj.toLocaleDateString("en-US", {
@@ -314,7 +464,6 @@ function renderTrendChart(d) {
 
   ctx.clearRect(0, 0, W, H);
 
-  // Y-axis: 0 to 100
   const minY = 0;
   const maxY = 100;
 
@@ -334,18 +483,15 @@ function renderTrendChart(d) {
     ctx.fillText(yVal.toString(), padLeft - 6, y + 4);
   }
 
-  // Color zones (subtle background bands)
-  // Red zone: 0-40
+  // Color zones
   ctx.fillStyle = "rgba(214, 48, 49, 0.05)";
   const redTop = padTop + chartH - (40 / 100) * chartH;
   ctx.fillRect(padLeft, redTop, chartW, padTop + chartH - redTop);
 
-  // Yellow zone: 40-70
   ctx.fillStyle = "rgba(253, 203, 110, 0.04)";
   const yellowTop = padTop + chartH - (70 / 100) * chartH;
   ctx.fillRect(padLeft, yellowTop, chartW, redTop - yellowTop);
 
-  // Green zone: 70-100
   ctx.fillStyle = "rgba(0, 184, 148, 0.04)";
   ctx.fillRect(padLeft, padTop, chartW, yellowTop - padTop);
 
@@ -369,7 +515,7 @@ function renderTrendChart(d) {
   });
   ctx.stroke();
 
-  // Gradient fill under line
+  // Gradient fill
   const gradient = ctx.createLinearGradient(0, padTop, 0, padTop + chartH);
   gradient.addColorStop(0, "rgba(79, 195, 247, 0.2)");
   gradient.addColorStop(1, "rgba(79, 195, 247, 0)");
@@ -394,7 +540,7 @@ function renderTrendChart(d) {
     ctx.fill();
   });
 
-  // X-axis date labels (show first, last, and a few in between)
+  // X-axis labels
   ctx.fillStyle = "#888";
   ctx.textAlign = "center";
   ctx.font = "10px -apple-system, sans-serif";
@@ -403,21 +549,17 @@ function renderTrendChart(d) {
   for (let i = 0; i < trend.length; i += labelStep) {
     const pt = points[i];
     const dateObj = new Date(trend[i].date + "T00:00:00");
-    const label = dateObj.toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-    });
+    const label = dateObj.toLocaleDateString("en-US", { month: "short", day: "numeric" });
     ctx.fillText(label, pt.x, H - 8);
   }
-  // Always show last label
   if (trend.length > 1) {
     const last = points[points.length - 1];
     const lastDate = new Date(trend[trend.length - 1].date + "T00:00:00");
-    const lastLabel = lastDate.toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-    });
-    ctx.fillText(lastLabel, last.x, H - 8);
+    ctx.fillText(
+      lastDate.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+      last.x,
+      H - 8
+    );
   }
 }
 
@@ -462,7 +604,6 @@ function renderDailyCards(d) {
     })
     .join("");
 
-  // Attach click listeners
   container.querySelectorAll(".daily-card").forEach((card) => {
     card.addEventListener("click", () => toggleDailyCard(card));
   });
@@ -499,11 +640,10 @@ async function toggleDailyCard(card) {
 
     messagesEl.innerHTML = messages
       .map((msg) => {
-        const senderClass = (msg.sender || "").toLowerCase().includes("ben")
-          ? "ben"
-          : "hope";
+        const senderClass = msg.speaker === "self" ? "ben" : "hope";
+        const senderLabel = msg.speaker === "self" ? "Ben" : "Hope";
         const timeStr = msg.timestamp
-          ? new Date(msg.timestamp).toLocaleTimeString("en-US", {
+          ? new Date(msg.timestamp * 1000).toLocaleTimeString("en-US", {
               hour: "numeric",
               minute: "2-digit",
             })
@@ -516,11 +656,11 @@ async function toggleDailyCard(card) {
         return `
         <div class="message-item">
           <div class="message-sender ${senderClass}">
-            ${escapeHtml(msg.sender || "Unknown")}
+            ${senderLabel}
             <span class="message-time">${timeStr}</span>
             ${typeBadge}
           </div>
-          <div class="message-text">${escapeHtml(msg.text || msg.body || "[media]")}</div>
+          <div class="message-text">${escapeHtml(msg.body || msg.transcript || "[media]")}</div>
         </div>`;
       })
       .join("");

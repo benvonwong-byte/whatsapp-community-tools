@@ -35,6 +35,8 @@ export class RelationshipStore {
     getMessages: Database.Statement;
     getMessagesByDate: Database.Statement;
     getStats: Database.Statement;
+    getStatsByRange: Database.Statement;
+    getAnalysesByRange: Database.Statement;
     getLastTimestamp: Database.Statement;
     getTodayCount: Database.Statement;
   };
@@ -107,6 +109,20 @@ export class RelationshipStore {
           MAX(timestamp) as lastTimestamp
         FROM relationship_messages
       `),
+      getStatsByRange: this.db.prepare(`
+        SELECT
+          COUNT(*) as totalMessages,
+          SUM(CASE WHEN speaker = 'self' THEN 1 ELSE 0 END) as selfMessages,
+          SUM(CASE WHEN speaker = 'hope' THEN 1 ELSE 0 END) as hopeMessages,
+          SUM(CASE WHEN type = 'voice' THEN 1 ELSE 0 END) as voiceMessages,
+          MIN(timestamp) as firstTimestamp,
+          MAX(timestamp) as lastTimestamp
+        FROM relationship_messages
+        WHERE timestamp >= ? AND timestamp <= ?
+      `),
+      getAnalysesByRange: this.db.prepare(
+        `SELECT * FROM relationship_analyses WHERE date >= ? AND date <= ? ORDER BY date DESC`
+      ),
       getLastTimestamp: this.db.prepare(
         `SELECT MAX(timestamp) as ts FROM relationship_messages`
       ),
@@ -159,6 +175,14 @@ export class RelationshipStore {
 
   getStats() {
     return this.stmts.getStats.get() as any;
+  }
+
+  getStatsByRange(startTs: number, endTs: number) {
+    return this.stmts.getStatsByRange.get(startTs, endTs) as any;
+  }
+
+  getAnalysesByRange(startDate: string, endDate: string): RelationshipAnalysis[] {
+    return this.stmts.getAnalysesByRange.all(startDate, endDate) as RelationshipAnalysis[];
   }
 
   getHealth() {

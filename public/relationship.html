@@ -439,6 +439,74 @@
 
     .hidden { display: none !important; }
 
+    /* Date range filter */
+    .date-range-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+
+    .range-chip {
+      background: var(--surface2);
+      color: var(--text-dim);
+      border: 1px solid transparent;
+      font-size: 12px;
+      font-weight: 500;
+      padding: 5px 14px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+
+    .range-chip:hover { border-color: var(--accent); color: var(--text); }
+    .range-chip.active { background: var(--accent); color: #000; border-color: var(--accent); }
+
+    .range-sep { color: var(--text-dim); font-size: 12px; margin: 0 2px; }
+
+    .range-date-input {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 4px 8px;
+      font-size: 12px;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .range-date-input:focus { border-color: var(--accent); }
+    .range-date-input::-webkit-calendar-picker-indicator { filter: invert(0.7); cursor: pointer; }
+
+    /* Action buttons row */
+    .action-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-left: auto;
+    }
+
+    .action-btn {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      font-size: 11px;
+      font-weight: 500;
+      padding: 5px 12px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .action-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
     /* Responsive */
     @media (max-width: 600px) {
       .stats-grid {
@@ -484,6 +552,23 @@
         <span id="monitor-dot" class="monitor-dot red"></span>
         <span id="monitor-last-msg" class="monitor-item">Last message: <strong>--</strong></span>
         <span id="monitor-today-count" class="monitor-item">Today: <strong>0</strong> messages</span>
+      </div>
+
+      <!-- Date range filter -->
+      <div class="date-range-bar">
+        <span class="range-chip active" data-range="30">30D</span>
+        <span class="range-chip" data-range="90">90D</span>
+        <span class="range-chip" data-range="365">1Y</span>
+        <span class="range-chip" data-range="all">All</span>
+        <span class="range-sep">|</span>
+        <input type="date" id="range-start" class="range-date-input" title="Start date">
+        <span class="range-sep">&ndash;</span>
+        <input type="date" id="range-end" class="range-date-input" title="End date">
+        <div class="action-row">
+          <button id="backfill-btn" class="action-btn" title="Fetch full WhatsApp history">Backfill</button>
+          <button id="import-btn" class="action-btn" title="Import WhatsApp .txt export">Import .txt</button>
+          <input type="file" id="import-file" accept=".txt,.text" style="display:none">
+        </div>
       </div>
 
       <!-- Stats panel -->

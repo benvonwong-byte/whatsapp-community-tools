@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express";
 import { RelationshipStore, RelationshipAnalysis } from "./store";
-import { runDailyAnalysis } from "./analyzer";
+import { config } from "../../config";
 
 /** Parse a stored analysis into a frontend-friendly shape */
 function parseAnalysisForFrontend(a: RelationshipAnalysis) {
@@ -42,16 +42,139 @@ function parseAnalysisForFrontend(a: RelationshipAnalysis) {
   }
 }
 
+// ── WhatsApp .txt export parser ──
+
+function simpleHash(str: string): string {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash) + str.charCodeAt(i);
+    hash = hash & hash;
+  }
+  return Math.abs(hash).toString(36);
+}
+
+function parseWhatsAppDate(dateStr: string, timeStr: string): number {
+  const parts = dateStr.split("/");
+  if (parts.length !== 3) return 0;
+
+  let month = parseInt(parts[0]);
+  let day = parseInt(parts[1]);
+  let year = parseInt(parts[2]);
+  if (year < 100) year += 2000;
+
+  const timeParts = timeStr.trim().match(/(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM|am|pm)?/);
+  if (!timeParts) return 0;
+
+  let hour = parseInt(timeParts[1]);
+  const minute = parseInt(timeParts[2]);
+  const second = timeParts[3] ? parseInt(timeParts[3]) : 0;
+  const ampm = timeParts[4]?.toUpperCase();
+  if (ampm === "PM" && hour < 12) hour += 12;
+  if (ampm === "AM" && hour === 12) hour = 0;
+
+  const date = new Date(year, month - 1, day, hour, minute, second);
+  if (isNaN(date.getTime())) return 0;
+  return Math.floor(date.getTime() / 1000);
+}
+
+/**
+ * Parse a WhatsApp .txt chat export into messages.
+ * Handles formats like:
+ *   1/14/25, 7:30 PM - Sender: Message
+ *   [1/14/25, 7:30:45 PM] Sender: Message
+ */
+function parseWhatsAppExport(text: string): Array<{
+  id: string; speaker: string; body: string;
+  transcript: string; timestamp: number; type: string;
+}> {
+  const lines = text.split("\n");
+  const messages: Array<{
+    id: string; speaker: string; body: string;
+    transcript: string; timestamp: number; type: string;
+  }> = [];
+
+  // Match WhatsApp export line start
+  const lineRegex = /^\[?(\d{1,2}\/\d{1,2}\/\d{2,4}),?\s+(\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|am|pm)?)\]?\s*[-–]?\s*(.*)/;
+  const partnerLower = config.relationshipChatName.toLowerCase();
+
+  let current: (typeof messages)[number] | null = null;
+
+  for (const line of lines) {
+    const match = line.match(lineRegex);
+    if (match) {
+      if (current) messages.push(current);
+
+      const [, dateStr, timeStr, rest] = match;
+      const colonIdx = rest.indexOf(": ");
+      if (colonIdx === -1) {
+        // System message (no colon separator)
+        current = null;
+        continue;
+      }
+
+      const sender = rest.slice(0, colonIdx).trim();
+      const body = rest.slice(colonIdx + 2);
+
+      // Skip media/deleted messages
+      if (body === "<Media omitted>" || body === "This message was deleted" ||
+          body === "You deleted this message") {
+        current = null;
+        continue;
+      }
+
+      const timestamp = parseWhatsAppDate(dateStr, timeStr);
+      if (!timestamp) { current = null; continue; }
+
+      // Determine speaker: if sender name contains partner name → "hope", else "self"
+      const speaker = sender.toLowerCase().includes(partnerLower) ? "hope" : "self";
+      const hash = simpleHash(timestamp + sender + body);
+
+      current = {
+        id: `import_${timestamp}_${hash}`,
+        speaker,
+        body,
+        transcript: "",
+        timestamp,
+        type: "text",
+      };
+    } else if (current && line.trim()) {
+      // Continuation line for multi-line messages
+      current.body += "\n" + line;
+    }
+  }
+
+  if (current) messages.push(current);
+  return messages;
+}
+
+// ── Router ──
+
 export function createRelationshipRouter(
   store: RelationshipStore,
-  analyzeTrigger: () => Promise<void>
+  analyzeTrigger: () => Promise<void>,
+  backfillTrigger: () => Promise<number>
 ): Router {
   const router = Router();
 
   // GET /api/relationship/dashboard — shaped for frontend consumption
+  // Accepts optional ?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD for date range filtering
   router.get("/dashboard", (req: Request, res: Response) => {
-    const analyses = store.getAnalyses(30);
-    const stats = store.getStats() as any;
+    const startDate = req.query.startDate as string | undefined;
+    const endDate = req.query.endDate as string | undefined;
+
+    let analyses: RelationshipAnalysis[];
+    let stats: any;
+
+    if (startDate && endDate) {
+      analyses = store.getAnalysesByRange(startDate, endDate);
+      const startTs = Math.floor(new Date(startDate + "T00:00:00").getTime() / 1000);
+      const endTs = Math.floor(new Date(endDate + "T23:59:59").getTime() / 1000);
+      stats = store.getStatsByRange(startTs, endTs);
+    } else {
+      analyses = store.getAnalyses(30);
+      stats = store.getStats();
+    }
+
     const health = store.getHealth();
 
     const latestAnalysis = analyses.length > 0
@@ -79,7 +202,6 @@ export function createRelationshipRouter(
       ? Math.max(1, Math.ceil((stats.lastTimestamp - stats.firstTimestamp) / 86400))
       : 0;
 
-    // Sum voice minutes from all analyses
     const totalVoiceMinutes = analyses.reduce((sum, a) => sum + (a.voiceMinutes || 0), 0);
 
     res.json({
@@ -155,6 +277,42 @@ export function createRelationshipRouter(
     } catch (err: any) {
       res.status(500).json({ error: err?.message || "Analysis failed" });
     }
+  });
+
+  // POST /api/relationship/backfill — fetch WhatsApp history for Hope's chat
+  router.post("/backfill", async (req: Request, res: Response) => {
+    try {
+      const count = await backfillTrigger();
+      res.json({ ok: true, messagesImported: count });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || "Backfill failed" });
+    }
+  });
+
+  // POST /api/relationship/import — import WhatsApp .txt export
+  // Body: { text: "...raw .txt file content..." }
+  router.post("/import", (req: Request, res: Response) => {
+    const { text } = req.body;
+    if (!text || typeof text !== "string") {
+      res.status(400).json({ error: "Missing 'text' field with .txt file content" });
+      return;
+    }
+
+    const parsed = parseWhatsAppExport(text);
+    let imported = 0;
+    for (const msg of parsed) {
+      if (!store.isDuplicate(msg.id)) {
+        store.saveMessage(msg);
+        imported++;
+      }
+    }
+
+    res.json({
+      ok: true,
+      imported,
+      total: parsed.length,
+      duplicates: parsed.length - imported,
+    });
   });
 
   return router;

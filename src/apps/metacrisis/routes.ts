@@ -4,7 +4,8 @@ import { MetacrisisStore } from "./store";
 export function createMetacrisisRouter(
   store: MetacrisisStore,
   summarizeTrigger: () => Promise<void>,
-  pushToWhatsApp: (date: string) => Promise<void>
+  pushToWhatsApp: (date: string) => Promise<void>,
+  backfillTrigger: () => Promise<number>
 ): Router {
   const router = Router();
 
@@ -102,6 +103,16 @@ export function createMetacrisisRouter(
       res.json({ ok: true, date, pushed: true });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || "Push failed" });
+    }
+  });
+
+  // POST /api/metacrisis/backfill — fetch WhatsApp history (last 2 weeks)
+  router.post("/backfill", async (req: Request, res: Response) => {
+    try {
+      const count = await backfillTrigger();
+      res.json({ ok: true, messagesImported: count });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || "Backfill failed" });
     }
   });
 

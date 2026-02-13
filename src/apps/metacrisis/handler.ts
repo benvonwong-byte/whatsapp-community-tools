@@ -6,7 +6,7 @@ import { config } from "../../config";
 const URL_REGEX = /https?:\/\/[^\s<>"')\]]+/gi;
 
 /** Categorize a URL based on its domain */
-function categorizeUrl(url: string): string {
+export function categorizeUrl(url: string): string {
   const lower = url.toLowerCase();
 
   // Event platforms
