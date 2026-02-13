@@ -88,10 +88,10 @@ export class RelationshipStore {
         `INSERT OR REPLACE INTO relationship_analyses (date, metrics_json, summary, message_count, voice_minutes) VALUES (?, ?, ?, ?, ?)`
       ),
       getAnalyses: this.db.prepare(
-        `SELECT * FROM relationship_analyses ORDER BY date DESC LIMIT ?`
+        `SELECT id, date, metrics_json AS metricsJson, summary, message_count AS messageCount, voice_minutes AS voiceMinutes, created_at AS createdAt FROM relationship_analyses ORDER BY date DESC LIMIT ?`
       ),
       getAnalysis: this.db.prepare(
-        `SELECT * FROM relationship_analyses WHERE date = ?`
+        `SELECT id, date, metrics_json AS metricsJson, summary, message_count AS messageCount, voice_minutes AS voiceMinutes, created_at AS createdAt FROM relationship_analyses WHERE date = ?`
       ),
       getMessages: this.db.prepare(
         `SELECT * FROM relationship_messages ORDER BY timestamp DESC LIMIT ?`
@@ -121,7 +121,7 @@ export class RelationshipStore {
         WHERE timestamp >= ? AND timestamp <= ?
       `),
       getAnalysesByRange: this.db.prepare(
-        `SELECT * FROM relationship_analyses WHERE date >= ? AND date <= ? ORDER BY date DESC`
+        `SELECT id, date, metrics_json AS metricsJson, summary, message_count AS messageCount, voice_minutes AS voiceMinutes, created_at AS createdAt FROM relationship_analyses WHERE date >= ? AND date <= ? ORDER BY date DESC`
       ),
       getLastTimestamp: this.db.prepare(
         `SELECT MAX(timestamp) as ts FROM relationship_messages`
@@ -151,6 +151,11 @@ export class RelationshipStore {
       }
     });
     markMany(ids);
+  }
+
+  resetAnalyzedFlags(): number {
+    const result = this.db.prepare(`UPDATE relationship_messages SET analyzed = 0`).run();
+    return result.changes;
   }
 
   saveAnalysis(date: string, metricsJson: string, summary: string, messageCount: number, voiceMinutes: number) {

@@ -278,6 +278,12 @@ export function createRelationshipRouter(
     res.json(analyzeProgress);
   });
 
+  // POST /api/relationship/reset-analyzed — reset all messages to unanalyzed
+  router.post("/reset-analyzed", (_req: Request, res: Response) => {
+    const count = store.resetAnalyzedFlags();
+    res.json({ ok: true, messagesReset: count });
+  });
+
   // POST /api/relationship/analyze — start analysis in background
   router.post("/analyze", (req: Request, res: Response) => {
     if (analyzeProgress.active) {
