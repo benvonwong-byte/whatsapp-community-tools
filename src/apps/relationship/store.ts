@@ -1,0 +1,173 @@
+import Database from "better-sqlite3";
+import { config } from "../../config";
+
+export interface RelationshipMessage {
+  id: string;
+  speaker: "self" | "hope";
+  body: string;
+  transcript: string;
+  timestamp: number;
+  type: "text" | "voice";
+  analyzed: number;
+  createdAt?: string;
+}
+
+export interface RelationshipAnalysis {
+  id: number;
+  date: string;
+  metricsJson: string;
+  summary: string;
+  messageCount: number;
+  voiceMinutes: number;
+  createdAt: string;
+}
+
+export class RelationshipStore {
+  private db: Database.Database;
+  private stmts!: {
+    saveMessage: Database.Statement;
+    isDuplicate: Database.Statement;
+    getUnanalyzed: Database.Statement;
+    markAnalyzed: Database.Statement;
+    saveAnalysis: Database.Statement;
+    getAnalyses: Database.Statement;
+    getAnalysis: Database.Statement;
+    getMessages: Database.Statement;
+    getMessagesByDate: Database.Statement;
+    getStats: Database.Statement;
+    getLastTimestamp: Database.Statement;
+    getTodayCount: Database.Statement;
+  };
+
+  constructor() {
+    this.db = new Database(config.dbPath);
+    this.db.pragma("journal_mode = WAL");
+    this.init();
+  }
+
+  private init() {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS relationship_messages (
+        id TEXT PRIMARY KEY,
+        speaker TEXT NOT NULL,
+        body TEXT DEFAULT '',
+        transcript TEXT DEFAULT '',
+        timestamp INTEGER NOT NULL,
+        type TEXT NOT NULL DEFAULT 'text',
+        analyzed INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_rel_msgs_timestamp ON relationship_messages(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_rel_msgs_analyzed ON relationship_messages(analyzed);
+
+      CREATE TABLE IF NOT EXISTS relationship_analyses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT NOT NULL UNIQUE,
+        metrics_json TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        message_count INTEGER DEFAULT 0,
+        voice_minutes REAL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `);
+
+    this.stmts = {
+      saveMessage: this.db.prepare(
+        `INSERT OR IGNORE INTO relationship_messages (id, speaker, body, transcript, timestamp, type) VALUES (?, ?, ?, ?, ?, ?)`
+      ),
+      isDuplicate: this.db.prepare(`SELECT 1 FROM relationship_messages WHERE id = ?`),
+      getUnanalyzed: this.db.prepare(
+        `SELECT * FROM relationship_messages WHERE analyzed = 0 ORDER BY timestamp ASC`
+      ),
+      markAnalyzed: this.db.prepare(
+        `UPDATE relationship_messages SET analyzed = 1 WHERE id = ?`
+      ),
+      saveAnalysis: this.db.prepare(
+        `INSERT OR REPLACE INTO relationship_analyses (date, metrics_json, summary, message_count, voice_minutes) VALUES (?, ?, ?, ?, ?)`
+      ),
+      getAnalyses: this.db.prepare(
+        `SELECT * FROM relationship_analyses ORDER BY date DESC LIMIT ?`
+      ),
+      getAnalysis: this.db.prepare(
+        `SELECT * FROM relationship_analyses WHERE date = ?`
+      ),
+      getMessages: this.db.prepare(
+        `SELECT * FROM relationship_messages ORDER BY timestamp DESC LIMIT ?`
+      ),
+      getMessagesByDate: this.db.prepare(
+        `SELECT * FROM relationship_messages WHERE date(datetime(timestamp, 'unixepoch')) = ? ORDER BY timestamp ASC`
+      ),
+      getStats: this.db.prepare(`
+        SELECT
+          COUNT(*) as totalMessages,
+          SUM(CASE WHEN speaker = 'self' THEN 1 ELSE 0 END) as selfMessages,
+          SUM(CASE WHEN speaker = 'hope' THEN 1 ELSE 0 END) as hopeMessages,
+          SUM(CASE WHEN type = 'voice' THEN 1 ELSE 0 END) as voiceMessages,
+          MIN(timestamp) as firstTimestamp,
+          MAX(timestamp) as lastTimestamp
+        FROM relationship_messages
+      `),
+      getLastTimestamp: this.db.prepare(
+        `SELECT MAX(timestamp) as ts FROM relationship_messages`
+      ),
+      getTodayCount: this.db.prepare(
+        `SELECT COUNT(*) as count FROM relationship_messages WHERE date(datetime(timestamp, 'unixepoch')) = date('now')`
+      ),
+    };
+  }
+
+  saveMessage(msg: { id: string; speaker: string; body: string; transcript: string; timestamp: number; type: string }) {
+    this.stmts.saveMessage.run(msg.id, msg.speaker, msg.body, msg.transcript, msg.timestamp, msg.type);
+  }
+
+  isDuplicate(id: string): boolean {
+    return !!this.stmts.isDuplicate.get(id);
+  }
+
+  getUnanalyzedMessages(): RelationshipMessage[] {
+    return this.stmts.getUnanalyzed.all() as RelationshipMessage[];
+  }
+
+  markAnalyzed(ids: string[]) {
+    const markMany = this.db.transaction((messageIds: string[]) => {
+      for (const id of messageIds) {
+        this.stmts.markAnalyzed.run(id);
+      }
+    });
+    markMany(ids);
+  }
+
+  saveAnalysis(date: string, metricsJson: string, summary: string, messageCount: number, voiceMinutes: number) {
+    this.stmts.saveAnalysis.run(date, metricsJson, summary, messageCount, voiceMinutes);
+  }
+
+  getAnalyses(limit: number = 30): RelationshipAnalysis[] {
+    return this.stmts.getAnalyses.all(limit) as RelationshipAnalysis[];
+  }
+
+  getAnalysis(date: string): RelationshipAnalysis | undefined {
+    return this.stmts.getAnalysis.get(date) as RelationshipAnalysis | undefined;
+  }
+
+  getMessages(limit: number = 50): RelationshipMessage[] {
+    return this.stmts.getMessages.all(limit) as RelationshipMessage[];
+  }
+
+  getMessagesByDate(date: string): RelationshipMessage[] {
+    return this.stmts.getMessagesByDate.all(date) as RelationshipMessage[];
+  }
+
+  getStats() {
+    return this.stmts.getStats.get() as any;
+  }
+
+  getHealth() {
+    const lastTs = (this.stmts.getLastTimestamp.get() as any)?.ts || null;
+    const todayCount = (this.stmts.getTodayCount.get() as any)?.count || 0;
+    return { lastMessageTimestamp: lastTs, todayMessageCount: todayCount };
+  }
+
+  close() {
+    this.db.close();
+  }
+}

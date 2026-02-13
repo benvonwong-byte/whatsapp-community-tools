@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Relationship Health Dashboard</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💕</text></svg>">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #121212;
+      --surface: #1e1e1e;
+      --surface2: #2a2a2a;
+      --border: #333;
+      --text: #e0e0e0;
+      --text-dim: #888;
+      --accent: #4fc3f7;
+      --green: #00b894;
+      --yellow: #fdcb6e;
+      --red: #d63031;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Header */
+    .header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .header h1 {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      flex: 1;
+    }
+
+    .back-link {
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+
+    .back-link:hover { text-decoration: underline; }
+
+    .analyze-btn {
+      background: var(--accent);
+      color: #000;
+      border: none;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 6px 16px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: opacity 0.15s;
+      white-space: nowrap;
+    }
+
+    .analyze-btn:hover { opacity: 0.85; }
+    .analyze-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* Main container */
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    /* Login gate */
+    .login-gate {
+      text-align: center;
+      padding: 80px 20px;
+      color: var(--text-dim);
+      font-size: 15px;
+      line-height: 1.6;
+    }
+
+    .login-gate a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    .login-gate a:hover { text-decoration: underline; }
+
+    /* Monitoring bar */
+    .monitor-bar {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 12px 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+
+    .monitor-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .monitor-dot.green { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .monitor-dot.yellow { background: var(--yellow); box-shadow: 0 0 6px var(--yellow); }
+    .monitor-dot.red { background: var(--red); box-shadow: 0 0 6px var(--red); }
+
+    .monitor-item {
+      font-size: 13px;
+      color: var(--text-dim);
+    }
+
+    .monitor-item strong {
+      color: var(--text);
+    }
+
+    /* Stats panel */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .stat-card {
+      background: var(--surface);
+      border-radius: 12px;
+      padding: 16px;
+      text-align: center;
+    }
+
+    .stat-value {
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--accent);
+    }
+
+    .stat-label {
+      font-size: 11px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-top: 4px;
+    }
+
+    /* Message ratio bar */
+    .ratio-bar-container {
+      margin-bottom: 20px;
+      background: var(--surface);
+      border-radius: 12px;
+      padding: 16px;
+    }
+
+    .ratio-label {
+      font-size: 12px;
+      color: var(--text-dim);
+      margin-bottom: 8px;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .ratio-bar {
+      height: 8px;
+      border-radius: 4px;
+      overflow: hidden;
+      display: flex;
+      background: var(--surface2);
+    }
+
+    .ratio-fill-left {
+      background: var(--accent);
+      transition: width 0.3s;
+    }
+
+    .ratio-fill-right {
+      background: #e84393;
+      transition: width 0.3s;
+    }
+
+    /* Section panels */
+    .section {
+      background: var(--surface);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+
+    .section-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 16px;
+    }
+
+    /* Health score display */
+    .health-score-display {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      margin-bottom: 16px;
+    }
+
+    .health-score-number {
+      font-size: 64px;
+      font-weight: 800;
+      line-height: 1;
+    }
+
+    .health-score-number.green { color: var(--green); }
+    .health-score-number.yellow { color: var(--yellow); }
+    .health-score-number.red { color: var(--red); }
+
+    .health-summary {
+      flex: 1;
+      font-size: 14px;
+      line-height: 1.6;
+      color: var(--text-dim);
+    }
+
+    .health-date {
+      font-size: 12px;
+      color: var(--text-dim);
+      margin-top: 8px;
+    }
+
+    /* Metric bars */
+    .metric-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+
+    .metric-label {
+      font-size: 13px;
+      color: var(--text);
+      width: 130px;
+      flex-shrink: 0;
+    }
+
+    .metric-bar-bg {
+      flex: 1;
+      height: 8px;
+      background: var(--surface2);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .metric-bar-fill {
+      height: 100%;
+      border-radius: 4px;
+      transition: width 0.4s ease;
+    }
+
+    .metric-value {
+      font-size: 12px;
+      color: var(--text-dim);
+      width: 36px;
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    /* Horsemen dimensions coloring */
+    .metric-bar-fill.horseman { background: var(--red); }
+    .metric-bar-fill.horseman.low { background: var(--green); }
+    .metric-bar-fill.horseman.mid { background: var(--yellow); }
+    .metric-bar-fill.positive { background: var(--green); }
+    .metric-bar-fill.positive.low { background: var(--red); }
+    .metric-bar-fill.positive.mid { background: var(--yellow); }
+    .metric-bar-fill.perel { background: var(--accent); }
+
+    /* Chart section */
+    .chart-container {
+      position: relative;
+      width: 100%;
+      height: 200px;
+    }
+
+    .chart-container canvas {
+      width: 100%;
+      height: 100%;
+    }
+
+    .chart-empty {
+      text-align: center;
+      color: var(--text-dim);
+      font-size: 13px;
+      padding: 60px 0;
+    }
+
+    /* Daily cards */
+    .daily-card {
+      background: var(--surface2);
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      transition: background 0.15s;
+      border-left: 3px solid var(--accent);
+    }
+
+    .daily-card:hover {
+      background: #333;
+    }
+
+    .daily-card-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .daily-card-date {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .daily-card-count {
+      font-size: 11px;
+      color: var(--text-dim);
+      background: var(--surface);
+      padding: 2px 8px;
+      border-radius: 999px;
+    }
+
+    .daily-card-score {
+      font-size: 12px;
+      font-weight: 600;
+      margin-left: auto;
+    }
+
+    .daily-card-score.green { color: var(--green); }
+    .daily-card-score.yellow { color: var(--yellow); }
+    .daily-card-score.red { color: var(--red); }
+
+    .daily-card-summary {
+      font-size: 13px;
+      color: var(--text-dim);
+      margin-top: 8px;
+      line-height: 1.5;
+    }
+
+    .daily-card-messages {
+      display: none;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+    }
+
+    .daily-card-messages.open {
+      display: block;
+    }
+
+    .daily-card.expanded .daily-card-messages {
+      display: block;
+    }
+
+    .message-item {
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .message-item:last-child {
+      border-bottom: none;
+    }
+
+    .message-sender {
+      font-weight: 600;
+      font-size: 12px;
+      margin-bottom: 2px;
+    }
+
+    .message-sender.ben { color: var(--accent); }
+    .message-sender.hope { color: #e84393; }
+
+    .message-time {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-left: 8px;
+      font-weight: 400;
+    }
+
+    .message-text {
+      color: var(--text-dim);
+      word-break: break-word;
+    }
+
+    .message-type-badge {
+      display: inline-block;
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: var(--surface);
+      color: var(--text-dim);
+      margin-left: 4px;
+    }
+
+    .loading-messages {
+      text-align: center;
+      color: var(--text-dim);
+      font-size: 12px;
+      padding: 16px;
+    }
+
+    /* Loading & error states */
+    .loading-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--text-dim);
+      font-size: 15px;
+    }
+
+    .error-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--red);
+      font-size: 14px;
+    }
+
+    .hidden { display: none !important; }
+
+    /* Responsive */
+    @media (max-width: 600px) {
+      .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .header { padding: 12px 16px; }
+      .container { padding: 16px; }
+      .metric-label { width: 100px; font-size: 12px; }
+      .health-score-number { font-size: 48px; }
+      .monitor-bar { gap: 10px; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <a href="/" class="back-link">&larr; Events</a>
+    <h1>Relationship Health</h1>
+    <button id="analyze-btn" class="analyze-btn">Analyze Now</button>
+  </div>
+
+  <!-- Login gate -->
+  <div id="login-gate" class="login-gate hidden">
+    <p>Admin access required.</p>
+    <p>Please <a href="/">log in via the main app</a> first, then return here.</p>
+  </div>
+
+  <!-- Main content (hidden until auth confirmed) -->
+  <div id="main-content" class="container hidden">
+
+    <!-- Loading state -->
+    <div id="loading-state" class="loading-state">Loading dashboard...</div>
+
+    <!-- Error state -->
+    <div id="error-state" class="error-state hidden"></div>
+
+    <!-- Dashboard content (hidden until data loaded) -->
+    <div id="dashboard" class="hidden">
+
+      <!-- Monitoring bar -->
+      <div class="monitor-bar">
+        <span id="monitor-dot" class="monitor-dot red"></span>
+        <span id="monitor-last-msg" class="monitor-item">Last message: <strong>--</strong></span>
+        <span id="monitor-today-count" class="monitor-item">Today: <strong>0</strong> messages</span>
+      </div>
+
+      <!-- Stats panel -->
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-value" id="stat-total-messages">0</div>
+          <div class="stat-label">Total Messages</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-voice-minutes">0</div>
+          <div class="stat-label">Voice Minutes</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-days-tracked">0</div>
+          <div class="stat-label">Days Tracked</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-avg-per-day">0</div>
+          <div class="stat-label">Avg / Day</div>
+        </div>
+      </div>
+
+      <!-- Message ratio -->
+      <div class="ratio-bar-container">
+        <div class="ratio-label">
+          <span id="ratio-left-label">Ben: 50%</span>
+          <span id="ratio-right-label">Hope: 50%</span>
+        </div>
+        <div class="ratio-bar">
+          <div id="ratio-fill-left" class="ratio-fill-left" style="width: 50%"></div>
+          <div id="ratio-fill-right" class="ratio-fill-right" style="width: 50%"></div>
+        </div>
+      </div>
+
+      <!-- Latest Analysis -->
+      <div class="section" id="analysis-section">
+        <div class="section-title">Latest Analysis</div>
+        <div class="health-score-display">
+          <div id="health-score" class="health-score-number green">--</div>
+          <div>
+            <div id="health-summary" class="health-summary">No analysis available yet. Click "Analyze Now" to generate one.</div>
+            <div id="health-date" class="health-date"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Gottman Four Horsemen -->
+      <div class="section" id="horsemen-section">
+        <div class="section-title">Gottman Four Horsemen (lower is better)</div>
+        <div id="horsemen-bars"></div>
+      </div>
+
+      <!-- Gottman Positives -->
+      <div class="section" id="positives-section">
+        <div class="section-title">Gottman Positives (higher is better)</div>
+        <div id="positives-bars"></div>
+      </div>
+
+      <!-- Perel Dimensions -->
+      <div class="section" id="perel-section">
+        <div class="section-title">Perel Dimensions</div>
+        <div id="perel-bars"></div>
+      </div>
+
+      <!-- Health Score Trend Chart -->
+      <div class="section">
+        <div class="section-title">Health Score Trend (30 Days)</div>
+        <div class="chart-container">
+          <canvas id="trend-chart"></canvas>
+          <div id="chart-empty" class="chart-empty hidden">Not enough data for a trend chart yet.</div>
+        </div>
+      </div>
+
+      <!-- Daily Cards -->
+      <div class="section">
+        <div class="section-title">Daily Analyses</div>
+        <div id="daily-cards"></div>
+        <div id="daily-empty" class="chart-empty hidden">No daily analyses yet.</div>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="relationship.js"></script>
+</body>
+</html>

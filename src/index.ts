@@ -4,6 +4,14 @@ import { extractEvents } from "./extractor";
 import { verifyEventDates, fetchPageText } from "./verifier";
 import { startServer, BackfillProgress } from "./server";
 import { EventStore } from "./store";
+import { RelationshipStore } from "./apps/relationship/store";
+import { createRelationshipHandler } from "./apps/relationship/handler";
+import { runDailyAnalysis } from "./apps/relationship/analyzer";
+import { createRelationshipRouter } from "./apps/relationship/routes";
+import { MetacrisisStore } from "./apps/metacrisis/store";
+import { createMetacrisisHandler } from "./apps/metacrisis/handler";
+import { runDailySummary, formatSummaryForWhatsApp } from "./apps/metacrisis/summarizer";
+import { createMetacrisisRouter } from "./apps/metacrisis/routes";
 
 // ── Event link enrichment ──
 
@@ -220,12 +228,53 @@ async function main() {
     return totalEvents;
   };
 
+  // ── Initialize sub-apps ──
+
+  const relationshipStore = new RelationshipStore();
+  console.log("Relationship store initialized.");
+
+  const appRouters: { path: string; router: any }[] = [];
+
+  // Relationship app: monitor private chat, transcribe voice notes, analyze communication
+  const relationshipAnalyze = () => runDailyAnalysis(relationshipStore);
+  whatsapp.addRawMessageListener(createRelationshipHandler(relationshipStore));
+  appRouters.push({
+    path: "/api/relationship",
+    router: createRelationshipRouter(relationshipStore, relationshipAnalyze),
+  });
+
+  // Metacrisis app: capture group messages, summarize, push to announcement channel
+  const metacrisisStore = new MetacrisisStore();
+  console.log("Metacrisis store initialized.");
+
+  const metacrisisSummarize = () => runDailySummary(metacrisisStore);
+  whatsapp.addRawMessageListener(createMetacrisisHandler(metacrisisStore));
+
+  const pushToWhatsApp = async (date: string) => {
+    const summary = metacrisisStore.getSummary(date);
+    if (!summary) throw new Error("No summary for " + date);
+    const topics = JSON.parse(summary.key_topics_json || "[]");
+    const template = metacrisisStore.getSetting("format_template") || "{{summary}}";
+    const formatted = formatSummaryForWhatsApp(summary.summary, topics, date, template);
+
+    const chat = await whatsapp.getChatByName(config.metacrisisAnnouncementChat);
+    if (!chat) throw new Error(`Chat "${config.metacrisisAnnouncementChat}" not found`);
+    await chat.sendMessage(formatted);
+    console.log(`[metacrisis] Pushed summary for ${date} to ${config.metacrisisAnnouncementChat}`);
+  };
+
+  appRouters.push({
+    path: "/api/metacrisis",
+    router: createMetacrisisRouter(metacrisisStore, metacrisisSummarize, pushToWhatsApp),
+  });
+
   startServer({
     store,
     statusChecker: () => ({ whatsappConnected: whatsapp.isConnected() }),
     qrCodeGetter: () => whatsapp.getQrCode(),
     backfillTrigger: runBackfill,
     backfillProgressGetter: () => backfillProgress,
+    appRouters,
   });
 
   // WhatsApp + Claude are optional — skip if no API key
@@ -243,6 +292,14 @@ async function main() {
   });
 
   whatsapp.setGroupBlockedCheck((chatName: string) => store.isGroupBlocked(chatName));
+
+  // Schedule daily relationship analysis + metacrisis summarization
+  scheduleDailyTask(config.analysisHour, async () => {
+    console.log("[scheduler] Running daily relationship analysis...");
+    await relationshipAnalyze();
+    console.log("[scheduler] Running daily metacrisis summary...");
+    await metacrisisSummarize();
+  });
 
   // On ready (initial connect or reconnect), backfill since last event found.
   // Uses the last event's created_at rather than the last processed message,
@@ -280,3 +337,28 @@ main().catch((err) => {
   console.error("Fatal error:", err);
   process.exit(1);
 });
+
+// ── Daily task scheduler ──
+
+function scheduleDailyTask(hour: number, task: () => Promise<void>) {
+  const schedule = () => {
+    const now = new Date();
+    const next = new Date(now);
+    next.setHours(hour, 0, 0, 0);
+    if (next <= now) next.setDate(next.getDate() + 1);
+
+    const delay = next.getTime() - now.getTime();
+    console.log(`[scheduler] Next daily task in ${(delay / 3600000).toFixed(1)}h at ${next.toISOString()}`);
+
+    setTimeout(async () => {
+      try {
+        await task();
+      } catch (err) {
+        console.error("[scheduler] Daily task failed:", err);
+      }
+      schedule(); // reschedule for next day
+    }, delay);
+  };
+
+  schedule();
+}
