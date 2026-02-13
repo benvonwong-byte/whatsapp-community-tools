@@ -143,17 +143,37 @@ export async function runDailyAnalysis(
     const response = await client.messages.create({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 4096,
-      messages: [{ role: "user", content: buildAnalysisPrompt(truncated, messages.length, today) }],
+      messages: [
+        { role: "user", content: buildAnalysisPrompt(truncated, messages.length, today) },
+        { role: "assistant", content: "{" },  // Prefill forces clean JSON output
+      ],
     });
 
     const text = response.content[0].type === "text" ? response.content[0].text : "";
 
-    let jsonStr = text.trim();
-    if (jsonStr.startsWith("```")) {
-      jsonStr = jsonStr.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
+    // Reconstruct full JSON (prefill started with "{")
+    let jsonStr = "{" + text.trim();
+    // Strip markdown fences if present
+    if (jsonStr.includes("```")) {
+      jsonStr = jsonStr.replace(/```(?:json)?\n?/g, "").replace(/\n?```/g, "");
     }
+    // Remove trailing content after the last }
+    const lastBrace = jsonStr.lastIndexOf("}");
+    if (lastBrace !== -1) jsonStr = jsonStr.slice(0, lastBrace + 1);
 
-    const parsed = JSON.parse(jsonStr);
+    let parsed: any;
+    try {
+      parsed = JSON.parse(jsonStr);
+    } catch (parseErr) {
+      // Attempt to salvage: strip evidence (most common source of broken JSON)
+      logProgress(progress, `JSON parse failed, retrying without evidence...`);
+      const noEvidence = jsonStr.replace(/"evidence"\s*:\s*\{[^}]*(?:\{[^}]*\}[^}]*)*\}/s, '"evidence": {}');
+      try {
+        parsed = JSON.parse(noEvidence);
+      } catch {
+        throw parseErr; // Give up with original error
+      }
+    }
     logProgress(progress, `Analysis received. Health score: ${parsed.metrics.overallHealthScore}/100`);
 
     if (progress) progress.phase = "saving";
