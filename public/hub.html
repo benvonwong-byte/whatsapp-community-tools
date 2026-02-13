@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard Hub</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏠</text></svg>">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --bg: #121212;
+      --surface: #1e1e1e;
+      --surface2: #2a2a2a;
+      --border: #333;
+      --text: #e0e0e0;
+      --text-dim: #888;
+      --accent: #4fc3f7;
+      --green: #00b894;
+      --yellow: #fdcb6e;
+      --red: #d63031;
+      --pink: #e84393;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      -webkit-font-smoothing: antialiased;
+    }
+    h1 {
+      font-size: 24px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      margin-bottom: 6px;
+    }
+    .subtitle {
+      font-size: 13px;
+      color: var(--text-dim);
+      margin-bottom: 32px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      max-width: 640px;
+      width: 100%;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 24px;
+      text-decoration: none;
+      color: var(--text);
+      transition: all 0.2s;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      position: relative;
+      overflow: hidden;
+    }
+    .card:hover {
+      border-color: var(--accent);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+    }
+    .card-icon {
+      font-size: 36px;
+      line-height: 1;
+    }
+    .card-title {
+      font-size: 16px;
+      font-weight: 700;
+    }
+    .card-desc {
+      font-size: 12px;
+      color: var(--text-dim);
+      line-height: 1.5;
+    }
+    .card-accent {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+    }
+    .card-events .card-accent { background: var(--accent); }
+    .card-relationship .card-accent { background: var(--pink); }
+    .card-friends .card-accent { background: var(--green); }
+    .card-metacrisis .card-accent { background: var(--yellow); }
+
+    .card-events:hover { border-color: var(--accent); }
+    .card-relationship:hover { border-color: var(--pink); }
+    .card-friends:hover { border-color: var(--green); }
+    .card-metacrisis:hover { border-color: var(--yellow); }
+
+    .footer {
+      margin-top: 32px;
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+    .footer a { color: var(--accent); text-decoration: none; }
+    .footer a:hover { text-decoration: underline; }
+
+    @media (max-width: 500px) {
+      .grid { grid-template-columns: 1fr; max-width: 360px; }
+      h1 { font-size: 20px; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Von Wong Dashboards</h1>
+  <div class="subtitle">Choose a dashboard to view</div>
+
+  <div class="grid">
+    <a class="card card-events" href="/" id="link-events">
+      <div class="card-accent"></div>
+      <div class="card-icon">📅</div>
+      <div class="card-title">NYC Events</div>
+      <div class="card-desc">WhatsApp-scraped events calendar with search, categories, and favorites.</div>
+    </a>
+
+    <a class="card card-relationship" href="/relationship.html" id="link-relationship">
+      <div class="card-accent"></div>
+      <div class="card-icon">💕</div>
+      <div class="card-title">Relationship Health</div>
+      <div class="card-desc">Gottman &amp; Perel analysis of communication patterns with Hope.</div>
+    </a>
+
+    <a class="card card-friends" href="/friends.html" id="link-friends">
+      <div class="card-accent"></div>
+      <div class="card-icon">👥</div>
+      <div class="card-title">Friends &amp; Network</div>
+      <div class="card-desc">Contact activity tracking, groups, and messaging portal.</div>
+    </a>
+
+    <a class="card card-metacrisis" href="/metacrisis.html" id="link-metacrisis">
+      <div class="card-accent"></div>
+      <div class="card-icon">🌍</div>
+      <div class="card-title">Metacrisis</div>
+      <div class="card-desc">Curated links and daily summaries from the metacrisis group.</div>
+    </a>
+  </div>
+
+  <div class="footer">
+    Admin access required &middot; <a href="/">Login via Events</a>
+  </div>
+
+  <script>
+    // Carry admin token to all links
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get("token") || params.get("admin") || localStorage.getItem("adminToken");
+    if (token) {
+      localStorage.setItem("adminToken", token);
+      document.querySelectorAll(".card").forEach(link => {
+        const url = new URL(link.href, window.location.origin);
+        url.searchParams.set("token", token);
+        link.href = url.toString();
+      });
+    }
+  </script>
+</body>
+</html>

@@ -278,9 +278,11 @@
     .bank-count { font-size: 20px; font-weight: 700; color: var(--text); }
     .bank-target { font-size: 10px; color: var(--text-dim); margin-top: 8px; }
 
-    /* Connection Grid */
-    .connection-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 14px; }
-    .connection-grid .section { margin-bottom: 0; }
+    /* Connection Grid (4-col with radar) */
+    .connection-grid-4 { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 10px; margin-bottom: 14px; }
+    .connection-grid-4 .section { margin-bottom: 0; }
+    #radar-section { padding: 12px; min-width: 160px; }
+    #radar-section .radar-chart-container { max-width: 160px; margin: 0 auto; }
 
     /* Bids */
     .bid-bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
@@ -440,7 +442,7 @@
       .health-score-number { font-size: 44px; }
       .toolbar { gap: 8px; }
       .perel-gauges { flex-wrap: wrap; }
-      .connection-grid { grid-template-columns: 1fr; }
+      .connection-grid-4 { grid-template-columns: 1fr; }
       .recs-grid { grid-template-columns: 1fr; }
       .bank-layout { flex-direction: column; }
     }
@@ -623,8 +625,8 @@
           </div>
         </div>
 
-        <!-- Connection Patterns (3-column grid) -->
-        <div class="connection-grid">
+        <!-- Connection Patterns (4-column grid with radar) -->
+        <div class="connection-grid-4">
           <!-- Bids for Connection -->
           <div class="section" id="bids-section">
             <div class="section-title">Bids for Connection</div>
@@ -679,13 +681,12 @@
               </div>
             </div>
           </div>
-        </div>
-
-        <!-- Radar chart (promoted, no longer collapsed) -->
-        <div class="section">
-          <div class="section-title">Relationship Radar</div>
-          <div class="radar-chart-container" style="text-align:center">
-            <canvas id="radar-chart"></canvas>
+          <!-- Radar chart (compact) -->
+          <div class="section" id="radar-section">
+            <div class="section-title">Radar</div>
+            <div class="radar-chart-container" style="text-align:center">
+              <canvas id="radar-chart"></canvas>
+            </div>
           </div>
         </div>
       </div>
@@ -734,25 +735,6 @@
         <div class="section">
           <div class="section-title">Perel Dimensions</div>
           <div id="perel-gauges" class="perel-gauges"></div>
-        </div>
-
-        <!-- Specific Recommendations (3-col) -->
-        <div class="section" id="recommendations-section">
-          <div class="section-title">Specific Recommendations</div>
-          <div class="recs-grid">
-            <div class="rec-column">
-              <div class="rec-header ben">For Ben</div>
-              <ul class="rec-list" id="recs-ben"></ul>
-            </div>
-            <div class="rec-column">
-              <div class="rec-header hope">For Hope</div>
-              <ul class="rec-list" id="recs-hope"></ul>
-            </div>
-            <div class="rec-column">
-              <div class="rec-header both">Together</div>
-              <ul class="rec-list" id="recs-both"></ul>
-            </div>
-          </div>
         </div>
 
         <!-- Daily Analyses -->

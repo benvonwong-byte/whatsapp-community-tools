@@ -91,7 +91,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupUpdateControls();
   setupTrendChartInteractivity();
   loadDashboard();
-  refreshTimer = setInterval(loadDashboard, 60000);
+  refreshTimer = setInterval(loadDashboard, 30000);
 });
 
 // ── Date Range Controls ──
@@ -510,7 +510,6 @@ function renderDashboard() {
   renderHorsemen(d);
   renderPositives(d);
   renderPerelGauges(d);
-  renderRecommendations(d);
   renderDailyCards(d);
 }
 
@@ -1013,16 +1012,16 @@ function renderRadarChart(d) {
 
   const ctx = canvas.getContext("2d");
   const dpr = window.devicePixelRatio || 1;
-  const size = Math.min(canvas.parentElement.getBoundingClientRect().width, 260);
+  const size = Math.min(canvas.parentElement.getBoundingClientRect().width, 160);
   canvas.width = size * dpr; canvas.height = size * dpr;
   canvas.style.width = size + "px"; canvas.style.height = size + "px";
   ctx.scale(dpr, dpr);
 
-  const cx = size / 2, cy = size / 2, radius = size * 0.34;
+  const cx = size / 2, cy = size / 2, radius = size * 0.30;
 
   // 7 axes: horsemen inverted + positives
-  const labels = ["Low Criticism", "Low Contempt", "Low Stonewalling", "Low Defensive",
-                  "Fondness", "Turning Toward", "Repair"];
+  const labels = ["Lo Crit", "Lo Cont", "Lo Stone", "Lo Def",
+                  "Fondness", "Turning", "Repair"];
   const values = [
     100 - (a.horsemen.criticism || 0),
     100 - (a.horsemen.contempt || 0),
@@ -1052,7 +1051,7 @@ function renderRadarChart(d) {
   });
 
   // Axis lines + labels
-  ctx.font = "9px -apple-system, sans-serif";
+  ctx.font = "7px -apple-system, sans-serif";
   ctx.fillStyle = "#888";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
@@ -1066,8 +1065,8 @@ function renderRadarChart(d) {
     ctx.strokeStyle = "#333";
     ctx.lineWidth = 0.5;
     ctx.stroke();
-    const lx = cx + Math.cos(angle) * (radius + 18);
-    const ly = cy + Math.sin(angle) * (radius + 18);
+    const lx = cx + Math.cos(angle) * (radius + 14);
+    const ly = cy + Math.sin(angle) * (radius + 14);
     ctx.fillText(labels[i], lx, ly);
   }
 
@@ -1383,37 +1382,6 @@ function renderCommunicationBalance(d) {
     var hopeAvg = fmtTime(rt.hope ? rt.hope.avgSec : null);
     rtEl.innerHTML = '<span style="color:var(--accent)">Ben: ' + benAvg + '</span> &middot; <span style="color:var(--pink)">Hope: ' + hopeAvg + '</span>';
   }
-}
-
-// ── Recommendations ──
-
-function renderRecommendations(d) {
-  var benEl = $("recs-ben");
-  var hopeEl = $("recs-hope");
-  var bothEl = $("recs-both");
-  var section = $("recommendations-section");
-  if (!benEl) return;
-
-  var recs = d.latestAnalysis ? d.latestAnalysis.recommendations : null;
-
-  if (!recs) {
-    if (section) section.classList.add("hidden");
-    return;
-  }
-  if (section) section.classList.remove("hidden");
-
-  function renderList(el, items) {
-    if (!el) return;
-    if (!items || items.length === 0) {
-      el.innerHTML = '<li style="color:var(--text-dim)">No specific suggestions</li>';
-      return;
-    }
-    el.innerHTML = items.map(function(item) { return '<li>' + escapeHtml(item) + '</li>'; }).join("");
-  }
-
-  renderList(benEl, recs.forBen);
-  renderList(hopeEl, recs.forHope);
-  renderList(bothEl, recs.forBoth);
 }
 
 // ── Daily Cards (with voice tags) ──

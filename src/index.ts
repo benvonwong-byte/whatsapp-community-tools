@@ -649,6 +649,31 @@ async function main() {
     await metacrisisSummarize();
   });
 
+  // ── Real-time relationship auto-analysis ──
+  // Every 30 minutes, reset today's analyzed flags and re-analyze
+  // so the dashboard reflects the latest messages throughout the day.
+  const AUTO_ANALYZE_INTERVAL = 30 * 60 * 1000; // 30 minutes
+  setInterval(async () => {
+    if (relationshipAnalyzeProgress.active) {
+      console.log("[auto-analyze] Analysis already in progress, skipping.");
+      return;
+    }
+
+    // Reset today's messages so re-analysis includes new ones
+    const resetCount = relationshipStore.resetTodayAnalyzedFlags();
+    const unanalyzedCount = relationshipStore.getUnanalyzedCount();
+
+    if (unanalyzedCount === 0) return; // Nothing to analyze
+
+    console.log(`[auto-analyze] ${unanalyzedCount} unanalyzed messages (${resetCount} from today reset). Starting auto-analysis...`);
+    try {
+      await relationshipAnalyze();
+      console.log("[auto-analyze] Auto-analysis complete.");
+    } catch (err: any) {
+      console.error("[auto-analyze] Failed:", err?.message || err);
+    }
+  }, AUTO_ANALYZE_INTERVAL);
+
   // On ready (initial connect or reconnect), backfill since last event found.
   // Uses the last event's created_at rather than the last processed message,
   // because real-time messages keep updating the processed timestamp even

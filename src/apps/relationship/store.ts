@@ -234,6 +234,20 @@ export class RelationshipStore {
     return result.changes;
   }
 
+  /** Reset only today's messages to unanalyzed so re-analysis captures new messages */
+  resetTodayAnalyzedFlags(): number {
+    const result = this.db.prepare(
+      `UPDATE relationship_messages SET analyzed = 0 WHERE date(datetime(timestamp, 'unixepoch')) = date('now')`
+    ).run();
+    return result.changes;
+  }
+
+  /** Count unanalyzed messages */
+  getUnanalyzedCount(): number {
+    const row = this.db.prepare(`SELECT COUNT(*) as count FROM relationship_messages WHERE analyzed = 0`).get() as { count: number };
+    return row?.count ?? 0;
+  }
+
   saveAnalysis(date: string, metricsJson: string, summary: string, messageCount: number, voiceMinutes: number) {
     this.stmts.saveAnalysis.run(date, metricsJson, summary, messageCount, voiceMinutes);
   }
