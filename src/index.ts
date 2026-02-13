@@ -5,7 +5,7 @@ import { verifyEventDates, fetchPageText } from "./verifier";
 import { startServer, BackfillProgress } from "./server";
 import { EventStore } from "./store";
 import { RelationshipStore } from "./apps/relationship/store";
-import { createRelationshipHandler } from "./apps/relationship/handler";
+import { createRelationshipHandler, transcribeVoiceNote } from "./apps/relationship/handler";
 import { runDailyAnalysis, AnalyzeProgress } from "./apps/relationship/analyzer";
 import { createRelationshipRouter } from "./apps/relationship/routes";
 import { MetacrisisStore } from "./apps/metacrisis/store";
@@ -264,29 +264,109 @@ async function main() {
     const messages = await chat.fetchMessages({ limit: 10000 });
 
     let saved = 0;
+    let transcribed = 0;
     for (const msg of messages) {
-      if (!msg.body && (msg as any).type !== "ptt") continue;
+      const isPtt = (msg as any).type === "ptt";
+      if (!msg.body && !isPtt) continue;
       if (relationshipStore.isDuplicate(msg.id._serialized)) continue;
 
       const speaker = msg.fromMe ? "self" : "hope";
-      relationshipStore.saveMessage({
-        id: msg.id._serialized,
-        speaker,
-        body: msg.body || "",
-        transcript: "",
-        timestamp: msg.timestamp,
-        type: (msg as any).type === "ptt" ? "voice" : "text",
-      });
+
+      // For voice notes, try to download and transcribe
+      if (isPtt) {
+        let transcript = "";
+        try {
+          const media = await msg.downloadMedia();
+          if (media) {
+            transcript = await transcribeVoiceNote(media.data, media.mimetype);
+            if (transcript) transcribed++;
+          }
+        } catch (err: any) {
+          console.log(`[relationship-backfill] Voice transcription failed: ${err?.message || err}`);
+        }
+        relationshipStore.saveMessage({
+          id: msg.id._serialized,
+          speaker,
+          body: transcript ? "" : "[voice note - transcription failed]",
+          transcript,
+          timestamp: msg.timestamp,
+          type: "voice",
+        });
+      } else {
+        relationshipStore.saveMessage({
+          id: msg.id._serialized,
+          speaker,
+          body: msg.body || "",
+          transcript: "",
+          timestamp: msg.timestamp,
+          type: "text",
+        });
+      }
       saved++;
     }
 
-    console.log(`[relationship-backfill] Imported ${saved} messages (${messages.length - saved} skipped/duplicates).`);
+    console.log(`[relationship-backfill] Imported ${saved} messages (${transcribed} voice transcribed, ${messages.length - saved} skipped/duplicates).`);
     return saved;
+  };
+
+  // Retro-transcribe: find voice messages with empty transcripts, re-fetch from WhatsApp, transcribe
+  const relationshipTranscribe = async (): Promise<number> => {
+    const untranscribed = relationshipStore.getUntranscribedVoiceMessages();
+    if (untranscribed.length === 0) {
+      console.log("[relationship-transcribe] No untranscribed voice messages found.");
+      return 0;
+    }
+
+    console.log(`[relationship-transcribe] Found ${untranscribed.length} untranscribed voice messages. Fetching from WhatsApp...`);
+
+    const chat = await whatsapp.getChatByName(config.relationshipChatName);
+    if (!chat) throw new Error(`Chat "${config.relationshipChatName}" not found`);
+
+    // Fetch messages from WhatsApp to get access to downloadMedia
+    const waMessages = await chat.fetchMessages({ limit: 10000 });
+    const waMap = new Map<string, any>();
+    for (const m of waMessages) {
+      waMap.set(m.id._serialized, m);
+    }
+
+    let success = 0;
+    let failed = 0;
+    for (const dbMsg of untranscribed) {
+      const waMsg = waMap.get(dbMsg.id);
+      if (!waMsg) {
+        console.log(`[relationship-transcribe] Message ${dbMsg.id} not found in WhatsApp (may be too old)`);
+        failed++;
+        continue;
+      }
+
+      try {
+        const media = await waMsg.downloadMedia();
+        if (!media) {
+          console.log(`[relationship-transcribe] No media for ${dbMsg.id}`);
+          failed++;
+          continue;
+        }
+        const transcript = await transcribeVoiceNote(media.data, media.mimetype);
+        if (transcript) {
+          relationshipStore.updateTranscript(dbMsg.id, transcript);
+          console.log(`[relationship-transcribe] Transcribed: "${transcript.slice(0, 60)}..."`);
+          success++;
+        } else {
+          failed++;
+        }
+      } catch (err: any) {
+        console.log(`[relationship-transcribe] Failed ${dbMsg.id}: ${err?.message || err}`);
+        failed++;
+      }
+    }
+
+    console.log(`[relationship-transcribe] Done: ${success} transcribed, ${failed} failed out of ${untranscribed.length}.`);
+    return success;
   };
 
   appRouters.push({
     path: "/api/relationship",
-    router: createRelationshipRouter(relationshipStore, relationshipAnalyze, relationshipBackfill, relationshipAnalyzeProgress),
+    router: createRelationshipRouter(relationshipStore, relationshipAnalyze, relationshipBackfill, relationshipTranscribe, relationshipAnalyzeProgress),
   });
 
   // Metacrisis app: capture group messages, summarize, push to announcement channel

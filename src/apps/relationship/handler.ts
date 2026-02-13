@@ -6,7 +6,7 @@ import { config } from "../../config";
  * Transcribe a voice note using Groq Whisper API (free tier).
  * WhatsApp voice notes are OGG/Opus — Groq accepts them directly.
  */
-async function transcribeVoiceNote(base64Data: string, mimetype: string): Promise<string> {
+export async function transcribeVoiceNote(base64Data: string, mimetype: string): Promise<string> {
   if (!config.groqApiKey) {
     console.log("[relationship] No GROQ_API_KEY set, skipping voice transcription");
     return "";

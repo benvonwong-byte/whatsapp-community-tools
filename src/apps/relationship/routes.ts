@@ -164,6 +164,7 @@ export function createRelationshipRouter(
   store: RelationshipStore,
   analyzeTrigger: () => Promise<void>,
   backfillTrigger: () => Promise<number>,
+  transcribeTrigger: () => Promise<number>,
   analyzeProgress: AnalyzeProgress
 ): Router {
   const router = Router();
@@ -329,6 +330,16 @@ export function createRelationshipRouter(
       res.json({ ok: true, messagesImported: count });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || "Backfill failed" });
+    }
+  });
+
+  // POST /api/relationship/transcribe — retro-transcribe voice messages with empty transcripts
+  router.post("/transcribe", async (req: Request, res: Response) => {
+    try {
+      const count = await transcribeTrigger();
+      res.json({ ok: true, transcribed: count });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || "Transcription failed" });
     }
   });
 

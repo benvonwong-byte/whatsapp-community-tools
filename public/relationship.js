@@ -83,6 +83,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupDateRangeControls();
   setupAnalyzeButton();
   setupBackfillButton();
+  setupTranscribeButton();
   setupImportButton();
   setupMetricsToggle();
   loadDashboard();
@@ -303,6 +304,31 @@ function setupBackfillButton() {
     } finally {
       btn.disabled = false;
       btn.textContent = "Backfill";
+    }
+  });
+}
+
+// ── Transcribe Voice Notes ──
+
+function setupTranscribeButton() {
+  const btn = $("transcribe-btn");
+  if (!btn) return;
+  btn.addEventListener("click", async () => {
+    if (btn.disabled) return;
+    if (!confirm("Transcribe all untranscribed voice notes via Groq Whisper? This re-fetches messages from WhatsApp.")) return;
+    btn.disabled = true;
+    btn.textContent = "Transcribing...";
+    try {
+      const res = await adminFetch("/api/relationship/transcribe", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Transcription failed");
+      alert(`Transcription complete! ${data.transcribed} voice notes transcribed.`);
+      await loadDashboard();
+    } catch (err) {
+      alert("Transcription failed: " + err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Transcribe Voice";
     }
   });
 }

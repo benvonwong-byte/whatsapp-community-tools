@@ -44,6 +44,8 @@ export class RelationshipStore {
     getInitiatorStats: Database.Statement;
     getResponseTimes: Database.Statement;
     getVolumeByDay: Database.Statement;
+    getUntranscribedVoice: Database.Statement;
+    updateTranscript: Database.Statement;
   };
 
   constructor() {
@@ -184,6 +186,12 @@ export class RelationshipStore {
         GROUP BY day, speaker
         ORDER BY day ASC
       `),
+      getUntranscribedVoice: this.db.prepare(
+        `SELECT * FROM relationship_messages WHERE type = 'voice' AND (transcript = '' OR transcript IS NULL) ORDER BY timestamp ASC`
+      ),
+      updateTranscript: this.db.prepare(
+        `UPDATE relationship_messages SET transcript = ? WHERE id = ?`
+      ),
     };
   }
 
@@ -263,6 +271,14 @@ export class RelationshipStore {
 
   getVolumeByDay(startTs: number, endTs: number) {
     return this.stmts.getVolumeByDay.all(startTs, endTs) as Array<{ day: string; speaker: string; count: number }>;
+  }
+
+  getUntranscribedVoiceMessages(): RelationshipMessage[] {
+    return this.stmts.getUntranscribedVoice.all() as RelationshipMessage[];
+  }
+
+  updateTranscript(id: string, transcript: string) {
+    this.stmts.updateTranscript.run(transcript, id);
   }
 
   getHealth() {
