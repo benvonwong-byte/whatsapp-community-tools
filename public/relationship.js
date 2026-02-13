@@ -30,6 +30,9 @@ let analyzePollTimer = null;
 // Date range state
 let dateRange = { startDate: null, endDate: null, preset: "30" };
 
+// Trend chart interactivity state
+let trendPoints = []; // [{x, y, score, date, summary, tone}]
+
 function toDateStr(d) { return d.toISOString().split("T")[0]; }
 
 function setPresetRange(days) {
@@ -86,7 +89,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupTranscribeButton();
   setupImportButton();
   setupUpdateControls();
-  setupMetricsToggle();
+  setupTrendChartInteractivity();
   loadDashboard();
   refreshTimer = setInterval(loadDashboard, 60000);
 });
@@ -485,21 +488,29 @@ function renderDashboard() {
   if (dash) dash.classList.remove("hidden");
 
   const d = dashboardData;
+  // Toolbar
   renderMonitorBar(d);
-  renderActionCard(d);
+  // Zone 1: Action
+  renderActionCards(d);
+  renderNotableQuotes(d);
+  // Zone 2: Trend
+  renderTrendChart(d);
+  // Zone 3: Overview
+  renderHealthScoreHero(d);
   renderBankAccount(d);
+  renderWaryOf(d);
+  renderLanguageEmotion(d);
   renderBids(d);
   renderPursueWithdraw(d);
   renderCommunicationBalance(d);
-  renderRecommendations(d);
-  renderLatestAnalysis(d);
-  renderTrendChart(d);
+  renderRadarChart(d);
+  // Zone 4: Granular
   renderStats(d);
   renderSparklines(d);
-  renderRadarChart(d);
   renderHorsemen(d);
   renderPositives(d);
   renderPerelGauges(d);
+  renderRecommendations(d);
   renderDailyCards(d);
 }
 
@@ -523,6 +534,425 @@ function renderMonitorBar(d) {
     ? `Last: <strong>${formatRelativeTime(lastMsg)}</strong>`
     : `Last: <strong>--</strong>`;
   todayEl.innerHTML = `Today: <strong>${todayCount}</strong>`;
+}
+
+// ── ZONE 1: ACTION ──
+
+function renderActionCards(d) {
+  const a = d.latestAnalysis;
+  const recs = a ? a.recommendations : null;
+
+  // Ben card
+  const benText = $("action-ben-text");
+  const benCtx = $("action-ben-context");
+  if (benText) {
+    if (recs && recs.forBen && recs.forBen.length > 0) {
+      benText.textContent = recs.forBen[0];
+      if (benCtx) benCtx.textContent = recs.forBen.length > 1 ? recs.forBen.slice(1).join(" ") : "";
+    } else {
+      benText.textContent = "Run an analysis to get recommendations.";
+      if (benCtx) benCtx.textContent = "";
+    }
+  }
+
+  // Hope card
+  const hopeText = $("action-hope-text");
+  const hopeCtx = $("action-hope-context");
+  if (hopeText) {
+    if (recs && recs.forHope && recs.forHope.length > 0) {
+      hopeText.textContent = recs.forHope[0];
+      if (hopeCtx) hopeCtx.textContent = recs.forHope.length > 1 ? recs.forHope.slice(1).join(" ") : "";
+    } else {
+      hopeText.textContent = "Run an analysis to get recommendations.";
+      if (hopeCtx) hopeCtx.textContent = "";
+    }
+  }
+
+  // Together card
+  const togetherText = $("action-together-text");
+  const togetherCtx = $("action-together-context");
+  if (togetherText) {
+    if (recs && recs.forBoth && recs.forBoth.length > 0) {
+      togetherText.textContent = recs.forBoth[0];
+      if (togetherCtx) togetherCtx.textContent = recs.forBoth.length > 1 ? recs.forBoth.slice(1).join(" ") : "";
+    } else {
+      togetherText.textContent = "Run an analysis to get recommendations.";
+      if (togetherCtx) togetherCtx.textContent = "";
+    }
+  }
+}
+
+function renderNotableQuotes(d) {
+  const section = $("notable-quotes-section");
+  const container = $("notable-quotes-content");
+  if (!section || !container) return;
+
+  const quotes = d.latestAnalysis ? d.latestAnalysis.notableQuotes : null;
+  if (!quotes || quotes.length === 0) {
+    section.classList.add("hidden");
+    return;
+  }
+  section.classList.remove("hidden");
+
+  container.innerHTML = quotes.map(q => {
+    const isHope = (q.speaker || "").toLowerCase() === "hope";
+    const cls = isHope ? "notable-quote-card hope" : "notable-quote-card";
+    const label = q.label || "insight";
+    return `<div class="${cls}">
+      <div class="quote-text">"${escapeHtml(q.quote)}"</div>
+      <div class="quote-meta">
+        <span style="color:${isHope ? 'var(--pink)' : 'var(--accent)'}">${escapeHtml(q.speaker || "Unknown")}</span>
+        <span class="quote-label">${escapeHtml(label)}</span>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+// ── ZONE 2: TREND (Interactive) ──
+
+function renderTrendChart(d) {
+  const canvas = $("trend-chart");
+  const emptyEl = $("chart-empty");
+  if (!canvas || !emptyEl) return;
+  const trend = d.trend || [];
+  const dailyAnalyses = d.dailyAnalyses || [];
+
+  // Build lookup for summaries/tones by date
+  const dayLookup = {};
+  for (const da of dailyAnalyses) {
+    dayLookup[da.date] = da;
+  }
+
+  if (trend.length < 2) {
+    canvas.style.display = "none";
+    emptyEl.classList.remove("hidden");
+    trendPoints = [];
+    return;
+  }
+
+  canvas.style.display = "block";
+  emptyEl.classList.add("hidden");
+
+  const ctx = canvas.getContext("2d");
+  const dpr = window.devicePixelRatio || 1;
+  const container = canvas.parentElement;
+  const rect = container.getBoundingClientRect();
+  const W = rect.width;
+  const H = rect.height;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width = W + "px";
+  canvas.style.height = H + "px";
+  ctx.scale(dpr, dpr);
+
+  const pL = 36, pR = 12, pT = 16, pB = 28;
+  const cW = W - pL - pR, cH = H - pT - pB;
+
+  ctx.clearRect(0, 0, W, H);
+
+  // Grid lines
+  ctx.strokeStyle = "#333"; ctx.lineWidth = 0.5;
+  ctx.font = "10px -apple-system, sans-serif";
+  ctx.fillStyle = "#666"; ctx.textAlign = "right";
+  for (let yVal = 0; yVal <= 100; yVal += 25) {
+    const y = pT + cH - (yVal / 100) * cH;
+    ctx.beginPath(); ctx.moveTo(pL, y); ctx.lineTo(W - pR, y); ctx.stroke();
+    ctx.fillText(yVal.toString(), pL - 4, y + 3);
+  }
+
+  // Color zones
+  const redTop = pT + cH - (40 / 100) * cH;
+  const yellowTop = pT + cH - (70 / 100) * cH;
+  ctx.fillStyle = "rgba(214, 48, 49, 0.04)";
+  ctx.fillRect(pL, redTop, cW, pT + cH - redTop);
+  ctx.fillStyle = "rgba(253, 203, 110, 0.03)";
+  ctx.fillRect(pL, yellowTop, cW, redTop - yellowTop);
+  ctx.fillStyle = "rgba(0, 184, 148, 0.03)";
+  ctx.fillRect(pL, pT, cW, yellowTop - pT);
+
+  // Points
+  const pts = trend.map((pt, i) => {
+    const x = pL + (i / (trend.length - 1)) * cW;
+    const score = Math.max(0, Math.min(100, pt.score ?? 0));
+    const y = pT + cH - (score / 100) * cH;
+    const dayData = dayLookup[pt.date] || {};
+    return { x, y, score, date: pt.date, summary: dayData.summary || "", tone: dayData.emotionalTone || "" };
+  });
+
+  // Store for interactivity
+  trendPoints = pts;
+
+  // Line
+  ctx.beginPath();
+  ctx.strokeStyle = "#4fc3f7"; ctx.lineWidth = 2;
+  ctx.lineJoin = "round"; ctx.lineCap = "round";
+  pts.forEach((pt, i) => { if (i === 0) ctx.moveTo(pt.x, pt.y); else ctx.lineTo(pt.x, pt.y); });
+  ctx.stroke();
+
+  // Gradient fill
+  const grad = ctx.createLinearGradient(0, pT, 0, pT + cH);
+  grad.addColorStop(0, "rgba(79, 195, 247, 0.15)");
+  grad.addColorStop(1, "rgba(79, 195, 247, 0)");
+  ctx.beginPath();
+  pts.forEach((pt, i) => { if (i === 0) ctx.moveTo(pt.x, pt.y); else ctx.lineTo(pt.x, pt.y); });
+  ctx.lineTo(pts[pts.length - 1].x, pT + cH);
+  ctx.lineTo(pts[0].x, pT + cH);
+  ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Dots
+  pts.forEach((pt) => {
+    ctx.beginPath();
+    ctx.arc(pt.x, pt.y, 3.5, 0, Math.PI * 2);
+    ctx.fillStyle = pt.score >= 70 ? "#00b894" : pt.score >= 40 ? "#fdcb6e" : "#d63031";
+    ctx.fill();
+  });
+
+  // X labels
+  ctx.fillStyle = "#666"; ctx.textAlign = "center";
+  ctx.font = "9px -apple-system, sans-serif";
+  const labelStep = Math.max(1, Math.floor(trend.length / 6));
+  for (let i = 0; i < trend.length; i += labelStep) {
+    const dateObj = new Date(trend[i].date + "T00:00:00");
+    ctx.fillText(dateObj.toLocaleDateString("en-US", { month: "short", day: "numeric" }), pts[i].x, H - 6);
+  }
+  if (trend.length > 1) {
+    const last = pts[pts.length - 1];
+    const lastDate = new Date(trend[trend.length - 1].date + "T00:00:00");
+    ctx.fillText(lastDate.toLocaleDateString("en-US", { month: "short", day: "numeric" }), last.x, H - 6);
+  }
+}
+
+function setupTrendChartInteractivity() {
+  const container = document.querySelector(".trend-chart-container");
+  if (!container) return;
+
+  container.addEventListener("mousemove", handleTrendHover);
+  container.addEventListener("mouseleave", hideTrendTooltip);
+  container.addEventListener("click", handleTrendClick);
+}
+
+function findClosestTrendPoint(clientX, clientY) {
+  const canvas = $("trend-chart");
+  if (!canvas || trendPoints.length === 0) return null;
+  const rect = canvas.getBoundingClientRect();
+  const mx = clientX - rect.left;
+  const my = clientY - rect.top;
+
+  let closest = null;
+  let minDist = Infinity;
+  for (const pt of trendPoints) {
+    const dx = pt.x - mx;
+    const dy = pt.y - my;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < minDist && dist < 40) {
+      minDist = dist;
+      closest = pt;
+    }
+  }
+  return closest;
+}
+
+function handleTrendHover(e) {
+  const pt = findClosestTrendPoint(e.clientX, e.clientY);
+  if (pt) {
+    showTrendTooltip(pt, e.clientX, e.clientY);
+  } else {
+    hideTrendTooltip();
+  }
+}
+
+function handleTrendClick(e) {
+  const pt = findClosestTrendPoint(e.clientX, e.clientY);
+  if (!pt) return;
+
+  // Show tooltip
+  showTrendTooltip(pt, e.clientX, e.clientY);
+
+  // Scroll to daily card
+  const card = document.querySelector(`.daily-card[data-date="${pt.date}"]`);
+  if (card) {
+    card.scrollIntoView({ behavior: "smooth", block: "center" });
+    card.style.outline = "2px solid var(--accent)";
+    setTimeout(() => { card.style.outline = ""; }, 2000);
+  }
+}
+
+function showTrendTooltip(pt, clientX, clientY) {
+  const tooltip = $("trend-tooltip");
+  const container = document.querySelector(".trend-chart-container");
+  if (!tooltip || !container) return;
+
+  const dateEl = $("trend-tooltip-date");
+  const scoreEl = $("trend-tooltip-score");
+  const summaryEl = $("trend-tooltip-summary");
+  const toneEl = $("trend-tooltip-tone");
+
+  if (dateEl) {
+    const dateObj = new Date(pt.date + "T00:00:00");
+    dateEl.textContent = dateObj.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+  }
+  if (scoreEl) {
+    scoreEl.textContent = Math.round(pt.score);
+    scoreEl.className = "trend-tooltip-score " + scoreColor(pt.score);
+  }
+  if (summaryEl) {
+    summaryEl.textContent = pt.summary ? (pt.summary.length > 150 ? pt.summary.slice(0, 147) + "..." : pt.summary) : "";
+  }
+  if (toneEl) {
+    if (pt.tone) {
+      toneEl.innerHTML = `<span class="tone-badge ${pt.tone}">${pt.tone}</span>`;
+    } else {
+      toneEl.innerHTML = "";
+    }
+  }
+
+  // Position tooltip
+  const containerRect = container.getBoundingClientRect();
+  let left = clientX - containerRect.left + 12;
+  let top = clientY - containerRect.top - 10;
+
+  // Keep within bounds
+  if (left + 200 > containerRect.width) left = left - 220;
+  if (top < 0) top = 10;
+
+  tooltip.style.left = left + "px";
+  tooltip.style.top = top + "px";
+  tooltip.classList.remove("hidden");
+}
+
+function hideTrendTooltip() {
+  const tooltip = $("trend-tooltip");
+  if (tooltip) tooltip.classList.add("hidden");
+}
+
+// ── ZONE 3: OVERVIEW ──
+
+function renderHealthScoreHero(d) {
+  const a = d.latestAnalysis;
+  const scoreEl = $("health-score");
+  const summaryEl = $("health-summary");
+  const dateEl = $("health-date");
+  const toneEl = $("health-tone");
+  if (!scoreEl || !summaryEl || !dateEl) return;
+
+  if (!a) {
+    scoreEl.textContent = "--";
+    scoreEl.className = "health-score-number-big";
+    summaryEl.textContent = 'No analysis available yet. Click "Analyze Now" to generate one.';
+    dateEl.textContent = "";
+    if (toneEl) toneEl.innerHTML = "";
+    return;
+  }
+
+  const score = a.overallScore ?? 0;
+  scoreEl.textContent = Math.round(score);
+  scoreEl.className = "health-score-number-big " + scoreColor(score);
+  summaryEl.textContent = a.summary || "No summary available.";
+
+  if (a.date) {
+    const dateObj = new Date(a.date + "T00:00:00");
+    dateEl.textContent = "Analysis from " + dateObj.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+  }
+
+  if (toneEl) {
+    const tone = a.emotionalTone || "neutral";
+    toneEl.innerHTML = `<span class="tone-badge ${tone}">${tone}</span>`;
+  }
+}
+
+function renderWaryOf(d) {
+  const container = $("wary-content");
+  if (!container) return;
+
+  const a = d.latestAnalysis;
+  if (!a) {
+    container.innerHTML = '<div style="font-size:12px;color:var(--text-dim)">No data yet.</div>';
+    return;
+  }
+
+  const warnings = [];
+
+  // Check horsemen
+  const h = a.horsemen || {};
+  if (h.criticism > 40) warnings.push({ icon: "!", label: "Criticism", text: `Criticism level is elevated (${Math.round(h.criticism)}%). Watch for attacking character vs. behavior.` });
+  if (h.contempt > 20) warnings.push({ icon: "!", label: "Contempt", text: `Contempt detected (${Math.round(h.contempt)}%). This is the strongest predictor of relationship breakdown.` });
+  if (h.stonewalling > 40) warnings.push({ icon: "!", label: "Stonewalling", text: `Stonewalling pattern detected (${Math.round(h.stonewalling)}%). One partner may be shutting down.` });
+  if (h.defensiveness > 40) warnings.push({ icon: "!", label: "Defensiveness", text: `Defensiveness is high (${Math.round(h.defensiveness)}%). Focus on taking responsibility.` });
+
+  // Check bank account
+  const bank = a.emotionalBankAccount;
+  if (bank && bank.status === "overdrawn") {
+    warnings.push({ icon: "$", label: "Overdrawn", text: `Emotional bank account is overdrawn (${bank.ratio.toFixed(1)}:1). Focus on making deposits.` });
+  } else if (bank && bank.status === "watch") {
+    warnings.push({ icon: "$", label: "Low Balance", text: `Emotional bank ratio (${bank.ratio.toFixed(1)}:1) is below the 5:1 target.` });
+  }
+
+  // Check pursue-withdraw
+  const pw = a.pursueWithdraw;
+  if (pw && pw.pattern !== "balanced") {
+    const labels = { "ben-pursues": "Ben is pursuing", "hope-pursues": "Hope is pursuing", "mutual-withdrawal": "Mutual withdrawal" };
+    warnings.push({ icon: "~", label: labels[pw.pattern] || pw.pattern, text: pw.description || "" });
+  }
+
+  // Check bids
+  const bids = a.bids;
+  if (bids) {
+    const total = (bids.turnedToward || 0) + (bids.turnedAway || 0) + (bids.turnedAgainst || 0);
+    const awayPct = total > 0 ? ((bids.turnedAway || 0) + (bids.turnedAgainst || 0)) / total : 0;
+    if (awayPct > 0.3) {
+      warnings.push({ icon: "x", label: "Missed Bids", text: `${Math.round(awayPct * 100)}% of bids for connection are being turned away or against.` });
+    }
+  }
+
+  if (warnings.length === 0) {
+    container.innerHTML = '<div style="font-size:12px;color:var(--green)">Nothing to worry about right now. Keep it up!</div>';
+    return;
+  }
+
+  container.innerHTML = warnings.map(w =>
+    `<div class="wary-item">
+      <div class="wary-icon">${escapeHtml(w.icon)}</div>
+      <div class="wary-text"><span class="wary-label">${escapeHtml(w.label)}</span> &mdash; ${escapeHtml(w.text)}</div>
+    </div>`
+  ).join("");
+}
+
+function renderLanguageEmotion(d) {
+  const container = $("language-emotion-content");
+  if (!container) return;
+
+  const le = d.latestAnalysis ? d.latestAnalysis.languageEmotionAnalysis : null;
+  if (!le) {
+    container.innerHTML = '<div style="font-size:11px;color:var(--text-dim)">Run analysis to see language patterns.</div>';
+    return;
+  }
+
+  let html = "";
+
+  // Emotion tags
+  if (le.benEmotions && le.benEmotions.length > 0) {
+    html += '<div style="margin-bottom:6px"><span style="font-size:10px;color:var(--text-dim)">Ben:</span> ';
+    html += '<div class="emotion-tags" style="display:inline-flex">';
+    html += le.benEmotions.map(e => `<span class="emotion-tag ben">${escapeHtml(e)}</span>`).join("");
+    html += '</div></div>';
+  }
+  if (le.hopeEmotions && le.hopeEmotions.length > 0) {
+    html += '<div style="margin-bottom:6px"><span style="font-size:10px;color:var(--text-dim)">Hope:</span> ';
+    html += '<div class="emotion-tags" style="display:inline-flex">';
+    html += le.hopeEmotions.map(e => `<span class="emotion-tag hope">${escapeHtml(e)}</span>`).join("");
+    html += '</div></div>';
+  }
+
+  if (le.communicationNotes) {
+    html += `<div class="language-note">${escapeHtml(le.communicationNotes)}</div>`;
+  }
+  if (le.notableShifts) {
+    html += `<div class="language-note" style="margin-top:4px;font-style:italic">${escapeHtml(le.notableShifts)}</div>`;
+  }
+
+  container.innerHTML = html || '<div style="font-size:11px;color:var(--text-dim)">No language data available.</div>';
 }
 
 // ── Stats ──
@@ -570,31 +1000,6 @@ function drawSparkline(id, data, color) {
     if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
   });
   ctx.stroke();
-}
-
-// ── Latest Analysis ──
-
-function renderLatestAnalysis(d) {
-  const a = d.latestAnalysis;
-  const scoreEl = $("health-score");
-  const summaryEl = $("health-summary");
-  const dateEl = $("health-date");
-  if (!scoreEl || !summaryEl || !dateEl) return;
-  if (!a) {
-    scoreEl.textContent = "--";
-    scoreEl.className = "health-score-number";
-    summaryEl.textContent = 'No analysis available yet. Click "Analyze Now" to generate one.';
-    dateEl.textContent = "";
-    return;
-  }
-  const score = a.overallScore ?? 0;
-  scoreEl.textContent = Math.round(score);
-  scoreEl.className = "health-score-number " + scoreColor(score);
-  summaryEl.textContent = a.summary || "No summary available.";
-  if (a.date) {
-    const dateObj = new Date(a.date + "T00:00:00");
-    dateEl.textContent = "Analysis from " + dateObj.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
-  }
 }
 
 // ── Radar Chart (Canvas) ──
@@ -834,109 +1239,184 @@ function drawGauge(canvas, pct) {
   }
 }
 
-// ── Trend Chart (Canvas) ──
+// ── Bank Account ──
 
-function renderTrendChart(d) {
-  const canvas = $("trend-chart");
-  const emptyEl = $("chart-empty");
-  if (!canvas || !emptyEl) return;
-  const trend = d.trend || [];
+function renderBankAccount(d) {
+  const a = d.latestAnalysis;
+  const bank = a ? a.emotionalBankAccount : null;
+  const ratioEl = $("bank-ratio");
+  const statusEl = $("bank-status");
+  const depEl = $("bank-deposits");
+  const withEl = $("bank-withdrawals");
 
-  if (trend.length < 2) {
-    canvas.style.display = "none";
-    emptyEl.classList.remove("hidden");
+  if (!ratioEl) return;
+
+  if (!bank) {
+    ratioEl.textContent = "--";
+    ratioEl.className = "bank-ratio";
+    if (statusEl) { statusEl.textContent = "No data"; statusEl.className = "bank-status"; }
+    if (depEl) depEl.textContent = "0";
+    if (withEl) withEl.textContent = "0";
     return;
   }
 
-  canvas.style.display = "block";
-  emptyEl.classList.add("hidden");
+  ratioEl.textContent = bank.ratio.toFixed(1) + ":1";
+  ratioEl.className = "bank-ratio " + bank.status;
+  if (statusEl) {
+    statusEl.textContent = bank.status === "healthy" ? "Healthy" : bank.status === "watch" ? "Watch" : "Overdrawn";
+    statusEl.className = "bank-status " + bank.status;
+  }
+  if (depEl) depEl.textContent = String(bank.deposits);
+  if (withEl) withEl.textContent = String(bank.withdrawals);
+}
 
-  const ctx = canvas.getContext("2d");
-  const dpr = window.devicePixelRatio || 1;
-  const rect = canvas.parentElement.getBoundingClientRect();
-  canvas.width = rect.width * dpr;
-  canvas.height = rect.height * dpr;
-  canvas.style.width = rect.width + "px";
-  canvas.style.height = rect.height + "px";
-  ctx.scale(dpr, dpr);
+// ── Bids ──
 
-  const W = rect.width, H = rect.height;
-  const pL = 36, pR = 12, pT = 12, pB = 28;
-  const cW = W - pL - pR, cH = H - pT - pB;
+function renderBids(d) {
+  const bids = d.latestAnalysis ? d.latestAnalysis.bids : null;
+  const towardFill = $("bid-toward-fill");
+  const awayFill = $("bid-away-fill");
+  const againstFill = $("bid-against-fill");
+  const towardVal = $("bid-toward-val");
+  const awayVal = $("bid-away-val");
+  const againstVal = $("bid-against-val");
+  const summaryEl = $("bid-summary");
 
-  ctx.clearRect(0, 0, W, H);
+  if (!towardFill) return;
 
-  // Grid lines
-  ctx.strokeStyle = "#333"; ctx.lineWidth = 0.5;
-  ctx.font = "10px -apple-system, sans-serif";
-  ctx.fillStyle = "#666"; ctx.textAlign = "right";
-  for (let yVal = 0; yVal <= 100; yVal += 25) {
-    const y = pT + cH - (yVal / 100) * cH;
-    ctx.beginPath(); ctx.moveTo(pL, y); ctx.lineTo(W - pR, y); ctx.stroke();
-    ctx.fillText(yVal.toString(), pL - 4, y + 3);
+  if (!bids) {
+    if (towardFill) towardFill.style.width = "0%";
+    if (awayFill) awayFill.style.width = "0%";
+    if (againstFill) againstFill.style.width = "0%";
+    if (towardVal) towardVal.textContent = "0";
+    if (awayVal) awayVal.textContent = "0";
+    if (againstVal) againstVal.textContent = "0";
+    if (summaryEl) summaryEl.textContent = "";
+    return;
   }
 
-  // Color zones
-  const redTop = pT + cH - (40 / 100) * cH;
-  const yellowTop = pT + cH - (70 / 100) * cH;
-  ctx.fillStyle = "rgba(214, 48, 49, 0.04)";
-  ctx.fillRect(pL, redTop, cW, pT + cH - redTop);
-  ctx.fillStyle = "rgba(253, 203, 110, 0.03)";
-  ctx.fillRect(pL, yellowTop, cW, redTop - yellowTop);
-  ctx.fillStyle = "rgba(0, 184, 148, 0.03)";
-  ctx.fillRect(pL, pT, cW, yellowTop - pT);
+  var total = (bids.turnedToward || 0) + (bids.turnedAway || 0) + (bids.turnedAgainst || 0);
+  var maxVal = Math.max(total, 1);
 
-  // Points
-  const pts = trend.map((pt, i) => {
-    const x = pL + (i / (trend.length - 1)) * cW;
-    const score = Math.max(0, Math.min(100, pt.score ?? 0));
-    const y = pT + cH - (score / 100) * cH;
-    return { x, y, score, date: pt.date };
-  });
+  if (towardFill) towardFill.style.width = ((bids.turnedToward || 0) / maxVal * 100) + "%";
+  if (awayFill) awayFill.style.width = ((bids.turnedAway || 0) / maxVal * 100) + "%";
+  if (againstFill) againstFill.style.width = ((bids.turnedAgainst || 0) / maxVal * 100) + "%";
 
-  // Line
-  ctx.beginPath();
-  ctx.strokeStyle = "#4fc3f7"; ctx.lineWidth = 1.5;
-  ctx.lineJoin = "round"; ctx.lineCap = "round";
-  pts.forEach((pt, i) => { if (i === 0) ctx.moveTo(pt.x, pt.y); else ctx.lineTo(pt.x, pt.y); });
-  ctx.stroke();
+  if (towardVal) towardVal.textContent = String(bids.turnedToward || 0);
+  if (awayVal) awayVal.textContent = String(bids.turnedAway || 0);
+  if (againstVal) againstVal.textContent = String(bids.turnedAgainst || 0);
 
-  // Gradient fill
-  const grad = ctx.createLinearGradient(0, pT, 0, pT + cH);
-  grad.addColorStop(0, "rgba(79, 195, 247, 0.15)");
-  grad.addColorStop(1, "rgba(79, 195, 247, 0)");
-  ctx.beginPath();
-  pts.forEach((pt, i) => { if (i === 0) ctx.moveTo(pt.x, pt.y); else ctx.lineTo(pt.x, pt.y); });
-  ctx.lineTo(pts[pts.length - 1].x, pT + cH);
-  ctx.lineTo(pts[0].x, pT + cH);
-  ctx.closePath();
-  ctx.fillStyle = grad;
-  ctx.fill();
-
-  // Dots
-  pts.forEach((pt) => {
-    ctx.beginPath();
-    ctx.arc(pt.x, pt.y, 3, 0, Math.PI * 2);
-    ctx.fillStyle = pt.score >= 70 ? "#00b894" : pt.score >= 40 ? "#fdcb6e" : "#d63031";
-    ctx.fill();
-  });
-
-  // X labels
-  ctx.fillStyle = "#666"; ctx.textAlign = "center";
-  ctx.font = "9px -apple-system, sans-serif";
-  const labelStep = Math.max(1, Math.floor(trend.length / 6));
-  for (let i = 0; i < trend.length; i += labelStep) {
-    const dateObj = new Date(trend[i].date + "T00:00:00");
-    ctx.fillText(dateObj.toLocaleDateString("en-US", { month: "short", day: "numeric" }), pts[i].x, H - 6);
-  }
-  if (trend.length > 1) {
-    const last = pts[pts.length - 1];
-    const lastDate = new Date(trend[trend.length - 1].date + "T00:00:00");
-    ctx.fillText(lastDate.toLocaleDateString("en-US", { month: "short", day: "numeric" }), last.x, H - 6);
+  if (summaryEl) {
+    var totalBids = (bids.benMade || 0) + (bids.hopeMade || 0);
+    var towardPct = total > 0 ? Math.round((bids.turnedToward || 0) / total * 100) : 0;
+    summaryEl.textContent = totalBids + ' bids total (Ben: ' + (bids.benMade || 0) + ', Hope: ' + (bids.hopeMade || 0) + '). ' + towardPct + '% turned toward.';
   }
 }
 
-// ── Daily Cards ──
+// ── Pursue-Withdraw ──
+
+function renderPursueWithdraw(d) {
+  const patternEl = $("pursue-pattern");
+  const descEl = $("pursue-description");
+  if (!patternEl) return;
+
+  const pw = d.latestAnalysis ? d.latestAnalysis.pursueWithdraw : null;
+  if (!pw) {
+    patternEl.textContent = "--";
+    patternEl.className = "pursue-pattern";
+    if (descEl) descEl.textContent = "";
+    return;
+  }
+
+  var labels = {
+    "balanced": "Balanced",
+    "ben-pursues": "Ben Pursues",
+    "hope-pursues": "Hope Pursues",
+    "mutual-withdrawal": "Mutual Withdrawal",
+  };
+  var cls = {
+    "balanced": "balanced",
+    "ben-pursues": "pursuing",
+    "hope-pursues": "pursuing",
+    "mutual-withdrawal": "withdrawal",
+  };
+
+  patternEl.textContent = labels[pw.pattern] || pw.pattern;
+  patternEl.className = "pursue-pattern " + (cls[pw.pattern] || "");
+  if (descEl) descEl.textContent = pw.description || "";
+}
+
+// ── Communication Balance ──
+
+function renderCommunicationBalance(d) {
+  // Message ratio
+  var r = d.stats ? d.stats.messageRatio : null;
+  var ben = r ? (r.benPercent || 50) : 50;
+  var hope = r ? (r.hopePercent || 50) : 50;
+  var ll = $("bal-ratio-left"), rl = $("bal-ratio-right");
+  var lf = $("bal-ratio-fill-left"), rf = $("bal-ratio-fill-right");
+  if (ll) ll.textContent = 'Ben: ' + Math.round(ben) + '%';
+  if (rl) rl.textContent = 'Hope: ' + Math.round(hope) + '%';
+  if (lf) lf.style.width = ben + "%";
+  if (rf) rf.style.width = hope + "%";
+
+  // Initiator stats
+  var initEl = $("initiator-stats");
+  if (initEl) {
+    var inits = (d.stats && d.stats.initiators) || {};
+    var benInits = inits.self || 0;
+    var hopeInits = inits.hope || 0;
+    initEl.innerHTML = '<span style="color:var(--accent)">Ben: ' + benInits + '</span> &middot; <span style="color:var(--pink)">Hope: ' + hopeInits + '</span>';
+  }
+
+  // Response times
+  var rtEl = $("response-time-stats");
+  if (rtEl) {
+    var rt = (d.stats && d.stats.responseTimes) || {};
+    function fmtTime(sec) {
+      if (!sec) return "--";
+      if (sec < 60) return sec + "s";
+      if (sec < 3600) return Math.round(sec / 60) + "m";
+      return (sec / 3600).toFixed(1) + "h";
+    }
+    var benAvg = fmtTime(rt.self ? rt.self.avgSec : null);
+    var hopeAvg = fmtTime(rt.hope ? rt.hope.avgSec : null);
+    rtEl.innerHTML = '<span style="color:var(--accent)">Ben: ' + benAvg + '</span> &middot; <span style="color:var(--pink)">Hope: ' + hopeAvg + '</span>';
+  }
+}
+
+// ── Recommendations ──
+
+function renderRecommendations(d) {
+  var benEl = $("recs-ben");
+  var hopeEl = $("recs-hope");
+  var bothEl = $("recs-both");
+  var section = $("recommendations-section");
+  if (!benEl) return;
+
+  var recs = d.latestAnalysis ? d.latestAnalysis.recommendations : null;
+
+  if (!recs) {
+    if (section) section.classList.add("hidden");
+    return;
+  }
+  if (section) section.classList.remove("hidden");
+
+  function renderList(el, items) {
+    if (!el) return;
+    if (!items || items.length === 0) {
+      el.innerHTML = '<li style="color:var(--text-dim)">No specific suggestions</li>';
+      return;
+    }
+    el.innerHTML = items.map(function(item) { return '<li>' + escapeHtml(item) + '</li>'; }).join("");
+  }
+
+  renderList(benEl, recs.forBen);
+  renderList(hopeEl, recs.forHope);
+  renderList(bothEl, recs.forBoth);
+}
+
+// ── Daily Cards (with voice tags) ──
 
 function renderDailyCards(d) {
   const container = $("daily-cards");
@@ -1002,228 +1482,21 @@ async function toggleDailyCard(card) {
       const time = msg.timestamp
         ? new Date(msg.timestamp * 1000).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
         : "";
-      const badge = msg.type && msg.type !== "text"
-        ? `<span class="message-type-badge">${escapeHtml(msg.type)}</span>` : "";
+      const isVoice = msg.type === "voice";
+      const voiceTag = isVoice
+        ? '<span class="message-voice-tag">&#9654; Voice</span>'
+        : "";
+      const content = isVoice
+        ? (msg.transcript || msg.body || "[voice note]")
+        : (msg.body || "[media]");
       return `<div class="message-item">
-        <div class="message-sender ${cls}">${name}<span class="message-time">${time}</span>${badge}</div>
-        <div class="message-text">${escapeHtml(msg.body || msg.transcript || "[media]")}</div>
+        <div class="message-sender ${cls}">${name}<span class="message-time">${time}</span>${voiceTag}</div>
+        <div class="message-text">${escapeHtml(content)}</div>
       </div>`;
     }).join("");
   } catch (err) {
     messagesEl.innerHTML = `<div class="loading-messages" style="color:var(--red)">Failed: ${escapeHtml(err.message)}</div>`;
   }
-}
-
-// ── Action-Oriented Dashboard Renderers ──
-
-function renderActionCard(d) {
-  const textEl = $("action-card-text");
-  const ctxEl = $("action-card-context");
-  if (!textEl || !ctxEl) return;
-
-  const a = d.latestAnalysis;
-  if (!a || !a.recommendations) {
-    textEl.textContent = 'Run an analysis to get your first recommendation.';
-    ctxEl.textContent = '';
-    return;
-  }
-
-  const recs = a.recommendations;
-  var primary = '';
-  var context = '';
-
-  if (a.emotionalBankAccount && a.emotionalBankAccount.status === 'overdrawn') {
-    primary = (recs.forBoth && recs.forBoth[0]) || (recs.forBen && recs.forBen[0]) || 'Keep connecting!';
-    context = 'Your emotional bank account is overdrawn (ratio: ' + a.emotionalBankAccount.ratio.toFixed(1) + '). Focus on deposits.';
-  } else if (a.pursueWithdraw && a.pursueWithdraw.pattern !== 'balanced') {
-    primary = (recs.forBen && recs.forBen[0]) || (recs.forBoth && recs.forBoth[0]) || '';
-    context = a.pursueWithdraw.description || '';
-  } else {
-    primary = (recs.forBen && recs.forBen[0]) || (recs.forBoth && recs.forBoth[0]) || 'Things look good. Keep it up!';
-    context = a.summary ? 'Based on: ' + a.summary.split('.')[0] + '.' : '';
-  }
-
-  textEl.textContent = primary;
-  ctxEl.textContent = context;
-}
-
-function renderBankAccount(d) {
-  const a = d.latestAnalysis;
-  const bank = a ? a.emotionalBankAccount : null;
-  const ratioEl = $("bank-ratio");
-  const statusEl = $("bank-status");
-  const depEl = $("bank-deposits");
-  const withEl = $("bank-withdrawals");
-
-  if (!ratioEl) return;
-
-  if (!bank) {
-    ratioEl.textContent = "--";
-    ratioEl.className = "bank-ratio";
-    if (statusEl) { statusEl.textContent = "No data"; statusEl.className = "bank-status"; }
-    if (depEl) depEl.textContent = "0";
-    if (withEl) withEl.textContent = "0";
-    return;
-  }
-
-  ratioEl.textContent = bank.ratio.toFixed(1) + ":1";
-  ratioEl.className = "bank-ratio " + bank.status;
-  if (statusEl) {
-    statusEl.textContent = bank.status === "healthy" ? "Healthy" : bank.status === "watch" ? "Watch" : "Overdrawn";
-    statusEl.className = "bank-status " + bank.status;
-  }
-  if (depEl) depEl.textContent = String(bank.deposits);
-  if (withEl) withEl.textContent = String(bank.withdrawals);
-}
-
-function renderBids(d) {
-  const bids = d.latestAnalysis ? d.latestAnalysis.bids : null;
-  const towardFill = $("bid-toward-fill");
-  const awayFill = $("bid-away-fill");
-  const againstFill = $("bid-against-fill");
-  const towardVal = $("bid-toward-val");
-  const awayVal = $("bid-away-val");
-  const againstVal = $("bid-against-val");
-  const summaryEl = $("bid-summary");
-
-  if (!towardFill) return;
-
-  if (!bids) {
-    if (towardFill) towardFill.style.width = "0%";
-    if (awayFill) awayFill.style.width = "0%";
-    if (againstFill) againstFill.style.width = "0%";
-    if (towardVal) towardVal.textContent = "0";
-    if (awayVal) awayVal.textContent = "0";
-    if (againstVal) againstVal.textContent = "0";
-    if (summaryEl) summaryEl.textContent = "";
-    return;
-  }
-
-  var total = (bids.turnedToward || 0) + (bids.turnedAway || 0) + (bids.turnedAgainst || 0);
-  var maxVal = Math.max(total, 1);
-
-  if (towardFill) towardFill.style.width = ((bids.turnedToward || 0) / maxVal * 100) + "%";
-  if (awayFill) awayFill.style.width = ((bids.turnedAway || 0) / maxVal * 100) + "%";
-  if (againstFill) againstFill.style.width = ((bids.turnedAgainst || 0) / maxVal * 100) + "%";
-
-  if (towardVal) towardVal.textContent = String(bids.turnedToward || 0);
-  if (awayVal) awayVal.textContent = String(bids.turnedAway || 0);
-  if (againstVal) againstVal.textContent = String(bids.turnedAgainst || 0);
-
-  if (summaryEl) {
-    var totalBids = (bids.benMade || 0) + (bids.hopeMade || 0);
-    var towardPct = total > 0 ? Math.round((bids.turnedToward || 0) / total * 100) : 0;
-    summaryEl.textContent = totalBids + ' bids total (Ben: ' + (bids.benMade || 0) + ', Hope: ' + (bids.hopeMade || 0) + '). ' + towardPct + '% turned toward.';
-  }
-}
-
-function renderPursueWithdraw(d) {
-  const patternEl = $("pursue-pattern");
-  const descEl = $("pursue-description");
-  if (!patternEl) return;
-
-  const pw = d.latestAnalysis ? d.latestAnalysis.pursueWithdraw : null;
-  if (!pw) {
-    patternEl.textContent = "--";
-    patternEl.className = "pursue-pattern";
-    if (descEl) descEl.textContent = "";
-    return;
-  }
-
-  var labels = {
-    "balanced": "Balanced",
-    "ben-pursues": "Ben Pursues",
-    "hope-pursues": "Hope Pursues",
-    "mutual-withdrawal": "Mutual Withdrawal",
-  };
-  var cls = {
-    "balanced": "balanced",
-    "ben-pursues": "pursuing",
-    "hope-pursues": "pursuing",
-    "mutual-withdrawal": "withdrawal",
-  };
-
-  patternEl.textContent = labels[pw.pattern] || pw.pattern;
-  patternEl.className = "pursue-pattern " + (cls[pw.pattern] || "");
-  if (descEl) descEl.textContent = pw.description || "";
-}
-
-function renderCommunicationBalance(d) {
-  // Message ratio
-  var r = d.stats ? d.stats.messageRatio : null;
-  var ben = r ? (r.benPercent || 50) : 50;
-  var hope = r ? (r.hopePercent || 50) : 50;
-  var ll = $("bal-ratio-left"), rl = $("bal-ratio-right");
-  var lf = $("bal-ratio-fill-left"), rf = $("bal-ratio-fill-right");
-  if (ll) ll.textContent = 'Ben: ' + Math.round(ben) + '%';
-  if (rl) rl.textContent = 'Hope: ' + Math.round(hope) + '%';
-  if (lf) lf.style.width = ben + "%";
-  if (rf) rf.style.width = hope + "%";
-
-  // Initiator stats
-  var initEl = $("initiator-stats");
-  if (initEl) {
-    var inits = (d.stats && d.stats.initiators) || {};
-    var benInits = inits.self || 0;
-    var hopeInits = inits.hope || 0;
-    initEl.innerHTML = '<span style="color:var(--accent)">Ben: ' + benInits + '</span> &middot; <span style="color:var(--pink)">Hope: ' + hopeInits + '</span>';
-  }
-
-  // Response times
-  var rtEl = $("response-time-stats");
-  if (rtEl) {
-    var rt = (d.stats && d.stats.responseTimes) || {};
-    function fmtTime(sec) {
-      if (!sec) return "--";
-      if (sec < 60) return sec + "s";
-      if (sec < 3600) return Math.round(sec / 60) + "m";
-      return (sec / 3600).toFixed(1) + "h";
-    }
-    var benAvg = fmtTime(rt.self ? rt.self.avgSec : null);
-    var hopeAvg = fmtTime(rt.hope ? rt.hope.avgSec : null);
-    rtEl.innerHTML = '<span style="color:var(--accent)">Ben: ' + benAvg + '</span> &middot; <span style="color:var(--pink)">Hope: ' + hopeAvg + '</span>';
-  }
-}
-
-function renderRecommendations(d) {
-  var benEl = $("recs-ben");
-  var hopeEl = $("recs-hope");
-  var bothEl = $("recs-both");
-  var section = $("recommendations-section");
-  if (!benEl) return;
-
-  var recs = d.latestAnalysis ? d.latestAnalysis.recommendations : null;
-
-  if (!recs) {
-    if (section) section.classList.add("hidden");
-    return;
-  }
-  if (section) section.classList.remove("hidden");
-
-  function renderList(el, items) {
-    if (!el) return;
-    if (!items || items.length === 0) {
-      el.innerHTML = '<li style="color:var(--text-dim)">No specific suggestions</li>';
-      return;
-    }
-    el.innerHTML = items.map(function(item) { return '<li>' + escapeHtml(item) + '</li>'; }).join("");
-  }
-
-  renderList(benEl, recs.forBen);
-  renderList(hopeEl, recs.forHope);
-  renderList(bothEl, recs.forBoth);
-}
-
-function setupMetricsToggle() {
-  var toggle = $("metrics-toggle");
-  if (!toggle) return;
-  toggle.addEventListener("click", function() {
-    var body = $("detailed-metrics-body");
-    var arrow = $("metrics-toggle-arrow");
-    if (!body) return;
-    body.classList.toggle("open");
-    if (arrow) arrow.classList.toggle("open");
-  });
 }
 
 // ── Utilities ──

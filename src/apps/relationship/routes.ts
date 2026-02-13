@@ -36,6 +36,8 @@ function parseAnalysisForFrontend(a: RelationshipAnalysis) {
       bids: m.bids || null,
       pursueWithdraw: m.pursueWithdraw || null,
       recommendations: m.recommendations || null,
+      notableQuotes: m.notableQuotes || [],
+      languageEmotionAnalysis: m.languageEmotionAnalysis || null,
     };
   } catch {
     return {
@@ -50,6 +52,8 @@ function parseAnalysisForFrontend(a: RelationshipAnalysis) {
       bids: null,
       pursueWithdraw: null,
       recommendations: null,
+      notableQuotes: [],
+      languageEmotionAnalysis: null,
     };
   }
 }

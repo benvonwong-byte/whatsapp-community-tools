@@ -95,6 +95,13 @@ ANALYSIS FRAMEWORKS:
 
 10. **Evidence**: For each metric, provide 1-2 direct quotes or short paraphrases from the conversation that best illustrate why you gave that score. If a metric scores 0 (absent), use an empty array. Keep each quote under 120 characters.
 
+11. **Notable Quotes**: Select 2-4 of the most meaningful, emotionally revealing, or relationship-defining quotes from the conversation. These can be sweet, insightful, funny, or concerning. For each, include the speaker and a brief label.
+
+12. **Language & Emotion Analysis**:
+    - Primary emotions detected for each speaker (e.g., joy, frustration, anxiety, tenderness, excitement)
+    - Communication style notes (e.g., "Ben uses more questions", "Hope uses more affirmations")
+    - Any notable language patterns or shifts during the conversation
+
 Respond with ONLY a JSON object (no markdown):
 {
   "metrics": {
@@ -144,6 +151,15 @@ Respond with ONLY a JSON object (no markdown):
     "curiosity": ["quote..."],
     "playfulness": ["quote..."],
     "autonomyTogetherness": ["quote..."]
+  },
+  "notableQuotes": [
+    { "speaker": "Ben" | "Hope", "quote": "<direct quote under 120 chars>", "label": "vulnerability" | "humor" | "affection" | "tension" | "insight" | "playfulness" }
+  ],
+  "languageEmotionAnalysis": {
+    "benEmotions": ["<primary emotions detected for Ben>"],
+    "hopeEmotions": ["<primary emotions detected for Hope>"],
+    "communicationNotes": "<style observations>",
+    "notableShifts": "<any tone or pattern shifts during the conversation>"
   },
   "summary": "2-4 sentence analysis of today's communication patterns, noting strengths and areas of concern. Be specific about what you observed."
 }
@@ -208,6 +224,8 @@ async function analyzeDay(
     bids: parsed.bids || null,
     pursueWithdraw: parsed.pursueWithdraw || null,
     recommendations: parsed.recommendations || null,
+    notableQuotes: parsed.notableQuotes || [],
+    languageEmotionAnalysis: parsed.languageEmotionAnalysis || null,
   };
 
   store.saveAnalysis(
