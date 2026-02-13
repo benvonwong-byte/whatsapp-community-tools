@@ -19,6 +19,14 @@ export const config = {
   airtableApiKey: process.env.AIRTABLE_API_KEY || "",
   airtableBaseId: process.env.AIRTABLE_BASE_ID || "",
   airtableTableId: process.env.AIRTABLE_TABLE_ID || "",
+  // Relationship app (optional — leave empty to disable)
+  groqApiKey: process.env.GROQ_API_KEY || "",
+  relationshipChatName: process.env.RELATIONSHIP_CHAT_NAME || "Hope Endrenyi",
+  // Metacrisis app (optional — leave empty to disable)
+  metacrisisChatName: process.env.METACRISIS_CHAT_NAME || "Metacrisis - Community Chat",
+  metacrisisAnnouncementChat: process.env.METACRISIS_ANNOUNCEMENT_CHAT || "Metacrisis NYC",
+  // Daily analysis/summary hour (0-23, local time)
+  analysisHour: parseInt(process.env.ANALYSIS_HOUR || "0", 10),
 };
 
 export function validateConfig() {

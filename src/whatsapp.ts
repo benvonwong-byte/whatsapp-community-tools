@@ -1,8 +1,11 @@
 import { Client, LocalAuth, Message } from "whatsapp-web.js";
+export { Message } from "whatsapp-web.js";
 import qrcode from "qrcode-terminal";
 import fs from "fs";
 import path from "path";
 import { config } from "./config";
+
+export type RawMessageListener = (msg: Message, chat: any) => Promise<void>;
 
 export interface BufferedMessage {
   id: string;
@@ -31,6 +34,7 @@ export class WhatsAppClient {
   private onFlush: FlushCallback | null = null;
   private onReady: ReadyCallback | null = null;
   private isGroupBlocked: ((chatName: string) => boolean) | null = null;
+  private rawListeners: RawMessageListener[] = [];
   private ready = false;
   private currentQr: string | null = null;
   private reconnectAttempts = 0;
@@ -123,7 +127,19 @@ export class WhatsAppClient {
 
     this.client.on("message", async (msg: Message) => {
       try {
-        await this.handleMessage(msg);
+        const chat = await msg.getChat();
+
+        // Notify raw listeners (new apps) — each decides its own filtering
+        for (const listener of this.rawListeners) {
+          try {
+            await listener(msg, chat);
+          } catch (err) {
+            console.error("[message] Error in raw listener:", err);
+          }
+        }
+
+        // Existing event scraper buffer logic
+        await this.handleMessage(msg, chat);
       } catch (err) {
         console.error("[message] Error handling message:", err);
       }
@@ -162,12 +178,12 @@ export class WhatsAppClient {
     }
   }
 
-  private async handleMessage(msg: Message) {
+  private async handleMessage(msg: Message, preloadedChat?: any) {
     // Skip non-text messages
     if (!msg.body || msg.body.trim() === "") return;
 
     // Process group chats with >10 participants, plus allowed private chats
-    const chat = await msg.getChat();
+    const chat = preloadedChat || await msg.getChat();
     if (!chat.isGroup && !isAllowedPrivateChat(chat.name)) return;
     if (chat.isGroup) {
       const participants = (chat as any).participants;
@@ -253,8 +269,19 @@ export class WhatsAppClient {
     this.isGroupBlocked = check;
   }
 
+  addRawMessageListener(listener: RawMessageListener) {
+    this.rawListeners.push(listener);
+  }
+
   isConnected(): boolean {
     return this.ready;
+  }
+
+  async getChatByName(name: string): Promise<any | null> {
+    if (!this.ready) return null;
+    const chats = await this.client.getChats();
+    const lower = name.toLowerCase();
+    return chats.find(c => c.name.toLowerCase().includes(lower)) || null;
   }
 
   async fetchRecentMessages(hours: number = 168, onGroupProgress?: (scanned: number, total: number) => void): Promise<BufferedMessage[]> {

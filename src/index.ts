@@ -220,13 +220,13 @@ async function main() {
     return totalEvents;
   };
 
-  startServer(
+  startServer({
     store,
-    () => ({ whatsappConnected: whatsapp.isConnected() }),
-    () => whatsapp.getQrCode(),
-    runBackfill,
-    () => backfillProgress
-  );
+    statusChecker: () => ({ whatsappConnected: whatsapp.isConnected() }),
+    qrCodeGetter: () => whatsapp.getQrCode(),
+    backfillTrigger: runBackfill,
+    backfillProgressGetter: () => backfillProgress,
+  });
 
   // WhatsApp + Claude are optional — skip if no API key
   if (!config.anthropicApiKey) {

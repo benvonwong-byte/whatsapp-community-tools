@@ -60,7 +60,18 @@ function requireAdmin(req: Request, res: Response, next: NextFunction): void {
   next();
 }
 
-export function startServer(store: EventStore, statusChecker?: () => { whatsappConnected: boolean }, qrCodeGetter?: () => string | null, backfillTrigger?: (hours: number) => Promise<number>, backfillProgressGetter?: () => BackfillProgress): void {
+export interface ServerOptions {
+  store: EventStore;
+  statusChecker?: () => { whatsappConnected: boolean };
+  qrCodeGetter?: () => string | null;
+  backfillTrigger?: (hours: number) => Promise<number>;
+  backfillProgressGetter?: () => BackfillProgress;
+  // App routers mounted under /api/<app> (all admin-protected)
+  appRouters?: { path: string; router: any }[];
+}
+
+export function startServer(opts: ServerOptions): void {
+  const { store, statusChecker, qrCodeGetter, backfillTrigger, backfillProgressGetter } = opts;
   const app = express();
   app.use(express.json({ limit: "2mb" }));
 
@@ -452,6 +463,14 @@ export function startServer(store: EventStore, statusChecker?: () => { whatsappC
 
     res.json({ message: `Seeded ${added} sample events (${samples.length - added} already existed).` });
   });
+
+  // Mount app-specific routers (all admin-protected)
+  if (opts.appRouters) {
+    for (const { path: routePath, router } of opts.appRouters) {
+      app.use(routePath, requireAdmin, router);
+      console.log(`[server] Mounted app router at ${routePath}`);
+    }
+  }
 
   app.listen(config.port, () => {
     console.log(`\nWeb UI available at http://localhost:${config.port}`);
