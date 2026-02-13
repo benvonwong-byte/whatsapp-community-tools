@@ -28,6 +28,8 @@ export class RelationshipStore {
     saveMessage: Database.Statement;
     isDuplicate: Database.Statement;
     getUnanalyzed: Database.Statement;
+    getUnanalyzedDates: Database.Statement;
+    getUnanalyzedByDate: Database.Statement;
     markAnalyzed: Database.Statement;
     saveAnalysis: Database.Statement;
     getAnalyses: Database.Statement;
@@ -83,6 +85,12 @@ export class RelationshipStore {
       isDuplicate: this.db.prepare(`SELECT 1 FROM relationship_messages WHERE id = ?`),
       getUnanalyzed: this.db.prepare(
         `SELECT * FROM relationship_messages WHERE analyzed = 0 ORDER BY timestamp ASC`
+      ),
+      getUnanalyzedDates: this.db.prepare(
+        `SELECT DISTINCT date(datetime(timestamp, 'unixepoch')) as day FROM relationship_messages WHERE analyzed = 0 ORDER BY day ASC`
+      ),
+      getUnanalyzedByDate: this.db.prepare(
+        `SELECT * FROM relationship_messages WHERE analyzed = 0 AND date(datetime(timestamp, 'unixepoch')) = ? ORDER BY timestamp ASC`
       ),
       markAnalyzed: this.db.prepare(
         `UPDATE relationship_messages SET analyzed = 1 WHERE id = ?`
@@ -189,6 +197,14 @@ export class RelationshipStore {
 
   getUnanalyzedMessages(): RelationshipMessage[] {
     return this.stmts.getUnanalyzed.all() as RelationshipMessage[];
+  }
+
+  getUnanalyzedDates(): string[] {
+    return (this.stmts.getUnanalyzedDates.all() as Array<{ day: string }>).map(r => r.day);
+  }
+
+  getUnanalyzedMessagesByDate(date: string): RelationshipMessage[] {
+    return this.stmts.getUnanalyzedByDate.all(date) as RelationshipMessage[];
   }
 
   markAnalyzed(ids: string[]) {

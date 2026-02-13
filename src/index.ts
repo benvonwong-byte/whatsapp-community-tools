@@ -240,6 +240,8 @@ async function main() {
     active: false,
     phase: "idle",
     messageCount: 0,
+    currentDay: 0,
+    totalDays: 0,
     log: [],
   };
   const relationshipAnalyze = () => runDailyAnalysis(relationshipStore, relationshipAnalyzeProgress);

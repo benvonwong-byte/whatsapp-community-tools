@@ -157,6 +157,34 @@ function setupAnalyzeButton() {
 
   // Check once on load in case analysis is already running
   pollAnalyzeStatus();
+
+  // Reset & Re-analyze button
+  const resetBtn = $("reset-analyze-btn");
+  if (resetBtn) {
+    resetBtn.addEventListener("click", async () => {
+      if (resetBtn.disabled) return;
+      if (!confirm("This will reset ALL messages to unanalyzed and re-analyze the full history day by day. Continue?")) return;
+      resetBtn.disabled = true;
+      btn.disabled = true;
+      try {
+        const resetRes = await adminFetch("/api/relationship/reset-analyzed", { method: "POST" });
+        const resetData = await resetRes.json();
+        if (!resetRes.ok) throw new Error(resetData.error || "Reset failed");
+
+        const analyzeRes = await adminFetch("/api/relationship/analyze", { method: "POST" });
+        if (!analyzeRes.ok) {
+          const data = await analyzeRes.json().catch(() => ({}));
+          throw new Error(data.error || `Server returned ${analyzeRes.status}`);
+        }
+        showAnalyzeProgress();
+        startAnalyzePoll();
+      } catch (err) {
+        alert("Failed: " + err.message);
+        resetBtn.disabled = false;
+        btn.disabled = false;
+      }
+    });
+  }
 }
 
 function startAnalyzePoll() {
@@ -189,11 +217,13 @@ function renderAnalyzeProgress(p) {
   const logEl = $("analyze-progress-log");
   if (!el || !btn || !label || !fill) return;
 
+  var resetBtn = $("reset-analyze-btn");
   if (!p.active && p.phase === "idle") {
     el.classList.add("hidden");
     el.classList.remove("done", "error");
     btn.disabled = false;
     btn.textContent = "Analyze Now";
+    if (resetBtn) resetBtn.disabled = false;
     stopAnalyzePoll();
     return;
   }
@@ -202,9 +232,16 @@ function renderAnalyzeProgress(p) {
     el.classList.remove("hidden", "done", "error");
     btn.disabled = true;
     btn.textContent = "Analyzing...";
-    const phasePct = { collecting: 15, analyzing: 50, saving: 90 };
-    fill.style.width = (phasePct[p.phase] || 5) + "%";
-    label.textContent = phaseLabel(p.phase, p.messageCount);
+    var pct = 5;
+    if (p.phase === "collecting") {
+      pct = 5;
+    } else if (p.phase === "analyzing" && p.totalDays > 0) {
+      pct = 10 + Math.round((p.currentDay / p.totalDays) * 80);
+    } else if (p.phase === "saving") {
+      pct = 95;
+    }
+    fill.style.width = pct + "%";
+    label.textContent = phaseLabel(p.phase, p.messageCount, p.currentDay, p.totalDays);
     startAnalyzePoll();
   } else if (p.phase === "done") {
     el.classList.remove("hidden", "error");
@@ -213,6 +250,7 @@ function renderAnalyzeProgress(p) {
     fill.style.width = "100%";
     btn.disabled = false;
     btn.textContent = "Analyze Now";
+    if (resetBtn) resetBtn.disabled = false;
     stopAnalyzePoll();
     loadDashboard();
     setTimeout(() => { el.classList.add("hidden"); el.classList.remove("done"); }, 5000);
@@ -223,6 +261,7 @@ function renderAnalyzeProgress(p) {
     fill.style.width = "100%";
     btn.disabled = false;
     btn.textContent = "Analyze Now";
+    if (resetBtn) resetBtn.disabled = false;
     stopAnalyzePoll();
   }
 
@@ -232,10 +271,12 @@ function renderAnalyzeProgress(p) {
   }
 }
 
-function phaseLabel(phase, count) {
+function phaseLabel(phase, count, currentDay, totalDays) {
   switch (phase) {
     case "collecting": return `Collecting ${count || 0} unanalyzed messages...`;
-    case "analyzing": return `Analyzing ${count || 0} messages with Claude...`;
+    case "analyzing":
+      if (totalDays > 1) return `Analyzing day ${currentDay || 1} of ${totalDays} (${count || 0} messages total)...`;
+      return `Analyzing ${count || 0} messages with Claude...`;
     case "saving": return "Saving analysis results...";
     default: return "Starting analysis...";
   }

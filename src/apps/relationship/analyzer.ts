@@ -10,6 +10,8 @@ export interface AnalyzeProgress {
   active: boolean;
   phase: "idle" | "collecting" | "analyzing" | "saving" | "done" | "error";
   messageCount: number;
+  currentDay: number;
+  totalDays: number;
   log: string[];
   errorMessage?: string;
 }
@@ -149,24 +151,94 @@ Respond with ONLY a JSON object (no markdown):
 JSON:`;
 }
 
+/** Parse Claude's JSON response (with prefill "{" trick) */
+function parseClaudeJson(rawText: string, progress?: AnalyzeProgress): any {
+  let jsonStr = "{" + rawText.trim();
+  if (jsonStr.includes("```")) {
+    jsonStr = jsonStr.replace(/```(?:json)?\n?/g, "").replace(/\n?```/g, "");
+  }
+  const lastBrace = jsonStr.lastIndexOf("}");
+  if (lastBrace !== -1) jsonStr = jsonStr.slice(0, lastBrace + 1);
+
+  try {
+    return JSON.parse(jsonStr);
+  } catch (parseErr) {
+    logProgress(progress, `JSON parse failed, retrying without evidence...`);
+    const noEvidence = jsonStr.replace(/"evidence"\s*:\s*\{[^}]*(?:\{[^}]*\}[^}]*)*\}/s, '"evidence": {}');
+    try {
+      return JSON.parse(noEvidence);
+    } catch {
+      throw parseErr;
+    }
+  }
+}
+
+/** Analyze a single day's messages and save results */
+async function analyzeDay(
+  store: RelationshipStore,
+  date: string,
+  messages: RelationshipMessage[],
+  progress?: AnalyzeProgress
+): Promise<void> {
+  const conversation = formatConversation(messages);
+  const truncated = conversation.slice(0, 12000);
+
+  logProgress(progress, `  Sending ${messages.length} messages for ${date} to Claude...`);
+
+  const response = await client.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 4096,
+    messages: [
+      { role: "user", content: buildAnalysisPrompt(truncated, messages.length, date) },
+      { role: "assistant", content: "{" },
+    ],
+  });
+
+  const text = response.content[0].type === "text" ? response.content[0].text : "";
+  const parsed = parseClaudeJson(text, progress);
+
+  logProgress(progress, `  ${date}: score ${parsed.metrics.overallHealthScore}/100`);
+
+  const voiceCount = messages.filter((m) => m.type === "voice").length;
+  const metricsWithEvidence = {
+    ...parsed.metrics,
+    evidence: parsed.evidence || {},
+    emotionalBankAccount: parsed.emotionalBankAccount || null,
+    bids: parsed.bids || null,
+    pursueWithdraw: parsed.pursueWithdraw || null,
+    recommendations: parsed.recommendations || null,
+  };
+
+  store.saveAnalysis(
+    date,
+    JSON.stringify(metricsWithEvidence),
+    parsed.summary,
+    messages.length,
+    voiceCount * 0.5
+  );
+
+  store.markAnalyzed(messages.map((m) => m.id));
+}
+
 export async function runDailyAnalysis(
   store: RelationshipStore,
   progress?: AnalyzeProgress
 ): Promise<void> {
-  // Reset progress
   if (progress) {
     progress.active = true;
     progress.phase = "collecting";
     progress.messageCount = 0;
+    progress.currentDay = 0;
+    progress.totalDays = 0;
     progress.log = [];
     progress.errorMessage = undefined;
   }
 
   try {
     logProgress(progress, "Collecting unanalyzed messages...");
-    const messages = store.getUnanalyzedMessages();
+    const dates = store.getUnanalyzedDates();
 
-    if (messages.length === 0) {
+    if (dates.length === 0) {
       logProgress(progress, "No new messages to analyze.");
       if (progress) {
         progress.phase = "done";
@@ -176,80 +248,36 @@ export async function runDailyAnalysis(
       return;
     }
 
-    if (progress) progress.messageCount = messages.length;
-    logProgress(progress, `Found ${messages.length} unanalyzed messages.`);
-
-    const today = new Date().toISOString().split("T")[0];
-    const conversation = formatConversation(messages);
-    const truncated = conversation.slice(0, 12000);
+    // Count total unanalyzed messages for progress display
+    const totalMessages = store.getUnanalyzedMessages().length;
+    if (progress) {
+      progress.messageCount = totalMessages;
+      progress.totalDays = dates.length;
+    }
+    logProgress(progress, `Found ${totalMessages} unanalyzed messages across ${dates.length} days.`);
 
     if (progress) progress.phase = "analyzing";
-    logProgress(progress, `Sending ${messages.length} messages to Claude for analysis...`);
+    let completedDays = 0;
+    let failedDays = 0;
 
-    const response = await client.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 4096,
-      messages: [
-        { role: "user", content: buildAnalysisPrompt(truncated, messages.length, today) },
-        { role: "assistant", content: "{" },  // Prefill forces clean JSON output
-      ],
-    });
+    for (const date of dates) {
+      const dayMessages = store.getUnanalyzedMessagesByDate(date);
+      if (dayMessages.length === 0) continue;
 
-    const text = response.content[0].type === "text" ? response.content[0].text : "";
+      if (progress) progress.currentDay = completedDays + 1;
+      logProgress(progress, `Day ${completedDays + 1}/${dates.length}: ${date} (${dayMessages.length} msgs)`);
 
-    // Reconstruct full JSON (prefill started with "{")
-    let jsonStr = "{" + text.trim();
-    // Strip markdown fences if present
-    if (jsonStr.includes("```")) {
-      jsonStr = jsonStr.replace(/```(?:json)?\n?/g, "").replace(/\n?```/g, "");
-    }
-    // Remove trailing content after the last }
-    const lastBrace = jsonStr.lastIndexOf("}");
-    if (lastBrace !== -1) jsonStr = jsonStr.slice(0, lastBrace + 1);
-
-    let parsed: any;
-    try {
-      parsed = JSON.parse(jsonStr);
-    } catch (parseErr) {
-      // Attempt to salvage: strip evidence (most common source of broken JSON)
-      logProgress(progress, `JSON parse failed, retrying without evidence...`);
-      const noEvidence = jsonStr.replace(/"evidence"\s*:\s*\{[^}]*(?:\{[^}]*\}[^}]*)*\}/s, '"evidence": {}');
       try {
-        parsed = JSON.parse(noEvidence);
-      } catch {
-        throw parseErr; // Give up with original error
+        await analyzeDay(store, date, dayMessages, progress);
+        completedDays++;
+      } catch (dayErr: any) {
+        failedDays++;
+        logProgress(progress, `  ERROR on ${date}: ${dayErr?.message || dayErr}`);
+        // Continue to next day instead of aborting entirely
       }
     }
-    logProgress(progress, `Analysis received. Health score: ${parsed.metrics.overallHealthScore}/100`);
 
-    if (progress) progress.phase = "saving";
-    logProgress(progress, "Saving analysis results...");
-
-    const voiceCount = messages.filter((m) => m.type === "voice").length;
-    const estimatedVoiceMinutes = voiceCount * 0.5;
-
-    // Store metrics + evidence + new analysis fields together in metrics_json
-    const metricsWithEvidence = {
-      ...parsed.metrics,
-      evidence: parsed.evidence || {},
-      emotionalBankAccount: parsed.emotionalBankAccount || null,
-      bids: parsed.bids || null,
-      pursueWithdraw: parsed.pursueWithdraw || null,
-      recommendations: parsed.recommendations || null,
-    };
-
-    store.saveAnalysis(
-      today,
-      JSON.stringify(metricsWithEvidence),
-      parsed.summary,
-      messages.length,
-      estimatedVoiceMinutes
-    );
-
-    store.markAnalyzed(messages.map((m) => m.id));
-
-    logProgress(progress, `Done! Score: ${parsed.metrics.overallHealthScore}/100`);
-    logProgress(progress, parsed.summary);
+    logProgress(progress, `Finished: ${completedDays} days analyzed, ${failedDays} failed.`);
 
     if (progress) {
       progress.phase = "done";
