@@ -221,7 +221,9 @@ function renderMonitorBar() {
   const lastMsgEl = document.getElementById("monitor-last-msg");
   const todayEl = document.getElementById("monitor-today-count");
 
-  const lastMsg = stats?.lastMessageTimestamp;
+  const rawTs = stats?.lastMessageTimestamp;
+  // Backend returns Unix timestamp (number) — convert to ISO string for formatRelativeTime
+  const lastMsg = rawTs ? (typeof rawTs === "number" ? new Date(rawTs * 1000).toISOString() : String(rawTs)) : null;
   const todayCount = stats?.todayMessageCount ?? 0;
 
   // Determine recency color
@@ -290,7 +292,7 @@ function renderLinks() {
         ? escapeHtml(link.sender_name)
         : "Unknown";
       const timeStr = link.timestamp
-        ? formatRelativeTime(link.timestamp)
+        ? formatRelativeTime(typeof link.timestamp === "number" ? new Date(link.timestamp * 1000).toISOString() : link.timestamp)
         : "";
 
       return `
