@@ -50,8 +50,8 @@ function setPresetRange(days) {
 }
 
 function syncDateInputs() {
-  const s = document.getElementById("range-start");
-  const e = document.getElementById("range-end");
+  const s = $("range-start");
+  const e = $("range-end");
   if (s && e) { s.value = dateRange.startDate || ""; e.value = dateRange.endDate || ""; }
 }
 
@@ -73,12 +73,12 @@ function buildDashboardUrl() {
 
 document.addEventListener("DOMContentLoaded", () => {
   if (!isAdmin) {
-    document.getElementById("login-gate").classList.remove("hidden");
-    document.getElementById("analyze-btn").classList.add("hidden");
+    $("login-gate")?.classList.remove("hidden");
+    $("analyze-btn")?.classList.add("hidden");
     return;
   }
 
-  document.getElementById("main-content").classList.remove("hidden");
+  $("main-content")?.classList.remove("hidden");
   setPresetRange("30");
   setupDateRangeControls();
   setupAnalyzeButton();
@@ -94,8 +94,9 @@ function setupDateRangeControls() {
   document.querySelectorAll(".range-chip").forEach((chip) => {
     chip.addEventListener("click", () => setPresetRange(chip.dataset.range));
   });
-  const s = document.getElementById("range-start");
-  const e = document.getElementById("range-end");
+  const s = $("range-start");
+  const e = $("range-end");
+  if (!s || !e) return;
   function onCustom() {
     if (s.value && e.value) {
       dateRange.startDate = s.value;
@@ -119,17 +120,20 @@ async function loadDashboard() {
     renderDashboard();
   } catch (err) {
     console.error("Failed to load dashboard:", err);
-    document.getElementById("loading-state").classList.add("hidden");
-    const errEl = document.getElementById("error-state");
-    errEl.textContent = `Failed to load dashboard: ${err.message}`;
-    errEl.classList.remove("hidden");
+    $("loading-state")?.classList.add("hidden");
+    const errEl = $("error-state");
+    if (errEl) {
+      errEl.textContent = `Failed to load dashboard: ${err.message}`;
+      errEl.classList.remove("hidden");
+    }
   }
 }
 
 // ── Analyze: async with progress polling ──
 
 function setupAnalyzeButton() {
-  const btn = document.getElementById("analyze-btn");
+  const btn = $("analyze-btn");
+  if (!btn) return;
   btn.addEventListener("click", async () => {
     if (btn.disabled) return;
     btn.disabled = true;
@@ -164,8 +168,8 @@ function stopAnalyzePoll() {
 }
 
 function showAnalyzeProgress() {
-  const el = document.getElementById("analyze-progress");
-  el.classList.remove("hidden", "done", "error");
+  const el = $("analyze-progress");
+  if (el) el.classList.remove("hidden", "done", "error");
 }
 
 async function pollAnalyzeStatus() {
@@ -177,11 +181,12 @@ async function pollAnalyzeStatus() {
 }
 
 function renderAnalyzeProgress(p) {
-  const el = document.getElementById("analyze-progress");
-  const btn = document.getElementById("analyze-btn");
-  const label = document.getElementById("analyze-progress-label");
-  const fill = document.getElementById("analyze-progress-fill");
-  const logEl = document.getElementById("analyze-progress-log");
+  const el = $("analyze-progress");
+  const btn = $("analyze-btn");
+  const label = $("analyze-progress-label");
+  const fill = $("analyze-progress-fill");
+  const logEl = $("analyze-progress-log");
+  if (!el || !btn || !label || !fill) return;
 
   if (!p.active && p.phase === "idle") {
     el.classList.add("hidden");
@@ -238,7 +243,7 @@ function phaseLabel(phase, count) {
 // ── Backfill ──
 
 function setupBackfillButton() {
-  const btn = document.getElementById("backfill-btn");
+  const btn = $("backfill-btn");
   if (!btn) return;
   btn.addEventListener("click", async () => {
     if (btn.disabled) return;
@@ -263,8 +268,8 @@ function setupBackfillButton() {
 // ── Import .txt ──
 
 function setupImportButton() {
-  const btn = document.getElementById("import-btn");
-  const fileInput = document.getElementById("import-file");
+  const btn = $("import-btn");
+  const fileInput = $("import-file");
   if (!btn || !fileInput) return;
   btn.addEventListener("click", () => fileInput.click());
   fileInput.addEventListener("change", async () => {
@@ -295,10 +300,15 @@ function setupImportButton() {
 
 // ── Rendering ──
 
+function $(id) { return document.getElementById(id); }
+
 function renderDashboard() {
-  document.getElementById("loading-state").classList.add("hidden");
-  document.getElementById("error-state").classList.add("hidden");
-  document.getElementById("dashboard").classList.remove("hidden");
+  const loading = $("loading-state");
+  const errEl = $("error-state");
+  const dash = $("dashboard");
+  if (loading) loading.classList.add("hidden");
+  if (errEl) errEl.classList.add("hidden");
+  if (dash) dash.classList.remove("hidden");
 
   const d = dashboardData;
   renderMonitorBar(d);
@@ -317,9 +327,10 @@ function renderDashboard() {
 // ── Monitor Bar ──
 
 function renderMonitorBar(d) {
-  const dot = document.getElementById("monitor-dot");
-  const lastMsgEl = document.getElementById("monitor-last-msg");
-  const todayEl = document.getElementById("monitor-today-count");
+  const dot = $("monitor-dot");
+  const lastMsgEl = $("monitor-last-msg");
+  const todayEl = $("monitor-today-count");
+  if (!dot || !lastMsgEl || !todayEl) return;
   const lastMsg = d.monitoring?.lastMessageAt;
   const todayCount = d.monitoring?.messagesToday ?? 0;
   let color = "red";
@@ -339,11 +350,12 @@ function renderMonitorBar(d) {
 
 function renderStats(d) {
   const s = d.stats || {};
-  document.getElementById("stat-total-messages").textContent = (s.totalMessages ?? 0).toLocaleString();
-  document.getElementById("stat-voice-minutes").textContent = (s.voiceMinutes ?? 0).toLocaleString();
-  document.getElementById("stat-days-tracked").textContent = (s.daysTracked ?? 0).toLocaleString();
+  const el = (id, val) => { const e = $(id); if (e) e.textContent = val; };
+  el("stat-total-messages", (s.totalMessages ?? 0).toLocaleString());
+  el("stat-voice-minutes", (s.voiceMinutes ?? 0).toLocaleString());
+  el("stat-days-tracked", (s.daysTracked ?? 0).toLocaleString());
   const avg = s.daysTracked > 0 ? Math.round(s.totalMessages / s.daysTracked) : 0;
-  document.getElementById("stat-avg-per-day").textContent = avg.toLocaleString();
+  el("stat-avg-per-day", avg.toLocaleString());
 }
 
 // ── Sparklines ──
@@ -357,7 +369,7 @@ function renderSparklines(d) {
 }
 
 function drawSparkline(id, data, color) {
-  const canvas = document.getElementById(id);
+  const canvas = $(id);
   if (!canvas || data.length < 2) return;
   const ctx = canvas.getContext("2d");
   const dpr = window.devicePixelRatio || 1;
@@ -387,19 +399,22 @@ function renderRatio(d) {
   const r = d.stats?.messageRatio || {};
   const ben = r.benPercent ?? 50;
   const hope = r.hopePercent ?? 50;
-  document.getElementById("ratio-left-label").textContent = `Ben: ${Math.round(ben)}%`;
-  document.getElementById("ratio-right-label").textContent = `Hope: ${Math.round(hope)}%`;
-  document.getElementById("ratio-fill-left").style.width = ben + "%";
-  document.getElementById("ratio-fill-right").style.width = hope + "%";
+  const ll = $("ratio-left-label"), rl = $("ratio-right-label");
+  const lf = $("ratio-fill-left"), rf = $("ratio-fill-right");
+  if (ll) ll.textContent = `Ben: ${Math.round(ben)}%`;
+  if (rl) rl.textContent = `Hope: ${Math.round(hope)}%`;
+  if (lf) lf.style.width = ben + "%";
+  if (rf) rf.style.width = hope + "%";
 }
 
 // ── Latest Analysis ──
 
 function renderLatestAnalysis(d) {
   const a = d.latestAnalysis;
-  const scoreEl = document.getElementById("health-score");
-  const summaryEl = document.getElementById("health-summary");
-  const dateEl = document.getElementById("health-date");
+  const scoreEl = $("health-score");
+  const summaryEl = $("health-summary");
+  const dateEl = $("health-date");
+  if (!scoreEl || !summaryEl || !dateEl) return;
   if (!a) {
     scoreEl.textContent = "--";
     scoreEl.className = "health-score-number";
@@ -420,7 +435,7 @@ function renderLatestAnalysis(d) {
 // ── Radar Chart (Canvas) ──
 
 function renderRadarChart(d) {
-  const canvas = document.getElementById("radar-chart");
+  const canvas = $("radar-chart");
   if (!canvas) return;
   const a = d.latestAnalysis;
   if (!a) { canvas.style.display = "none"; return; }
@@ -518,7 +533,8 @@ function renderRadarChart(d) {
 // ── Gottman Four Horsemen ──
 
 function renderHorsemen(d) {
-  const container = document.getElementById("horsemen-bars");
+  const container = $("horsemen-bars");
+  if (!container) return;
   const h = d.latestAnalysis?.horsemen || {};
   const ev = d.latestAnalysis?.evidence || {};
   const items = [
@@ -537,7 +553,8 @@ function renderHorsemen(d) {
 // ── Gottman Positives ──
 
 function renderPositives(d) {
-  const container = document.getElementById("positives-bars");
+  const container = $("positives-bars");
+  if (!container) return;
   const p = d.latestAnalysis?.positives || {};
   const ev = d.latestAnalysis?.evidence || {};
   const items = [
@@ -581,7 +598,8 @@ function metricBarHTML(label, value, colorClass, evKey, evidence) {
 // ── Perel Gauges ──
 
 function renderPerelGauges(d) {
-  const container = document.getElementById("perel-gauges");
+  const container = $("perel-gauges");
+  if (!container) return;
   const p = d.latestAnalysis?.perel || {};
   const ev = d.latestAnalysis?.evidence || {};
   const items = [
@@ -610,7 +628,7 @@ function renderPerelGauges(d) {
 
   // Draw gauges
   items.forEach((item, i) => {
-    const canvas = document.getElementById(`gauge-${i}`);
+    const canvas = $(`gauge-${i}`);
     if (canvas) drawGauge(canvas, (p[item.key] ?? 0) / 100);
   });
 }
@@ -654,8 +672,9 @@ function drawGauge(canvas, pct) {
 // ── Trend Chart (Canvas) ──
 
 function renderTrendChart(d) {
-  const canvas = document.getElementById("trend-chart");
-  const emptyEl = document.getElementById("chart-empty");
+  const canvas = $("trend-chart");
+  const emptyEl = $("chart-empty");
+  if (!canvas || !emptyEl) return;
   const trend = d.trend || [];
 
   if (trend.length < 2) {
@@ -755,8 +774,9 @@ function renderTrendChart(d) {
 // ── Daily Cards ──
 
 function renderDailyCards(d) {
-  const container = document.getElementById("daily-cards");
-  const emptyEl = document.getElementById("daily-empty");
+  const container = $("daily-cards");
+  const emptyEl = $("daily-empty");
+  if (!container || !emptyEl) return;
   const days = d.dailyAnalyses || [];
 
   if (days.length === 0) { container.innerHTML = ""; emptyEl.classList.remove("hidden"); return; }
