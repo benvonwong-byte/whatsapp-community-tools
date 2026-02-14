@@ -1,4 +1,5 @@
 import express, { Request, Response, NextFunction } from "express";
+import rateLimit from "express-rate-limit";
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
@@ -8,8 +9,9 @@ import { categories } from "./categories";
 import { verifyAllStoredEvents, VerifyProgress, deduplicateEvents, DedupProgress } from "./verifier";
 
 function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
+  const ha = crypto.createHash("sha256").update(a).digest();
+  const hb = crypto.createHash("sha256").update(b).digest();
+  return crypto.timingSafeEqual(ha, hb);
 }
 
 export interface BackfillProgress {
@@ -80,14 +82,17 @@ export function startServer(opts: ServerOptions): void {
   app.use(express.json({ limit: "2mb" }));
 
   // CORS: allow Firebase-hosted frontend to call Railway API
-  const allowedOriginSuffixes = [".firebaseapp.com", ".web.app"];
+  const allowedOrigins = new Set([
+    "https://whatsapp-events-nyc.web.app",
+    "https://whatsapp-events-nyc.firebaseapp.com",
+  ]);
   app.use((req, res, next) => {
     const origin = req.headers.origin || "";
     let allowed = false;
     try {
       const { hostname } = new URL(origin);
       allowed = hostname === "localhost" || hostname === "127.0.0.1"
-        || allowedOriginSuffixes.some((s) => hostname === s.slice(1) || hostname.endsWith(s));
+        || allowedOrigins.has(origin);
     } catch {}
     if (allowed) {
       res.setHeader("Access-Control-Allow-Origin", origin);
@@ -99,6 +104,7 @@ export function startServer(opts: ServerOptions): void {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-Frame-Options", "DENY");
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
     res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://whatsapp-events-nyc-production.up.railway.app https://whatsapp-events-nyc.web.app https://nominatim.openstreetmap.org; img-src 'self' data:");
     next();
   });
@@ -108,7 +114,8 @@ export function startServer(opts: ServerOptions): void {
   // ── Public endpoints (read-only, safe for anyone) ──
 
   // Login: exchange email/password for admin token
-  app.post("/api/login", (req, res) => {
+  const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: { error: "Too many login attempts. Try again later." } });
+  app.post("/api/login", loginLimiter, (req, res) => {
     const { email, password } = req.body;
     if (!config.adminEmail || !config.adminPassword) {
       res.status(503).json({ error: "Login not configured." });
@@ -155,10 +162,11 @@ export function startServer(opts: ServerOptions): void {
     }
   });
 
-  // Toggle favorite (harmless user action)
-  app.post("/api/events/:hash/favorite", (req, res) => {
-    const favorited = store.toggleFavorite(req.params.hash);
-    res.json({ hash: req.params.hash, favorited });
+  // Toggle favorite
+  app.post("/api/events/:hash/favorite", requireAdmin, (req, res) => {
+    const hash = req.params.hash as string;
+    const favorited = store.toggleFavorite(hash);
+    res.json({ hash, favorited });
   });
 
   // Get categories
@@ -673,10 +681,9 @@ export function startServer(opts: ServerOptions): void {
   app.listen(config.port, () => {
     console.log(`\nWeb UI available at http://localhost:${config.port}`);
     if (!process.env.ADMIN_TOKEN) {
-      console.log(`Admin token (auto-generated): ${config.adminToken}`);
-      console.log(`Set ADMIN_TOKEN env var for a stable token.\n`);
+      console.log(`Admin token: auto-generated (set ADMIN_TOKEN env var for a stable token)\n`);
     } else {
-      console.log(`Admin token loaded from ADMIN_TOKEN env var.\n`);
+      console.log(`Admin token: loaded from ADMIN_TOKEN env var.\n`);
     }
   });
 }

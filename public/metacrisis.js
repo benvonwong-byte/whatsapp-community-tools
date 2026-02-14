@@ -15,11 +15,9 @@ const API_BASE =
 
 // Admin fetch helper — adds auth token
 function adminFetch(path, opts = {}) {
-  const separator = path.includes("?") ? "&" : "?";
-  return fetch(
-    `${API_BASE}${path}${separator}token=${encodeURIComponent(adminToken)}`,
-    opts
-  );
+  const headers = opts.headers ? { ...opts.headers } : {};
+  headers["Authorization"] = `Bearer ${adminToken}`;
+  return fetch(`${API_BASE}${path}`, { ...opts, headers });
 }
 
 // State

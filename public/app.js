@@ -93,10 +93,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   backfillPollTimer = setInterval(pollBackfillStatus, 5000);
 });
 
-// Helper: fetch an admin-protected endpoint with the token
+// Helper: fetch an admin-protected endpoint with Bearer auth header
 function adminFetch(url, options = {}) {
-  const separator = url.includes("?") ? "&" : "?";
-  return fetch(`${API_BASE}${url}${separator}token=${encodeURIComponent(adminToken)}`, options);
+  const headers = options.headers ? { ...options.headers } : {};
+  headers["Authorization"] = `Bearer ${adminToken}`;
+  return fetch(`${API_BASE}${url}`, { ...options, headers });
 }
 
 // Helper: fetch a public API endpoint
