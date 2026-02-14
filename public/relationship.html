@@ -584,14 +584,17 @@
       <div class="zone" id="zone-snapshot">
         <div class="zone-label">LATEST SNAPSHOT</div>
 
-        <!-- Person Toggle -->
-        <div class="person-toggle" id="person-toggle">
-          <button class="person-toggle-btn active" data-person="ben">
-            <span class="person-dot ben-dot"></span> Ben
-          </button>
-          <button class="person-toggle-btn" data-person="hope">
-            <span class="person-dot hope-dot"></span> Hope
-          </button>
+        <!-- Person Toggle + Text Hope button -->
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+          <div class="person-toggle" id="person-toggle" style="margin-bottom:0;">
+            <button class="person-toggle-btn active" data-person="ben">
+              <span class="person-dot ben-dot"></span> Ben
+            </button>
+            <button class="person-toggle-btn" data-person="hope">
+              <span class="person-dot hope-dot"></span> Hope
+            </button>
+          </div>
+          <button id="text-hope-btn" class="action-btn" style="display:none;background:var(--pink);color:#fff;border-color:var(--pink);font-weight:600;" title="Send today's summary to Hope via WhatsApp">Text Hope</button>
         </div>
 
         <!-- Action Cards (person + together) -->

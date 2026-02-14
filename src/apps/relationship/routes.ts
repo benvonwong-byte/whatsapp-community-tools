@@ -436,5 +436,20 @@ export function createRelationshipRouter(
     res.json({ message: message || "No analysis data available." });
   });
 
+  // POST /api/relationship/send-custom — send a custom message to Hope via WhatsApp
+  router.post("/send-custom", async (req: Request, res: Response) => {
+    const { message } = req.body;
+    if (!message || typeof message !== "string" || !message.trim()) {
+      res.status(400).json({ error: "Message body is required" });
+      return;
+    }
+    try {
+      await sendUpdateTrigger(message.trim());
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || "Failed to send message" });
+    }
+  });
+
   return router;
 }

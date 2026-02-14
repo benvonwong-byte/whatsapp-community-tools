@@ -131,6 +131,17 @@ function setupPersonToggle() {
       renderIndividualSection(dashboardData);
     });
   });
+
+  // Text Hope button
+  const textHopeBtn = document.getElementById("text-hope-btn");
+  if (textHopeBtn) {
+    textHopeBtn.addEventListener("click", sendTextToHope);
+  }
+}
+
+function updateTextHopeButton() {
+  const btn = document.getElementById("text-hope-btn");
+  if (btn) btn.style.display = selectedPerson === "hope" ? "" : "none";
 }
 
 function renderIndividualSection(d) {
@@ -140,6 +151,117 @@ function renderIndividualSection(d) {
   renderLanguageEmotion(d);
   renderCommunicationBalance(d);
   renderBids(d);
+  updateTextHopeButton();
+}
+
+function buildHopeMessage(d) {
+  var a = d.latestAnalysis;
+  var range = d.rangeAnalysis;
+  var lines = [];
+
+  lines.push("💗 *Hey Hope — here's your daily check-in*");
+  lines.push("");
+
+  // Hope's recommendations
+  var recs = a ? a.recommendations : null;
+  var hopeRecs = recs && recs.forHope ? recs.forHope : [];
+  if (hopeRecs.length > 0) {
+    lines.push("✨ *What you can focus on:*");
+    for (var i = 0; i < hopeRecs.length; i++) {
+      lines.push("• " + hopeRecs[i]);
+    }
+    lines.push("");
+  }
+
+  // Together recommendations
+  var togetherRecs = recs && recs.forBoth ? recs.forBoth : [];
+  if (togetherRecs.length > 0) {
+    lines.push("🌱 *Together:*");
+    for (var i = 0; i < togetherRecs.length; i++) {
+      lines.push("• " + togetherRecs[i]);
+    }
+    lines.push("");
+  }
+
+  // Team summary: health score
+  var score = range ? range.overallHealthScore : (a ? a.overallScore : null);
+  if (score != null) {
+    var emoji = score >= 70 ? "🟢" : score >= 40 ? "🟡" : "🔴";
+    lines.push(emoji + " *Health Score: " + Math.round(score) + "/100*");
+  }
+
+  // Emotional bank account
+  var bank = range ? range.emotionalBankAccount : (a ? a.emotionalBankAccount : null);
+  if (bank) {
+    var bankEmoji = bank.status === "healthy" ? "✅" : bank.status === "watch" ? "⚠️" : "🚨";
+    lines.push("🏦 Bank Account: " + bank.ratio.toFixed(1) + ":1 " + bankEmoji + " (" + bank.deposits + " deposits, " + bank.withdrawals + " withdrawals)");
+  }
+
+  // Bids
+  var bids = range ? range.bids : (a ? a.bids : null);
+  if (bids) {
+    var total = (bids.turnedToward || 0) + (bids.turnedAway || 0) + (bids.turnedAgainst || 0);
+    if (total > 0) {
+      var towardPct = Math.round((bids.turnedToward / total) * 100);
+      lines.push("🤝 Bids: " + towardPct + "% turned toward (" + bids.turnedToward + "/" + total + ")");
+    }
+  }
+
+  // Summary
+  if (range && range.summary) {
+    lines.push("");
+    lines.push("📝 " + range.summary);
+  } else if (a && a.summary) {
+    lines.push("");
+    lines.push("📝 " + a.summary);
+  }
+
+  // Notable quotes from Hope
+  var allQuotes = a ? (a.notableQuotes || []) : [];
+  var hopeQuotes = allQuotes.filter(function(q) { return (q.speaker || "").toLowerCase() === "hope"; });
+  if (hopeQuotes.length > 0) {
+    lines.push("");
+    lines.push("💬 *Your notable quotes today:*");
+    for (var i = 0; i < Math.min(hopeQuotes.length, 3); i++) {
+      lines.push('"' + hopeQuotes[i].text + '"');
+    }
+  }
+
+  lines.push("");
+  lines.push("_Sent with love from Ben's dashboard_ 💕");
+
+  return lines.join("\n");
+}
+
+async function sendTextToHope() {
+  var btn = document.getElementById("text-hope-btn");
+  if (!btn || !dashboardData) return;
+
+  var message = buildHopeMessage(dashboardData);
+  if (!message.trim()) {
+    alert("No data to send yet.");
+    return;
+  }
+
+  if (!confirm("Send this summary to Hope via WhatsApp?\n\n" + message.substring(0, 300) + "...")) return;
+
+  btn.disabled = true;
+  btn.textContent = "Sending...";
+  try {
+    var res = await adminFetch("/api/relationship/send-custom", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: message }),
+    });
+    var data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed");
+    btn.textContent = "Sent ✓";
+    setTimeout(function() { btn.textContent = "Text Hope"; btn.disabled = false; }, 3000);
+  } catch (err) {
+    alert("Failed to send: " + err.message);
+    btn.textContent = "Text Hope";
+    btn.disabled = false;
+  }
 }
 
 // ── Data Loading ──
@@ -638,6 +760,7 @@ function renderDashboard() {
   renderIndividualActionCard(d);
   renderNotableQuotes(d);
   renderLanguageEmotion(d);
+  updateTextHopeButton();
 
   // TEAM (date-range dependent)
   renderHealthScoreHero(d);
