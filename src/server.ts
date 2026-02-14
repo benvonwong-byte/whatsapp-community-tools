@@ -537,8 +537,13 @@ export function startServer(opts: ServerOptions): void {
       }
     } catch { /* skip */ }
 
-    // Table row counts
+    // Table row counts + sizes
     const tableCounts = store.getTableCounts();
+    const rawSizes = store.getTableSizes();
+    const tableSizes: Record<string, string> = {};
+    for (const [name, bytes] of Object.entries(rawSizes)) {
+      tableSizes[name] = formatBytes(bytes);
+    }
 
     const total = dbSize + walSize + shmSize + authSize;
 
@@ -554,6 +559,7 @@ export function startServer(opts: ServerOptions): void {
       },
       authBreakdown,
       tableCounts,
+      tableSizes,
     });
   });
 

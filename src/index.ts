@@ -1,3 +1,5 @@
+import fs from "fs";
+import path from "path";
 import { config } from "./config";
 import { WhatsAppClient, BufferedMessage } from "./whatsapp";
 import { extractEvents } from "./extractor";
@@ -664,6 +666,43 @@ async function main() {
   scheduleWeeklyTask(0, 0, async () => {
     console.log("[scheduler] Running metacrisis weekly summary...");
     await runWeeklySummary(metacrisisStore);
+  });
+
+  // Schedule weekly cache cleanup (Sunday at 3 AM)
+  scheduleWeeklyTask(0, 3, async () => {
+    console.log("[cleanup] Running weekly cache cleanup...");
+    const cacheDirNames = ["Cache", "Code Cache", "GPUCache", "Service Worker", "blob_storage", "Session Storage", "WebStorage"];
+    let cleared = 0;
+    try {
+      const sessionDirs = fs.readdirSync(config.authDir, { withFileTypes: true })
+        .filter(e => e.isDirectory() && e.name.startsWith("session"));
+      for (const sessionDir of sessionDirs) {
+        const defPath = path.join(config.authDir, sessionDir.name, "Default");
+        if (!fs.existsSync(defPath)) continue;
+        for (const sub of cacheDirNames) {
+          const cacheDir = path.join(defPath, sub);
+          if (fs.existsSync(cacheDir)) {
+            try {
+              const stat = fs.statSync(cacheDir);
+              fs.rmSync(cacheDir, { recursive: true, force: true });
+              cleared++;
+            } catch { /* skip locked dirs */ }
+          }
+        }
+      }
+    } catch (err: any) {
+      console.error("[cleanup] Cache scan failed:", err?.message || err);
+    }
+
+    // Vacuum database
+    try {
+      store.vacuum();
+      console.log("[cleanup] Database vacuumed.");
+    } catch (err: any) {
+      console.error("[cleanup] Vacuum failed:", err?.message || err);
+    }
+
+    console.log(`[cleanup] Cleared ${cleared} cache directories.`);
   });
 
   // ── Real-time relationship auto-analysis ──

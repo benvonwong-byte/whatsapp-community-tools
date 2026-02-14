@@ -433,6 +433,22 @@ export class EventStore {
     return counts;
   }
 
+  /** Get estimated byte sizes per table using dbstat virtual table */
+  getTableSizes(): Record<string, number> {
+    const sizes: Record<string, number> = {};
+    try {
+      const rows = this.db.prepare(
+        `SELECT name, SUM(pgsize) as size FROM dbstat GROUP BY name ORDER BY size DESC`
+      ).all() as { name: string; size: number }[];
+      for (const r of rows) {
+        sizes[r.name] = r.size;
+      }
+    } catch {
+      // dbstat not available — fall back to page_count * page_size estimate
+    }
+    return sizes;
+  }
+
   vacuum(): void {
     this.db.pragma("wal_checkpoint(TRUNCATE)");
     this.db.exec("VACUUM");
