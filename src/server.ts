@@ -580,7 +580,7 @@ export function startServer(opts: ServerOptions): void {
     let cacheCleared = 0;
     try {
       const sessionDirs = fs.readdirSync(authDir, { withFileTypes: true })
-        .filter(e => e.isDirectory() && e.name.startsWith("session-"));
+        .filter(e => e.isDirectory() && e.name.startsWith("session"));
       for (const sessionDir of sessionDirs) {
         const defPath = path.join(authDir, sessionDir.name, "Default");
         if (!fs.existsSync(defPath)) continue;
