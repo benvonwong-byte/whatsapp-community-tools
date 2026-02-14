@@ -207,13 +207,13 @@
        ======================================== */
 
     /* Health score hero */
-    .health-score-hero { text-align: center; padding: 24px; }
-    .health-score-hero-inner { display: flex; align-items: center; gap: 24px; justify-content: center; }
-    .health-score-number-big { font-size: 72px; font-weight: 900; line-height: 1; }
+    .health-score-hero { padding: 24px; }
+    .health-score-hero-inner { display: flex; align-items: center; gap: 24px; }
+    .health-score-number-big { font-size: 72px; font-weight: 900; line-height: 1; flex-shrink: 0; }
     .health-score-number-big.green { color: var(--green); }
     .health-score-number-big.yellow { color: var(--yellow); }
     .health-score-number-big.red { color: var(--red); }
-    .health-score-meta { text-align: left; max-width: 500px; }
+    .health-score-meta { text-align: left; flex: 1; min-width: 0; }
     .health-score-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); margin-bottom: 4px; }
     .health-tone { font-size: 11px; margin-top: 6px; }
     .tone-badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
