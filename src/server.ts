@@ -1,5 +1,6 @@
 import express, { Request, Response, NextFunction } from "express";
 import crypto from "crypto";
+import fs from "fs";
 import path from "path";
 import { config } from "./config";
 import { EventStore } from "./store";
@@ -462,6 +463,134 @@ export function startServer(opts: ServerOptions): void {
     }
 
     res.json({ message: `Seeded ${added} sample events (${samples.length - added} already existed).` });
+  });
+
+  // ── Disk usage & cleanup ──
+
+  function getDirSize(dirPath: string): number {
+    if (!fs.existsSync(dirPath)) return 0;
+    let total = 0;
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(dirPath, entry.name);
+      try {
+        if (entry.isDirectory()) {
+          total += getDirSize(fullPath);
+        } else {
+          total += fs.statSync(fullPath).size;
+        }
+      } catch { /* skip inaccessible files */ }
+    }
+    return total;
+  }
+
+  function getFileSize(filePath: string): number {
+    try { return fs.statSync(filePath).size; } catch { return 0; }
+  }
+
+  function formatBytes(bytes: number): string {
+    if (bytes < 1024) return bytes + " B";
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+  }
+
+  // GET /api/disk-usage — show what's consuming storage
+  app.get("/api/disk-usage", requireAdmin, (_req, res) => {
+    const dbFile = config.dbPath;
+    const walFile = dbFile + "-wal";
+    const shmFile = dbFile + "-shm";
+    const authDir = config.authDir;
+
+    const dbSize = getFileSize(dbFile);
+    const walSize = getFileSize(walFile);
+    const shmSize = getFileSize(shmFile);
+    const authSize = getDirSize(authDir);
+
+    // Chrome cache is inside auth dir
+    let chromeCacheSize = 0;
+    const defaultDir = path.join(authDir, "session-whatsapp-events-nyc", "Default");
+    if (fs.existsSync(defaultDir)) {
+      for (const sub of ["Cache", "Code Cache", "GPUCache", "Service Worker"]) {
+        chromeCacheSize += getDirSize(path.join(defaultDir, sub));
+      }
+    }
+
+    // Table row counts
+    const tableCounts = store.getTableCounts();
+
+    const total = dbSize + walSize + shmSize + authSize;
+
+    res.json({
+      total: formatBytes(total),
+      totalBytes: total,
+      breakdown: {
+        "events.db": formatBytes(dbSize),
+        "events.db-wal": formatBytes(walSize),
+        "events.db-shm": formatBytes(shmSize),
+        ".auth/ (total)": formatBytes(authSize),
+        "Chrome cache": formatBytes(chromeCacheSize),
+        ".auth/ (without cache)": formatBytes(authSize - chromeCacheSize),
+      },
+      tableCounts,
+    });
+  });
+
+  // POST /api/cleanup — vacuum DB, clear Chrome cache, prune old data
+  app.post("/api/cleanup", requireAdmin, (req, res) => {
+    const actions: string[] = [];
+    const dryRun = req.query.dry === "true";
+
+    // 1. Checkpoint and vacuum SQLite
+    if (!dryRun) {
+      try {
+        store.vacuum();
+        actions.push("WAL checkpoint + VACUUM completed");
+      } catch (err: any) {
+        actions.push("VACUUM failed: " + err.message);
+      }
+    } else {
+      actions.push("[dry-run] Would checkpoint WAL and VACUUM database");
+    }
+
+    // 2. Clear Chrome cache directories
+    const authDir = config.authDir;
+    const defaultDir = path.join(authDir, "session-whatsapp-events-nyc", "Default");
+    const cacheDirs = ["Cache", "Code Cache", "GPUCache", "Service Worker"];
+    let cacheCleared = 0;
+    for (const sub of cacheDirs) {
+      const cacheDir = path.join(defaultDir, sub);
+      if (fs.existsSync(cacheDir)) {
+        const size = getDirSize(cacheDir);
+        if (!dryRun) {
+          try {
+            fs.rmSync(cacheDir, { recursive: true, force: true });
+            cacheCleared += size;
+            actions.push(`Cleared ${sub}/ (${formatBytes(size)})`);
+          } catch (err: any) {
+            actions.push(`Failed to clear ${sub}/: ${err.message}`);
+          }
+        } else {
+          cacheCleared += size;
+          actions.push(`[dry-run] Would clear ${sub}/ (${formatBytes(size)})`);
+        }
+      }
+    }
+
+    // 3. Prune processed_messages body text older than 30 days (keep metadata for dedup)
+    const thirtyDays = 30 * 86400;
+    try {
+      if (!dryRun) {
+        const pruned = store.pruneOldMessageBodies(thirtyDays);
+        actions.push(`Pruned message bodies: ${pruned} rows`);
+      } else {
+        const count = store.countPrunableMessageBodies(thirtyDays);
+        actions.push(`[dry-run] Would prune ${count} old message bodies`);
+      }
+    } catch (err: any) {
+      actions.push("Body pruning failed: " + err.message);
+    }
+
+    res.json({ actions, cacheCleared: formatBytes(cacheCleared) });
   });
 
   // Mount app-specific routers (all admin-protected)

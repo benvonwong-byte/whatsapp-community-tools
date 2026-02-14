@@ -417,6 +417,43 @@ export class EventStore {
     return rows.map(this.mapRow);
   }
 
+  // ── Maintenance methods ──
+
+  getTableCounts(): Record<string, number> {
+    const counts: Record<string, number> = {};
+    const tables = this.db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+    ).all() as { name: string }[];
+    for (const t of tables) {
+      try {
+        const row = this.db.prepare(`SELECT COUNT(*) as c FROM "${t.name}"`).get() as { c: number };
+        counts[t.name] = row.c;
+      } catch { /* skip */ }
+    }
+    return counts;
+  }
+
+  vacuum(): void {
+    this.db.pragma("wal_checkpoint(TRUNCATE)");
+    this.db.exec("VACUUM");
+  }
+
+  pruneOldMessageBodies(olderThanSec: number): number {
+    const cutoff = Math.floor(Date.now() / 1000) - olderThanSec;
+    const result = this.db.prepare(
+      "UPDATE processed_messages SET body = '' WHERE timestamp < ? AND body != ''"
+    ).run(cutoff);
+    return result.changes;
+  }
+
+  countPrunableMessageBodies(olderThanSec: number): number {
+    const cutoff = Math.floor(Date.now() / 1000) - olderThanSec;
+    const row = this.db.prepare(
+      "SELECT COUNT(*) as c FROM processed_messages WHERE timestamp < ? AND body != ''"
+    ).get(cutoff) as { c: number };
+    return row.c;
+  }
+
   close() {
     this.db.close();
   }
