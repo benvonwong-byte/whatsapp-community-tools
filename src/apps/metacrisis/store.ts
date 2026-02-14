@@ -25,11 +25,33 @@ export interface MetacrisisLink {
 export interface MetacrisisSummary {
   id: number;
   date: string;
+  type: string;
   summary: string;
   key_topics_json: string;
+  recommendations_json: string;
+  who_said_what_json: string;
   message_count: number;
   pushed: number;
   created_at: string;
+}
+
+export interface MetacrisisEvent {
+  id: number;
+  url: string;
+  name: string;
+  date: string | null;
+  start_time: string | null;
+  end_time: string | null;
+  location: string;
+  description: string;
+  source_message_id: string | null;
+  status: string;
+  created_at: string;
+}
+
+export interface MetacrisisTopic {
+  topic: string;
+  total_mentions: number;
 }
 
 export class MetacrisisStore {
@@ -44,7 +66,9 @@ export class MetacrisisStore {
     getLinksByCategory: Database.Statement;
     saveSummary: Database.Statement;
     getSummaries: Database.Statement;
+    getSummariesByType: Database.Statement;
     getSummary: Database.Statement;
+    getSummaryByType: Database.Statement;
     markPushed: Database.Statement;
     getSetting: Database.Statement;
     setSetting: Database.Statement;
@@ -54,6 +78,15 @@ export class MetacrisisStore {
     getTodayCount: Database.Statement;
     getLeaderboard: Database.Statement;
     getMessagesByDate: Database.Statement;
+    getMessagesByDateRange: Database.Statement;
+    // Events
+    saveEvent: Database.Statement;
+    getEventByUrl: Database.Statement;
+    getUpcomingEvents: Database.Statement;
+    markPastEvents: Database.Statement;
+    // Topics
+    saveTopic: Database.Statement;
+    getTopicsByPeriod: Database.Statement;
   };
 
   constructor() {
@@ -63,6 +96,7 @@ export class MetacrisisStore {
   }
 
   private init() {
+    // Core tables
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS metacrisis_messages (
         id TEXT PRIMARY KEY,
@@ -89,20 +123,89 @@ export class MetacrisisStore {
       CREATE INDEX IF NOT EXISTS idx_meta_links_category ON metacrisis_links(category);
       CREATE INDEX IF NOT EXISTS idx_meta_links_timestamp ON metacrisis_links(timestamp);
 
-      CREATE TABLE IF NOT EXISTS metacrisis_summaries (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        date TEXT NOT NULL UNIQUE,
-        summary TEXT NOT NULL,
-        key_topics_json TEXT NOT NULL,
-        message_count INTEGER DEFAULT 0,
-        pushed INTEGER NOT NULL DEFAULT 0,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
-      );
-
       CREATE TABLE IF NOT EXISTS metacrisis_settings (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
       );
+    `);
+
+    // Migrate summaries table: add type, recommendations_json, who_said_what_json columns
+    // Check if the old table exists without type column
+    const cols = this.db.prepare("PRAGMA table_info(metacrisis_summaries)").all() as any[];
+    const hasType = cols.find((c: any) => c.name === "type");
+
+    if (cols.length > 0 && !hasType) {
+      // Existing table without type — migrate
+      this.db.exec(`
+        CREATE TABLE metacrisis_summaries_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          date TEXT NOT NULL,
+          type TEXT NOT NULL DEFAULT 'weekly',
+          summary TEXT NOT NULL,
+          key_topics_json TEXT NOT NULL,
+          recommendations_json TEXT DEFAULT '[]',
+          who_said_what_json TEXT DEFAULT '[]',
+          message_count INTEGER DEFAULT 0,
+          pushed INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          UNIQUE(date, type)
+        );
+        INSERT INTO metacrisis_summaries_new (id, date, type, summary, key_topics_json, message_count, pushed, created_at)
+          SELECT id, date, 'weekly', summary, key_topics_json, message_count, pushed, created_at FROM metacrisis_summaries;
+        DROP TABLE metacrisis_summaries;
+        ALTER TABLE metacrisis_summaries_new RENAME TO metacrisis_summaries;
+      `);
+      console.log("[metacrisis-store] Migrated metacrisis_summaries table (added type column)");
+    } else if (cols.length === 0) {
+      // Fresh install — create with new schema
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS metacrisis_summaries (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          date TEXT NOT NULL,
+          type TEXT NOT NULL DEFAULT 'weekly',
+          summary TEXT NOT NULL,
+          key_topics_json TEXT NOT NULL,
+          recommendations_json TEXT DEFAULT '[]',
+          who_said_what_json TEXT DEFAULT '[]',
+          message_count INTEGER DEFAULT 0,
+          pushed INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          UNIQUE(date, type)
+        );
+      `);
+    }
+
+    // Events table
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS metacrisis_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        url TEXT NOT NULL UNIQUE,
+        name TEXT DEFAULT '',
+        date TEXT,
+        start_time TEXT,
+        end_time TEXT,
+        location TEXT DEFAULT '',
+        description TEXT DEFAULT '',
+        source_message_id TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_meta_events_date ON metacrisis_events(date);
+      CREATE INDEX IF NOT EXISTS idx_meta_events_status ON metacrisis_events(status);
+    `);
+
+    // Topics table
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS metacrisis_topics (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        topic TEXT NOT NULL,
+        date TEXT NOT NULL,
+        mention_count INTEGER DEFAULT 1,
+        sentiment TEXT DEFAULT 'neutral',
+        UNIQUE(topic, date)
+      );
+      CREATE INDEX IF NOT EXISTS idx_meta_topics_date ON metacrisis_topics(date);
+      CREATE INDEX IF NOT EXISTS idx_meta_topics_topic ON metacrisis_topics(topic);
     `);
 
     // Insert default settings if they don't exist
@@ -142,17 +245,24 @@ export class MetacrisisStore {
       getLinksByCategory: this.db.prepare(
         `SELECT * FROM metacrisis_links WHERE category = ? ORDER BY timestamp DESC LIMIT ?`
       ),
+      // Summaries — now with type support
       saveSummary: this.db.prepare(
-        `INSERT OR REPLACE INTO metacrisis_summaries (date, summary, key_topics_json, message_count) VALUES (?, ?, ?, ?)`
+        `INSERT OR REPLACE INTO metacrisis_summaries (date, type, summary, key_topics_json, recommendations_json, who_said_what_json, message_count) VALUES (?, ?, ?, ?, ?, ?, ?)`
       ),
       getSummaries: this.db.prepare(
         `SELECT * FROM metacrisis_summaries ORDER BY date DESC LIMIT ?`
       ),
+      getSummariesByType: this.db.prepare(
+        `SELECT * FROM metacrisis_summaries WHERE type = ? ORDER BY date DESC LIMIT ?`
+      ),
       getSummary: this.db.prepare(
-        `SELECT * FROM metacrisis_summaries WHERE date = ?`
+        `SELECT * FROM metacrisis_summaries WHERE date = ? ORDER BY type ASC LIMIT 1`
+      ),
+      getSummaryByType: this.db.prepare(
+        `SELECT * FROM metacrisis_summaries WHERE date = ? AND type = ?`
       ),
       markPushed: this.db.prepare(
-        `UPDATE metacrisis_summaries SET pushed = 1 WHERE date = ?`
+        `UPDATE metacrisis_summaries SET pushed = 1 WHERE date = ? AND type = ?`
       ),
       getSetting: this.db.prepare(
         `SELECT value FROM metacrisis_settings WHERE key = ?`
@@ -181,8 +291,33 @@ export class MetacrisisStore {
       getMessagesByDate: this.db.prepare(
         `SELECT * FROM metacrisis_messages WHERE date(datetime(timestamp, 'unixepoch')) = ? ORDER BY timestamp ASC`
       ),
+      getMessagesByDateRange: this.db.prepare(
+        `SELECT * FROM metacrisis_messages WHERE date(datetime(timestamp, 'unixepoch')) >= ? AND date(datetime(timestamp, 'unixepoch')) <= ? ORDER BY timestamp ASC`
+      ),
+      // Events
+      saveEvent: this.db.prepare(
+        `INSERT OR REPLACE INTO metacrisis_events (url, name, date, start_time, end_time, location, description, source_message_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ),
+      getEventByUrl: this.db.prepare(
+        `SELECT * FROM metacrisis_events WHERE url = ?`
+      ),
+      getUpcomingEvents: this.db.prepare(
+        `SELECT * FROM metacrisis_events WHERE status != 'past' AND (date >= date('now') OR date IS NULL) ORDER BY date ASC`
+      ),
+      markPastEvents: this.db.prepare(
+        `UPDATE metacrisis_events SET status = 'past' WHERE date < date('now') AND status != 'past'`
+      ),
+      // Topics
+      saveTopic: this.db.prepare(
+        `INSERT OR REPLACE INTO metacrisis_topics (topic, date, mention_count, sentiment) VALUES (?, ?, ?, ?)`
+      ),
+      getTopicsByPeriod: this.db.prepare(
+        `SELECT topic, SUM(mention_count) as total_mentions FROM metacrisis_topics WHERE date >= ? AND date <= ? GROUP BY topic ORDER BY total_mentions DESC LIMIT 20`
+      ),
     };
   }
+
+  // ── Messages ──
 
   saveMessage(msg: {
     id: string;
@@ -217,6 +352,16 @@ export class MetacrisisStore {
     markMany(ids);
   }
 
+  getMessagesByDate(date: string): MetacrisisMessage[] {
+    return this.stmts.getMessagesByDate.all(date) as MetacrisisMessage[];
+  }
+
+  getMessagesByDateRange(startDate: string, endDate: string): MetacrisisMessage[] {
+    return this.stmts.getMessagesByDateRange.all(startDate, endDate) as MetacrisisMessage[];
+  }
+
+  // ── Links ──
+
   saveLink(link: {
     url: string;
     title?: string;
@@ -243,26 +388,92 @@ export class MetacrisisStore {
     return this.stmts.getLinksByCategory.all(category, limit) as MetacrisisLink[];
   }
 
+  // ── Summaries ──
+
   saveSummary(
     date: string,
+    type: string,
     summary: string,
     keyTopicsJson: string,
+    recommendationsJson: string,
+    whoSaidWhatJson: string,
     messageCount: number
   ) {
-    this.stmts.saveSummary.run(date, summary, keyTopicsJson, messageCount);
+    this.stmts.saveSummary.run(date, type, summary, keyTopicsJson, recommendationsJson, whoSaidWhatJson, messageCount);
   }
 
-  getSummaries(limit: number = 30): MetacrisisSummary[] {
+  getSummaries(limit: number = 30, type?: string): MetacrisisSummary[] {
+    if (type) {
+      return this.stmts.getSummariesByType.all(type, limit) as MetacrisisSummary[];
+    }
     return this.stmts.getSummaries.all(limit) as MetacrisisSummary[];
   }
 
-  getSummary(date: string): MetacrisisSummary | undefined {
+  getSummary(date: string, type?: string): MetacrisisSummary | undefined {
+    if (type) {
+      return this.stmts.getSummaryByType.get(date, type) as MetacrisisSummary | undefined;
+    }
     return this.stmts.getSummary.get(date) as MetacrisisSummary | undefined;
   }
 
-  markPushed(date: string) {
-    this.stmts.markPushed.run(date);
+  markPushed(date: string, type: string = "weekly") {
+    this.stmts.markPushed.run(date, type);
   }
+
+  // ── Events ──
+
+  saveEvent(event: {
+    url: string;
+    name: string;
+    date: string | null;
+    start_time: string | null;
+    end_time: string | null;
+    location: string;
+    description: string;
+    source_message_id: string | null;
+    status?: string;
+  }) {
+    this.stmts.saveEvent.run(
+      event.url,
+      event.name,
+      event.date,
+      event.start_time,
+      event.end_time,
+      event.location,
+      event.description,
+      event.source_message_id,
+      event.status || (event.date ? "active" : "pending")
+    );
+  }
+
+  getEventByUrl(url: string): MetacrisisEvent | undefined {
+    return this.stmts.getEventByUrl.get(url) as MetacrisisEvent | undefined;
+  }
+
+  getUpcomingEvents(): MetacrisisEvent[] {
+    return this.stmts.getUpcomingEvents.all() as MetacrisisEvent[];
+  }
+
+  markPastEvents(): number {
+    return this.stmts.markPastEvents.run().changes;
+  }
+
+  // ── Topics ──
+
+  saveTopics(date: string, topics: { topic: string; count: number; sentiment: string }[]) {
+    const saveMany = this.db.transaction((items: typeof topics) => {
+      for (const t of items) {
+        this.stmts.saveTopic.run(t.topic, date, t.count, t.sentiment);
+      }
+    });
+    saveMany(topics);
+  }
+
+  getTopicsByPeriod(startDate: string, endDate: string): MetacrisisTopic[] {
+    return this.stmts.getTopicsByPeriod.all(startDate, endDate) as MetacrisisTopic[];
+  }
+
+  // ── Settings ──
 
   getSetting(key: string): string | undefined {
     const row = this.stmts.getSetting.get(key) as { value: string } | undefined;
@@ -281,6 +492,8 @@ export class MetacrisisStore {
     }
     return settings;
   }
+
+  // ── Stats ──
 
   getStats() {
     return this.stmts.getStats.get() as {
@@ -301,10 +514,6 @@ export class MetacrisisStore {
       sender_name: string;
       message_count: number;
     }[];
-  }
-
-  getMessagesByDate(date: string): MetacrisisMessage[] {
-    return this.stmts.getMessagesByDate.all(date) as MetacrisisMessage[];
   }
 
   close() {

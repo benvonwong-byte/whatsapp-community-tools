@@ -426,6 +426,78 @@
     .error-state { text-align: center; padding: 40px 20px; color: var(--red); font-size: 14px; }
     .hidden { display: none !important; }
 
+    /* Person toggle */
+    .person-toggle {
+      display: inline-flex;
+      background: var(--surface2);
+      border-radius: 999px;
+      padding: 3px;
+      margin-bottom: 14px;
+      border: 1px solid var(--border);
+    }
+    .person-toggle-btn {
+      background: transparent;
+      color: var(--text-dim);
+      border: none;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 6px 20px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-family: inherit;
+    }
+    .person-toggle-btn:hover { color: var(--text); }
+    .person-toggle-btn.active[data-person="ben"] { background: var(--accent); color: #000; }
+    .person-toggle-btn.active[data-person="hope"] { background: var(--pink); color: #fff; }
+    .person-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+    .person-dot.ben-dot { background: var(--accent); }
+    .person-dot.hope-dot { background: var(--pink); }
+    .person-toggle-btn.active .person-dot.ben-dot { background: #000; }
+    .person-toggle-btn.active .person-dot.hope-dot { background: #fff; }
+
+    /* Individual action row */
+    .individual-action-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    /* Team patterns grid (pursue-withdraw + radar) */
+    .team-patterns-grid {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .team-patterns-grid .section { margin-bottom: 0; }
+
+    /* Date range bar */
+    .date-range-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      margin-bottom: 14px;
+    }
+    .date-range-label {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      opacity: 0.5;
+      margin-right: 4px;
+      white-space: nowrap;
+    }
+
     /* Responsive */
     @media (max-width: 768px) {
       .action-cards-grid { grid-template-columns: 1fr; }
@@ -444,6 +516,8 @@
       .toolbar { gap: 8px; }
       .perel-gauges { flex-wrap: wrap; }
       .connection-grid-4 { grid-template-columns: 1fr; }
+      .individual-action-row { grid-template-columns: 1fr; }
+      .team-patterns-grid { grid-template-columns: 1fr; }
       .recs-grid { grid-template-columns: 1fr; }
       .bank-layout { flex-direction: column; }
     }
@@ -482,21 +556,11 @@
 
     <div id="dashboard" class="hidden">
 
-      <!-- Toolbar (UNCHANGED) -->
+      <!-- Toolbar: monitor + actions -->
       <div class="toolbar">
         <span id="monitor-dot" class="monitor-dot red"></span>
         <span id="monitor-last-msg" class="monitor-item">Last: <strong>--</strong></span>
         <span id="monitor-today-count" class="monitor-item">Today: <strong>0</strong></span>
-        <span class="toolbar-sep"></span>
-        <span class="range-chip active" data-range="7">7D</span>
-        <span class="range-chip" data-range="14">14D</span>
-        <span class="range-chip" data-range="30">30D</span>
-        <span class="range-chip" data-range="90">90D</span>
-        <span class="range-chip" data-range="365">1Y</span>
-        <span class="range-chip" data-range="all">All</span>
-        <input type="date" id="range-start" class="range-date-input" title="Start date">
-        <span class="range-sep">&ndash;</span>
-        <input type="date" id="range-end" class="range-date-input" title="End date">
         <div class="action-row">
           <button id="backfill-btn" class="action-btn" title="Fetch full WhatsApp history">Backfill</button>
           <button id="transcribe-btn" class="action-btn" title="Transcribe untranscribed voice notes via Groq Whisper">Transcribe Voice</button>
@@ -515,22 +579,27 @@
       </div>
 
       <!-- =============================================
-           ZONE 1: ACTION
+           ZONE: LATEST SNAPSHOT (not date-range dependent)
            ============================================= -->
-      <div class="zone" id="zone-action">
-        <div class="zone-label">ACTION</div>
+      <div class="zone" id="zone-snapshot">
+        <div class="zone-label">LATEST SNAPSHOT</div>
 
-        <!-- 3-column action cards -->
-        <div class="action-cards-grid">
-          <div class="action-card action-card-ben" id="action-card-ben">
-            <div class="action-card-label">What Ben should do</div>
-            <div class="action-card-text" id="action-ben-text">Run an analysis to get recommendations.</div>
-            <div class="action-card-context" id="action-ben-context"></div>
-          </div>
-          <div class="action-card action-card-hope" id="action-card-hope">
-            <div class="action-card-label">What Hope should do</div>
-            <div class="action-card-text" id="action-hope-text">Run an analysis to get recommendations.</div>
-            <div class="action-card-context" id="action-hope-context"></div>
+        <!-- Person Toggle -->
+        <div class="person-toggle" id="person-toggle">
+          <button class="person-toggle-btn active" data-person="ben">
+            <span class="person-dot ben-dot"></span> Ben
+          </button>
+          <button class="person-toggle-btn" data-person="hope">
+            <span class="person-dot hope-dot"></span> Hope
+          </button>
+        </div>
+
+        <!-- Action Cards (person + together) -->
+        <div class="individual-action-row">
+          <div class="action-card action-card-ben" id="individual-action-card">
+            <div class="action-card-label" id="individual-action-label">What Ben should do</div>
+            <div class="action-card-text" id="individual-action-text">Run an analysis to get recommendations.</div>
+            <div class="action-card-context" id="individual-action-context"></div>
           </div>
           <div class="action-card action-card-together" id="action-card-together">
             <div class="action-card-label">Together</div>
@@ -539,46 +608,24 @@
           </div>
         </div>
 
-        <!-- Legacy action card (hidden, kept for JS compat) -->
-        <div class="hidden" id="action-card-section">
-          <div class="action-card-label">What to do next</div>
-          <div class="action-card-text" id="action-card-text">Run an analysis to get your first recommendation.</div>
-          <div class="action-card-context" id="action-card-context"></div>
-        </div>
-
         <!-- Notable Quotes -->
         <div class="section" id="notable-quotes-section">
           <div class="section-title">Notable Quotes</div>
           <div class="notable-quotes-grid" id="notable-quotes-content"></div>
         </div>
-      </div>
 
-      <!-- =============================================
-           ZONE 2: TREND
-           ============================================= -->
-      <div class="zone" id="zone-trend">
-        <div class="zone-label">TREND</div>
-
-        <div class="section">
-          <div class="section-title">Health Score Trend</div>
-          <div class="trend-chart-container">
-            <canvas id="trend-chart"></canvas>
-            <div id="chart-empty" class="chart-empty hidden">Not enough data yet.</div>
-            <div id="trend-tooltip" class="trend-tooltip hidden">
-              <div class="trend-tooltip-date" id="trend-tooltip-date"></div>
-              <div class="trend-tooltip-score" id="trend-tooltip-score"></div>
-              <div class="trend-tooltip-summary" id="trend-tooltip-summary"></div>
-              <div class="trend-tooltip-tone" id="trend-tooltip-tone"></div>
-            </div>
-          </div>
+        <!-- Language & Emotion -->
+        <div class="section" id="language-emotion-section">
+          <div class="section-title">Language &amp; Emotion</div>
+          <div id="language-emotion-content"></div>
         </div>
       </div>
 
       <!-- =============================================
-           ZONE 3: OVERVIEW
+           ZONE: TEAM (date-range dependent)
            ============================================= -->
-      <div class="zone" id="zone-overview">
-        <div class="zone-label">OVERVIEW</div>
+      <div class="zone" id="zone-team">
+        <div class="zone-label">TEAM</div>
 
         <!-- Health Score Hero -->
         <div class="section health-score-hero" id="analysis-section">
@@ -594,9 +641,37 @@
           </div>
         </div>
 
-        <!-- Duo grid: Bank Account + Wary/Language -->
+        <!-- Date Range Controls -->
+        <div class="date-range-bar">
+          <span class="date-range-label">Date Range</span>
+          <span class="range-chip active" data-range="7">7D</span>
+          <span class="range-chip" data-range="14">14D</span>
+          <span class="range-chip" data-range="30">30D</span>
+          <span class="range-chip" data-range="90">90D</span>
+          <span class="range-chip" data-range="365">1Y</span>
+          <span class="range-chip" data-range="all">All</span>
+          <input type="date" id="range-start" class="range-date-input" title="Start date">
+          <span class="range-sep">&ndash;</span>
+          <input type="date" id="range-end" class="range-date-input" title="End date">
+        </div>
+
+        <!-- Health Score Trend -->
+        <div class="section">
+          <div class="section-title">Health Score Trend</div>
+          <div class="trend-chart-container">
+            <canvas id="trend-chart"></canvas>
+            <div id="chart-empty" class="chart-empty hidden">Not enough data yet.</div>
+            <div id="trend-tooltip" class="trend-tooltip hidden">
+              <div class="trend-tooltip-date" id="trend-tooltip-date"></div>
+              <div class="trend-tooltip-score" id="trend-tooltip-score"></div>
+              <div class="trend-tooltip-summary" id="trend-tooltip-summary"></div>
+              <div class="trend-tooltip-tone" id="trend-tooltip-tone"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Bank Account + Wary Of -->
         <div class="overview-duo-grid">
-          <!-- Emotional Bank Account -->
           <div class="section" id="bank-account-section">
             <div class="section-title">Emotional Bank Account</div>
             <div class="bank-layout">
@@ -620,72 +695,19 @@
             </div>
           </div>
 
-          <!-- Wary + Language/Emotion -->
           <div class="section" id="wary-section">
             <div class="section-title">Things to Be Wary Of</div>
             <div id="wary-content"></div>
-            <div class="section-title" style="margin-top:16px">Language &amp; Emotion</div>
-            <div id="language-emotion-content"></div>
           </div>
         </div>
 
-        <!-- Connection Patterns (4-column grid with radar) -->
-        <div class="connection-grid-4">
-          <!-- Bids for Connection -->
-          <div class="section" id="bids-section">
-            <div class="section-title">Bids for Connection</div>
-            <div id="bids-content">
-              <div class="bid-bars">
-                <div class="bid-bar-row">
-                  <span class="bid-label">Toward</span>
-                  <div class="bid-bar-bg"><div class="bid-bar-fill toward" id="bid-toward-fill"></div></div>
-                  <span class="bid-value" id="bid-toward-val">0</span>
-                </div>
-                <div class="bid-bar-row">
-                  <span class="bid-label">Away</span>
-                  <div class="bid-bar-bg"><div class="bid-bar-fill away" id="bid-away-fill"></div></div>
-                  <span class="bid-value" id="bid-away-val">0</span>
-                </div>
-                <div class="bid-bar-row">
-                  <span class="bid-label">Against</span>
-                  <div class="bid-bar-bg"><div class="bid-bar-fill against" id="bid-against-fill"></div></div>
-                  <span class="bid-value" id="bid-against-val">0</span>
-                </div>
-              </div>
-              <div class="bid-summary" id="bid-summary"></div>
-            </div>
-          </div>
-          <!-- Pursue-Withdraw -->
+        <!-- Pursue-Withdraw + Radar -->
+        <div class="team-patterns-grid">
           <div class="section" id="pursue-section">
             <div class="section-title">Pursue-Withdraw</div>
             <div class="pursue-pattern" id="pursue-pattern">--</div>
             <div class="pursue-description" id="pursue-description"></div>
           </div>
-          <!-- Communication Balance -->
-          <div class="section" id="balance-section">
-            <div class="section-title">Communication Balance</div>
-            <div id="balance-content">
-              <div class="balance-item">
-                <div class="ratio-label">
-                  <span id="bal-ratio-left">Ben: 50%</span>
-                  <span id="bal-ratio-right">Hope: 50%</span>
-                </div>
-                <div class="ratio-bar">
-                  <div id="bal-ratio-fill-left" class="ratio-fill-left" style="width:50%"></div>
-                  <div id="bal-ratio-fill-right" class="ratio-fill-right" style="width:50%"></div>
-                </div>
-              </div>
-              <div class="balance-item">
-                <div class="balance-label">Initiates conversations</div>
-                <div class="balance-values" id="initiator-stats">--</div>
-              </div>
-              <div class="balance-item">
-                <div class="balance-label">Avg response time</div>
-                <div class="balance-values" id="response-time-stats">--</div>
-              </div>
-            </div>
-          </div>
-          <!-- Radar chart (compact) -->
           <div class="section" id="radar-section">
             <div class="section-title">Radar</div>
             <div class="radar-chart-container" style="text-align:center">
@@ -693,13 +715,81 @@
             </div>
           </div>
         </div>
+
+        <!-- Four Horsemen + Positives -->
+        <div class="metrics-grid">
+          <div class="section" id="horsemen-section" style="margin-bottom:0">
+            <div class="section-title">Four Horsemen (lower is better)</div>
+            <div id="horsemen-bars"></div>
+          </div>
+          <div class="section" id="positives-section" style="margin-bottom:0">
+            <div class="section-title">Positives (higher is better)</div>
+            <div id="positives-bars"></div>
+          </div>
+        </div>
+
+        <!-- Perel Dimensions -->
+        <div class="section">
+          <div class="section-title">Perel Dimensions</div>
+          <div id="perel-gauges" class="perel-gauges"></div>
+        </div>
+
+        <!-- Communication Balance (person-toggle aware) -->
+        <div class="section" id="balance-section">
+          <div class="section-title">Communication Balance</div>
+          <div id="balance-content">
+            <div class="balance-item">
+              <div class="ratio-label">
+                <span id="bal-ratio-left">Ben: 50%</span>
+                <span id="bal-ratio-right">Hope: 50%</span>
+              </div>
+              <div class="ratio-bar">
+                <div id="bal-ratio-fill-left" class="ratio-fill-left" style="width:50%"></div>
+                <div id="bal-ratio-fill-right" class="ratio-fill-right" style="width:50%"></div>
+              </div>
+            </div>
+            <div class="balance-item">
+              <div class="balance-label">Initiates conversations</div>
+              <div class="balance-values" id="initiator-stats">--</div>
+            </div>
+            <div class="balance-item">
+              <div class="balance-label">Avg response time</div>
+              <div class="balance-values" id="response-time-stats">--</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Bids for Connection (person-toggle aware) -->
+        <div class="section" id="bids-section">
+          <div class="section-title">Bids for Connection</div>
+          <div id="bids-content">
+            <div class="bid-bars">
+              <div class="bid-bar-row">
+                <span class="bid-label">Toward</span>
+                <div class="bid-bar-bg"><div class="bid-bar-fill toward" id="bid-toward-fill"></div></div>
+                <span class="bid-value" id="bid-toward-val">0</span>
+              </div>
+              <div class="bid-bar-row">
+                <span class="bid-label">Away</span>
+                <div class="bid-bar-bg"><div class="bid-bar-fill away" id="bid-away-fill"></div></div>
+                <span class="bid-value" id="bid-away-val">0</span>
+              </div>
+              <div class="bid-bar-row">
+                <span class="bid-label">Against</span>
+                <div class="bid-bar-bg"><div class="bid-bar-fill against" id="bid-against-fill"></div></div>
+                <span class="bid-value" id="bid-against-val">0</span>
+              </div>
+            </div>
+            <div class="bid-summary" id="bid-summary"></div>
+          </div>
+        </div>
       </div>
 
       <!-- =============================================
-           ZONE 4: GRANULAR
+           ZONE: DETAILS (date-range dependent)
            ============================================= -->
-      <div class="zone" id="zone-granular">
-        <div class="zone-label">GRANULAR</div>
+      <div class="zone" id="zone-shared">
+        <div class="zone-label">DETAILS</div>
 
         <!-- Stats grid -->
         <div class="stats-grid">
@@ -721,24 +811,6 @@
             <div class="stat-label">Avg / Day</div>
             <canvas id="spark-health" class="sparkline"></canvas>
           </div>
-        </div>
-
-        <!-- Four Horsemen + Positives (2-col) -->
-        <div class="metrics-grid">
-          <div class="section" id="horsemen-section" style="margin-bottom:0">
-            <div class="section-title">Four Horsemen (lower is better)</div>
-            <div id="horsemen-bars"></div>
-          </div>
-          <div class="section" id="positives-section" style="margin-bottom:0">
-            <div class="section-title">Positives (higher is better)</div>
-            <div id="positives-bars"></div>
-          </div>
-        </div>
-
-        <!-- Perel Dimensions -->
-        <div class="section">
-          <div class="section-title">Perel Dimensions</div>
-          <div id="perel-gauges" class="perel-gauges"></div>
         </div>
 
         <!-- Daily Analyses -->

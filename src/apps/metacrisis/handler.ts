@@ -49,6 +49,13 @@ export function categorizeUrl(url: string): string {
   return "other";
 }
 
+export interface MetacrisisHandlerDiagnostics {
+  lastCaptureTs: number;
+  captureCount: number;
+  chatNameTarget: string;
+  lastSeenGroup: string | null;
+}
+
 /**
  * Create a raw message listener for the Metacrisis app.
  * Captures text messages from the Metacrisis Community Chat group,
@@ -57,7 +64,20 @@ export function categorizeUrl(url: string): string {
 export function createMetacrisisHandler(store: MetacrisisStore) {
   const chatNameLower = config.metacrisisChatName.toLowerCase();
 
-  return async (msg: Message, chat: any) => {
+  // Diagnostics
+  let lastCaptureTs = 0;
+  let captureCount = 0;
+  let lastSeenGroup: string | null = null;
+
+  const handler = async (msg: Message, chat: any) => {
+    // Log all group messages for diagnostics
+    if (chat.isGroup) {
+      lastSeenGroup = chat.name;
+      if (chat.name.toLowerCase().includes(chatNameLower)) {
+        console.log(`[metacrisis] SAW: type=${msg.type} hasBody=${!!msg.body} from=${msg.author || msg.from}`);
+      }
+    }
+
     // Only process group chats
     if (!chat.isGroup) return;
 
@@ -83,8 +103,11 @@ export function createMetacrisisHandler(store: MetacrisisStore) {
       timestamp: msg.timestamp,
     });
 
+    lastCaptureTs = Date.now();
+    captureCount++;
+
     console.log(
-      `[metacrisis] Message from ${senderName}: ${msg.body.slice(0, 80)}...`
+      `[metacrisis] Captured #${captureCount}: ${senderName}: ${msg.body.slice(0, 80)}...`
     );
 
     // Extract and save URLs
@@ -103,4 +126,13 @@ export function createMetacrisisHandler(store: MetacrisisStore) {
       }
     }
   };
+
+  (handler as any).getDiagnostics = (): MetacrisisHandlerDiagnostics => ({
+    lastCaptureTs,
+    captureCount,
+    chatNameTarget: config.metacrisisChatName,
+    lastSeenGroup,
+  });
+
+  return handler;
 }

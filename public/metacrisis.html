@@ -512,6 +512,216 @@
     .settings-save-btn:hover { opacity: 0.85; }
     .settings-save-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
+    /* Daily Digest */
+    .digest-who-list {
+      list-style: none;
+      padding: 0;
+    }
+
+    .digest-who-item {
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .digest-who-item:last-child { border-bottom: none; }
+
+    .digest-who-name {
+      font-weight: 600;
+      color: var(--accent);
+    }
+
+    .digest-mood {
+      font-size: 13px;
+      color: var(--text-dim);
+      line-height: 1.6;
+      padding: 10px 14px;
+      background: var(--surface2);
+      border-radius: 8px;
+      margin-top: 12px;
+    }
+
+    .digest-recs {
+      margin-top: 12px;
+      padding: 10px 14px;
+      background: rgba(253, 203, 110, 0.08);
+      border-left: 3px solid var(--yellow);
+      border-radius: 0 8px 8px 0;
+    }
+
+    .digest-recs-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--yellow);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+
+    .digest-rec-item {
+      font-size: 13px;
+      color: var(--text);
+      line-height: 1.5;
+      padding: 2px 0;
+    }
+
+    .digest-empty {
+      text-align: center;
+      color: var(--text-dim);
+      font-size: 13px;
+      padding: 24px 0;
+    }
+
+    .digest-date-label {
+      font-size: 12px;
+      color: var(--text-dim);
+      margin-bottom: 12px;
+    }
+
+    /* Upcoming Events */
+    .event-card {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+      padding: 12px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .event-card:last-child { border-bottom: none; }
+
+    .event-date-box {
+      flex-shrink: 0;
+      width: 48px;
+      text-align: center;
+      background: var(--surface2);
+      border-radius: 8px;
+      padding: 6px 4px;
+    }
+
+    .event-date-month {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .event-date-day {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1.1;
+    }
+
+    .event-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .event-name {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .event-name a {
+      color: var(--text);
+      text-decoration: none;
+    }
+
+    .event-name a:hover { color: var(--accent); }
+
+    .event-detail {
+      font-size: 12px;
+      color: var(--text-dim);
+      margin-top: 2px;
+    }
+
+    .events-empty {
+      text-align: center;
+      color: var(--text-dim);
+      font-size: 13px;
+      padding: 24px 0;
+    }
+
+    /* Topic Trends */
+    .topic-period-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .topic-period-tab {
+      background: var(--surface2);
+      color: var(--text-dim);
+      border: 1px solid var(--border);
+      font-size: 12px;
+      font-weight: 500;
+      padding: 5px 14px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .topic-period-tab:hover {
+      border-color: var(--accent);
+      color: var(--text);
+    }
+
+    .topic-period-tab.active {
+      background: var(--accent);
+      color: #000;
+      border-color: var(--accent);
+    }
+
+    .topic-bar-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 6px 0;
+    }
+
+    .topic-bar-name {
+      font-size: 13px;
+      color: var(--text);
+      width: 140px;
+      flex-shrink: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .topic-bar-bg {
+      flex: 1;
+      height: 8px;
+      background: var(--surface2);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .topic-bar-fill {
+      height: 100%;
+      border-radius: 4px;
+      background: #6c5ce7;
+      transition: width 0.4s ease;
+    }
+
+    .topic-bar-count {
+      font-size: 12px;
+      color: var(--text-dim);
+      width: 48px;
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    .topics-empty {
+      text-align: center;
+      color: var(--text-dim);
+      font-size: 13px;
+      padding: 24px 0;
+    }
+
     /* Loading & error states */
     .loading-state {
       text-align: center;
@@ -595,6 +805,29 @@
           <div class="stat-value" id="stat-members">0</div>
           <div class="stat-label">Active Members</div>
         </div>
+      </div>
+
+      <!-- Daily Digest -->
+      <div class="section" id="digest-section">
+        <div class="section-title">Daily Digest</div>
+        <div id="digest-content"></div>
+      </div>
+
+      <!-- Upcoming Events -->
+      <div class="section" id="events-section">
+        <div class="section-title">Upcoming Events</div>
+        <div id="events-list"></div>
+      </div>
+
+      <!-- Topic Trends -->
+      <div class="section" id="topics-section">
+        <div class="section-title">Topic Trends</div>
+        <div class="topic-period-tabs" id="topic-period-tabs">
+          <button class="topic-period-tab active" data-period="week">This Week</button>
+          <button class="topic-period-tab" data-period="month">This Month</button>
+          <button class="topic-period-tab" data-period="quarter">3 Months</button>
+        </div>
+        <div id="topics-list"></div>
       </div>
 
       <!-- Link Organizer -->

@@ -11,7 +11,7 @@ import { createRelationshipRouter } from "./apps/relationship/routes";
 import { buildUpdateMessage, shouldSendUpdate } from "./apps/relationship/updater";
 import { MetacrisisStore } from "./apps/metacrisis/store";
 import { createMetacrisisHandler, categorizeUrl } from "./apps/metacrisis/handler";
-import { runDailySummary, formatSummaryForWhatsApp } from "./apps/metacrisis/summarizer";
+import { runDailyDigest, runWeeklySummary, processEventLinks, formatSummaryForWhatsApp } from "./apps/metacrisis/summarizer";
 import { createMetacrisisRouter } from "./apps/metacrisis/routes";
 import { FriendsStore } from "./apps/friends/store";
 import { createFriendsHandler } from "./apps/friends/handler";
@@ -385,12 +385,12 @@ async function main() {
   const metacrisisStore = new MetacrisisStore();
   console.log("Metacrisis store initialized.");
 
-  const metacrisisSummarize = () => runDailySummary(metacrisisStore);
-  whatsapp.addRawMessageListener(createMetacrisisHandler(metacrisisStore));
+  const metacrisisHandler = createMetacrisisHandler(metacrisisStore);
+  whatsapp.addRawMessageListener(metacrisisHandler);
 
   const pushToWhatsApp = async (date: string) => {
-    const summary = metacrisisStore.getSummary(date);
-    if (!summary) throw new Error("No summary for " + date);
+    const summary = metacrisisStore.getSummary(date, "weekly");
+    if (!summary) throw new Error("No weekly summary for " + date);
     const topics = JSON.parse(summary.key_topics_json || "[]");
     const template = metacrisisStore.getSetting("format_template") || "{{summary}}";
     const formatted = formatSummaryForWhatsApp(summary.summary, topics, date, template);
@@ -454,7 +454,15 @@ async function main() {
 
   appRouters.push({
     path: "/api/metacrisis",
-    router: createMetacrisisRouter(metacrisisStore, metacrisisSummarize, pushToWhatsApp, metacrisisBackfill),
+    router: createMetacrisisRouter(
+      metacrisisStore,
+      () => runWeeklySummary(metacrisisStore),
+      () => runDailyDigest(metacrisisStore),
+      pushToWhatsApp,
+      metacrisisBackfill,
+      () => processEventLinks(metacrisisStore),
+      (metacrisisHandler as any).getDiagnostics
+    ),
   });
 
   // Friends/Network app: monitor private chats + small groups, track interaction frequency
@@ -625,7 +633,7 @@ async function main() {
 
   whatsapp.setGroupBlockedCheck((chatName: string) => store.isGroupBlocked(chatName));
 
-  // Schedule daily relationship analysis + metacrisis summarization
+  // Schedule daily relationship analysis (midnight)
   scheduleDailyTask(config.analysisHour, async () => {
     console.log("[scheduler] Running daily relationship analysis...");
     await relationshipAnalyze();
@@ -644,9 +652,18 @@ async function main() {
         }
       }
     }
+  });
 
-    console.log("[scheduler] Running daily metacrisis summary...");
-    await metacrisisSummarize();
+  // Schedule metacrisis daily digest at 9AM
+  scheduleDailyTask(9, async () => {
+    console.log("[scheduler] Running metacrisis daily digest...");
+    await runDailyDigest(metacrisisStore);
+  });
+
+  // Schedule metacrisis weekly summary (Sunday at midnight)
+  scheduleWeeklyTask(0, 0, async () => {
+    console.log("[scheduler] Running metacrisis weekly summary...");
+    await runWeeklySummary(metacrisisStore);
   });
 
   // ── Real-time relationship auto-analysis ──
@@ -730,6 +747,37 @@ function scheduleDailyTask(hour: number, task: () => Promise<void>) {
         console.error("[scheduler] Daily task failed:", err);
       }
       schedule(); // reschedule for next day
+    }, delay);
+  };
+
+  schedule();
+}
+
+function scheduleWeeklyTask(dayOfWeek: number, hour: number, task: () => Promise<void>) {
+  const schedule = () => {
+    const now = new Date();
+    const next = new Date(now);
+    next.setHours(hour, 0, 0, 0);
+
+    // Advance to the next occurrence of the target day
+    const daysUntil = (dayOfWeek - now.getDay() + 7) % 7;
+    if (daysUntil === 0 && next <= now) {
+      next.setDate(next.getDate() + 7);
+    } else {
+      next.setDate(next.getDate() + daysUntil);
+    }
+
+    const delay = next.getTime() - now.getTime();
+    const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    console.log(`[scheduler] Next weekly task (${days[dayOfWeek]}) in ${(delay / 86400000).toFixed(1)}d at ${next.toISOString()}`);
+
+    setTimeout(async () => {
+      try {
+        await task();
+      } catch (err) {
+        console.error("[scheduler] Weekly task failed:", err);
+      }
+      schedule(); // reschedule for next week
     }, delay);
   };
 

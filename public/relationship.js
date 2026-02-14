@@ -32,6 +32,7 @@ let dateRange = { startDate: null, endDate: null, preset: "7" };
 
 // Trend chart interactivity state
 let trendPoints = []; // [{x, y, score, date, summary, tone}]
+let selectedPerson = "ben"; // "ben" or "hope"
 
 function toDateStr(d) { return d.toISOString().split("T")[0]; }
 
@@ -90,6 +91,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupImportButton();
   setupUpdateControls();
   setupTrendChartInteractivity();
+  setupPersonToggle();
   loadDashboard();
   refreshTimer = setInterval(loadDashboard, 30000);
 });
@@ -114,6 +116,30 @@ function setupDateRangeControls() {
   }
   s.addEventListener("change", onCustom);
   e.addEventListener("change", onCustom);
+}
+
+function setupPersonToggle() {
+  const container = document.getElementById("person-toggle");
+  if (!container) return;
+  container.querySelectorAll(".person-toggle-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      if (btn.dataset.person === selectedPerson) return;
+      selectedPerson = btn.dataset.person;
+      container.querySelectorAll(".person-toggle-btn").forEach(b => {
+        b.classList.toggle("active", b.dataset.person === selectedPerson);
+      });
+      renderIndividualSection(dashboardData);
+    });
+  });
+}
+
+function renderIndividualSection(d) {
+  if (!d) return;
+  renderIndividualActionCard(d);
+  renderNotableQuotes(d);
+  renderLanguageEmotion(d);
+  renderCommunicationBalance(d);
+  renderBids(d);
 }
 
 // ── Data Loading ──
@@ -601,32 +627,34 @@ function renderDashboard() {
   if (dash) dash.classList.remove("hidden");
 
   const d = dashboardData;
+  if (!d) return;
 
-  // Compute range-aggregated analysis from all daily analyses
   d.rangeAnalysis = computeRangeAnalysis(d.dailyAnalyses || []);
 
   // Toolbar
   renderMonitorBar(d);
-  // Zone 1: Action (uses latest for actionable recs)
-  renderActionCards(d);
+
+  // LATEST SNAPSHOT (not date-range dependent, person-toggle aware)
+  renderIndividualActionCard(d);
   renderNotableQuotes(d);
-  // Zone 2: Trend
-  renderTrendChart(d);
-  // Zone 3: Overview (uses range-aggregated metrics)
+  renderLanguageEmotion(d);
+
+  // TEAM (date-range dependent)
   renderHealthScoreHero(d);
+  renderTrendChart(d);
   renderBankAccount(d);
   renderWaryOf(d);
-  renderLanguageEmotion(d);
-  renderBids(d);
   renderPursueWithdraw(d);
-  renderCommunicationBalance(d);
   renderRadarChart(d);
-  // Zone 4: Granular (uses range-aggregated metrics)
-  renderStats(d);
-  renderSparklines(d);
   renderHorsemen(d);
   renderPositives(d);
   renderPerelGauges(d);
+  renderCommunicationBalance(d);
+  renderBids(d);
+
+  // DETAILS (date-range dependent)
+  renderStats(d);
+  renderSparklines(d);
   renderDailyCards(d);
 }
 
@@ -652,45 +680,43 @@ function renderMonitorBar(d) {
   todayEl.innerHTML = `Today: <strong>${todayCount}</strong>`;
 }
 
-// ── ZONE 1: ACTION ──
+// ── INDIVIDUAL ACTION ──
 
-function renderActionCards(d) {
-  const a = d.latestAnalysis;
-  const recs = a ? a.recommendations : null;
+function renderIndividualActionCard(d) {
+  var a = d.latestAnalysis;
+  var recs = a ? a.recommendations : null;
+  var person = selectedPerson;
 
-  // Ben card
-  const benText = $("action-ben-text");
-  const benCtx = $("action-ben-context");
-  if (benText) {
-    if (recs && recs.forBen && recs.forBen.length > 0) {
-      benText.textContent = recs.forBen[0];
-      if (benCtx) benCtx.textContent = recs.forBen.length > 1 ? recs.forBen.slice(1).join(" ") : "";
-    } else {
-      benText.textContent = "Run an analysis to get recommendations.";
-      if (benCtx) benCtx.textContent = "";
-    }
+  var card = $("individual-action-card");
+  var label = $("individual-action-label");
+  var text = $("individual-action-text");
+  var ctx = $("individual-action-context");
+
+  if (!card || !text) return;
+
+  // Style the card based on selected person
+  card.className = "action-card action-card-" + person;
+  if (label) label.textContent = person === "ben" ? "What Ben should do" : "What Hope should do";
+
+  var personRecs = person === "ben"
+    ? (recs && recs.forBen) || []
+    : (recs && recs.forHope) || [];
+
+  if (personRecs.length > 0) {
+    text.textContent = personRecs[0];
+    if (ctx) ctx.textContent = personRecs.length > 1 ? personRecs.slice(1).join(" \u2022 ") : "";
+  } else {
+    text.textContent = "Run an analysis to get recommendations.";
+    if (ctx) ctx.textContent = "";
   }
 
-  // Hope card
-  const hopeText = $("action-hope-text");
-  const hopeCtx = $("action-hope-context");
-  if (hopeText) {
-    if (recs && recs.forHope && recs.forHope.length > 0) {
-      hopeText.textContent = recs.forHope[0];
-      if (hopeCtx) hopeCtx.textContent = recs.forHope.length > 1 ? recs.forHope.slice(1).join(" ") : "";
-    } else {
-      hopeText.textContent = "Run an analysis to get recommendations.";
-      if (hopeCtx) hopeCtx.textContent = "";
-    }
-  }
-
-  // Together card
-  const togetherText = $("action-together-text");
-  const togetherCtx = $("action-together-context");
+  // Together card (always visible)
+  var togetherText = $("action-together-text");
+  var togetherCtx = $("action-together-context");
   if (togetherText) {
     if (recs && recs.forBoth && recs.forBoth.length > 0) {
       togetherText.textContent = recs.forBoth[0];
-      if (togetherCtx) togetherCtx.textContent = recs.forBoth.length > 1 ? recs.forBoth.slice(1).join(" ") : "";
+      if (togetherCtx) togetherCtx.textContent = recs.forBoth.length > 1 ? recs.forBoth.slice(1).join(" \u2022 ") : "";
     } else {
       togetherText.textContent = "Run an analysis to get recommendations.";
       if (togetherCtx) togetherCtx.textContent = "";
@@ -699,28 +725,39 @@ function renderActionCards(d) {
 }
 
 function renderNotableQuotes(d) {
-  const section = $("notable-quotes-section");
-  const container = $("notable-quotes-content");
+  var section = $("notable-quotes-section");
+  var container = $("notable-quotes-content");
   if (!section || !container) return;
 
-  const quotes = d.latestAnalysis ? d.latestAnalysis.notableQuotes : null;
-  if (!quotes || quotes.length === 0) {
+  var allQuotes = d.latestAnalysis ? d.latestAnalysis.notableQuotes : null;
+  if (!allQuotes || allQuotes.length === 0) {
     section.classList.add("hidden");
     return;
   }
+
+  // Filter to selected person
+  var personName = selectedPerson === "ben" ? "Ben" : "Hope";
+  var quotes = allQuotes.filter(function(q) {
+    return (q.speaker || "").toLowerCase() === selectedPerson;
+  });
+
   section.classList.remove("hidden");
 
-  container.innerHTML = quotes.map(q => {
-    const isHope = (q.speaker || "").toLowerCase() === "hope";
-    const cls = isHope ? "notable-quote-card hope" : "notable-quote-card";
-    const label = q.label || "insight";
-    return `<div class="${cls}">
-      <div class="quote-text">"${escapeHtml(q.quote)}"</div>
-      <div class="quote-meta">
-        <span style="color:${isHope ? 'var(--pink)' : 'var(--accent)'}">${escapeHtml(q.speaker || "Unknown")}</span>
-        <span class="quote-label">${escapeHtml(label)}</span>
-      </div>
-    </div>`;
+  if (quotes.length === 0) {
+    container.innerHTML = '<div style="font-size:12px;color:var(--text-dim)">No notable quotes from ' + personName + ' in this period.</div>';
+    return;
+  }
+
+  container.innerHTML = quotes.map(function(q) {
+    var isHope = selectedPerson === "hope";
+    var cls = isHope ? "notable-quote-card hope" : "notable-quote-card";
+    var label = q.label || "insight";
+    return '<div class="' + cls + '">' +
+      '<div class="quote-text">"' + escapeHtml(q.quote) + '"</div>' +
+      '<div class="quote-meta">' +
+        '<span style="color:' + (isHope ? 'var(--pink)' : 'var(--accent)') + '">' + escapeHtml(q.speaker || "Unknown") + '</span>' +
+        '<span class="quote-label">' + escapeHtml(label) + '</span>' +
+      '</div></div>';
   }).join("");
 }
 
@@ -1059,39 +1096,37 @@ function renderWaryOf(d) {
 }
 
 function renderLanguageEmotion(d) {
-  const container = $("language-emotion-content");
+  var container = $("language-emotion-content");
   if (!container) return;
 
-  const le = d.latestAnalysis ? d.latestAnalysis.languageEmotionAnalysis : null;
+  var le = d.latestAnalysis ? d.latestAnalysis.languageEmotionAnalysis : null;
   if (!le) {
     container.innerHTML = '<div style="font-size:11px;color:var(--text-dim)">Run analysis to see language patterns.</div>';
     return;
   }
 
-  let html = "";
+  var html = "";
+  var emotions = selectedPerson === "ben" ? le.benEmotions : le.hopeEmotions;
+  var personName = selectedPerson === "ben" ? "Ben" : "Hope";
+  var tagClass = selectedPerson === "ben" ? "ben" : "hope";
 
-  // Emotion tags
-  if (le.benEmotions && le.benEmotions.length > 0) {
-    html += '<div style="margin-bottom:6px"><span style="font-size:10px;color:var(--text-dim)">Ben:</span> ';
-    html += '<div class="emotion-tags" style="display:inline-flex">';
-    html += le.benEmotions.map(e => `<span class="emotion-tag ben">${escapeHtml(e)}</span>`).join("");
+  if (emotions && emotions.length > 0) {
+    html += '<div style="margin-bottom:6px"><span style="font-size:10px;color:var(--text-dim)">' + personName + '\'s emotions:</span> ';
+    html += '<div class="emotion-tags" style="display:inline-flex;flex-wrap:wrap">';
+    html += emotions.map(function(e) { return '<span class="emotion-tag ' + tagClass + '">' + escapeHtml(e) + '</span>'; }).join("");
     html += '</div></div>';
-  }
-  if (le.hopeEmotions && le.hopeEmotions.length > 0) {
-    html += '<div style="margin-bottom:6px"><span style="font-size:10px;color:var(--text-dim)">Hope:</span> ';
-    html += '<div class="emotion-tags" style="display:inline-flex">';
-    html += le.hopeEmotions.map(e => `<span class="emotion-tag hope">${escapeHtml(e)}</span>`).join("");
-    html += '</div></div>';
+  } else {
+    html += '<div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">No emotions detected for ' + personName + '.</div>';
   }
 
   if (le.communicationNotes) {
-    html += `<div class="language-note">${escapeHtml(le.communicationNotes)}</div>`;
+    html += '<div class="language-note">' + escapeHtml(le.communicationNotes) + '</div>';
   }
   if (le.notableShifts) {
-    html += `<div class="language-note" style="margin-top:4px;font-style:italic">${escapeHtml(le.notableShifts)}</div>`;
+    html += '<div class="language-note" style="margin-top:4px;font-style:italic">' + escapeHtml(le.notableShifts) + '</div>';
   }
 
-  container.innerHTML = html || '<div style="font-size:11px;color:var(--text-dim)">No language data available.</div>';
+  container.innerHTML = html;
 }
 
 // ── Stats ──
@@ -1412,14 +1447,14 @@ function renderBankAccount(d) {
 // ── Bids ──
 
 function renderBids(d) {
-  const bids = d.rangeAnalysis ? d.rangeAnalysis.bids : null;
-  const towardFill = $("bid-toward-fill");
-  const awayFill = $("bid-away-fill");
-  const againstFill = $("bid-against-fill");
-  const towardVal = $("bid-toward-val");
-  const awayVal = $("bid-away-val");
-  const againstVal = $("bid-against-val");
-  const summaryEl = $("bid-summary");
+  var bids = d.rangeAnalysis ? d.rangeAnalysis.bids : null;
+  var towardFill = $("bid-toward-fill");
+  var awayFill = $("bid-away-fill");
+  var againstFill = $("bid-against-fill");
+  var towardVal = $("bid-toward-val");
+  var awayVal = $("bid-away-val");
+  var againstVal = $("bid-against-val");
+  var summaryEl = $("bid-summary");
 
   if (!towardFill) return;
 
@@ -1446,9 +1481,17 @@ function renderBids(d) {
   if (againstVal) againstVal.textContent = String(bids.turnedAgainst || 0);
 
   if (summaryEl) {
-    var totalBids = (bids.benMade || 0) + (bids.hopeMade || 0);
+    var person = selectedPerson;
+    var personName = person === "ben" ? "Ben" : "Hope";
+    var personColor = person === "ben" ? "var(--accent)" : "var(--pink)";
+    var personMade = person === "ben" ? (bids.benMade || 0) : (bids.hopeMade || 0);
+    var otherMade = person === "ben" ? (bids.hopeMade || 0) : (bids.benMade || 0);
+    var otherName = person === "ben" ? "Hope" : "Ben";
     var towardPct = total > 0 ? Math.round((bids.turnedToward || 0) / total * 100) : 0;
-    summaryEl.textContent = totalBids + ' bids total (Ben: ' + (bids.benMade || 0) + ', Hope: ' + (bids.hopeMade || 0) + '). ' + towardPct + '% turned toward.';
+
+    summaryEl.innerHTML = '<span style="color:' + personColor + ';font-weight:600">' + personName + ' made ' + personMade + ' bids</span>' +
+      ' <span style="color:var(--text-dim)">(' + otherName + ': ' + otherMade + ')</span>. ' +
+      towardPct + '% turned toward overall.';
   }
 }
 
@@ -1488,16 +1531,32 @@ function renderPursueWithdraw(d) {
 // ── Communication Balance ──
 
 function renderCommunicationBalance(d) {
+  var person = selectedPerson;
+  var personColor = person === "ben" ? "var(--accent)" : "var(--pink)";
+  var otherColor = person === "ben" ? "var(--pink)" : "var(--accent)";
+
   // Message ratio
   var r = d.stats ? d.stats.messageRatio : null;
   var ben = r ? (r.benPercent || 50) : 50;
   var hope = r ? (r.hopePercent || 50) : 50;
+
   var ll = $("bal-ratio-left"), rl = $("bal-ratio-right");
   var lf = $("bal-ratio-fill-left"), rf = $("bal-ratio-fill-right");
-  if (ll) ll.textContent = 'Ben: ' + Math.round(ben) + '%';
-  if (rl) rl.textContent = 'Hope: ' + Math.round(hope) + '%';
-  if (lf) lf.style.width = ben + "%";
-  if (rf) rf.style.width = hope + "%";
+
+  if (ll) {
+    ll.textContent = "Ben: " + Math.round(ben) + "%";
+    ll.style.fontWeight = person === "ben" ? "700" : "400";
+    ll.style.color = person === "ben" ? "var(--accent)" : "var(--text-dim)";
+    ll.style.opacity = person === "ben" ? "1" : "0.5";
+  }
+  if (rl) {
+    rl.textContent = "Hope: " + Math.round(hope) + "%";
+    rl.style.fontWeight = person === "hope" ? "700" : "400";
+    rl.style.color = person === "hope" ? "var(--pink)" : "var(--text-dim)";
+    rl.style.opacity = person === "hope" ? "1" : "0.5";
+  }
+  if (lf) { lf.style.width = ben + "%"; lf.style.opacity = person === "ben" ? "1" : "0.35"; }
+  if (rf) { rf.style.width = hope + "%"; rf.style.opacity = person === "hope" ? "1" : "0.35"; }
 
   // Initiator stats
   var initEl = $("initiator-stats");
@@ -1505,7 +1564,11 @@ function renderCommunicationBalance(d) {
     var inits = (d.stats && d.stats.initiators) || {};
     var benInits = inits.self || 0;
     var hopeInits = inits.hope || 0;
-    initEl.innerHTML = '<span style="color:var(--accent)">Ben: ' + benInits + '</span> &middot; <span style="color:var(--pink)">Hope: ' + hopeInits + '</span>';
+    if (person === "ben") {
+      initEl.innerHTML = '<span style="color:var(--accent);font-weight:700;font-size:14px">' + benInits + ' initiated</span> <span style="color:var(--text-dim);font-size:11px">(Hope: ' + hopeInits + ')</span>';
+    } else {
+      initEl.innerHTML = '<span style="color:var(--pink);font-weight:700;font-size:14px">' + hopeInits + ' initiated</span> <span style="color:var(--text-dim);font-size:11px">(Ben: ' + benInits + ')</span>';
+    }
   }
 
   // Response times
@@ -1520,7 +1583,11 @@ function renderCommunicationBalance(d) {
     }
     var benAvg = fmtTime(rt.self ? rt.self.avgSec : null);
     var hopeAvg = fmtTime(rt.hope ? rt.hope.avgSec : null);
-    rtEl.innerHTML = '<span style="color:var(--accent)">Ben: ' + benAvg + '</span> &middot; <span style="color:var(--pink)">Hope: ' + hopeAvg + '</span>';
+    if (person === "ben") {
+      rtEl.innerHTML = '<span style="color:var(--accent);font-weight:700;font-size:14px">' + benAvg + ' avg reply</span> <span style="color:var(--text-dim);font-size:11px">(Hope: ' + hopeAvg + ')</span>';
+    } else {
+      rtEl.innerHTML = '<span style="color:var(--pink);font-weight:700;font-size:14px">' + hopeAvg + ' avg reply</span> <span style="color:var(--text-dim);font-size:11px">(Ben: ' + benAvg + ')</span>';
+    }
   }
 }
 

@@ -31,6 +31,10 @@ let settings = {};
 let activeLinkCategory = "all";
 let expandedSummaries = new Set();
 let refreshTimer = null;
+let dailyDigests = [];
+let upcomingEvents = [];
+let topics = [];
+let activeTopicPeriod = "week";
 
 // ── Init ──
 
@@ -47,6 +51,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupSettingsToggle();
   setupSettingsSave();
   setupScheduleVisibility();
+  setupTopicPeriodTabs();
   loadDashboard();
 
   // Auto-refresh every 60 seconds
@@ -57,20 +62,22 @@ document.addEventListener("DOMContentLoaded", () => {
 
 async function loadDashboard() {
   try {
-    const [statsRes, summariesRes, linksRes, leaderboardRes, settingsRes] =
+    const [statsRes, summariesRes, linksRes, leaderboardRes, settingsRes, dailyRes, eventsRes, topicsRes] =
       await Promise.all([
         adminFetch("/api/metacrisis/stats"),
-        adminFetch("/api/metacrisis/summaries?days=30"),
+        adminFetch("/api/metacrisis/summaries?days=30&type=weekly"),
         adminFetch("/api/metacrisis/links?limit=50"),
         adminFetch("/api/metacrisis/leaderboard?limit=10"),
         adminFetch("/api/metacrisis/settings"),
+        adminFetch("/api/metacrisis/summaries?days=7&type=daily"),
+        adminFetch("/api/metacrisis/events"),
+        adminFetch(`/api/metacrisis/topics?period=${activeTopicPeriod}`),
       ]);
 
     if (!statsRes.ok) throw new Error(`Stats: ${statsRes.status}`);
     if (!summariesRes.ok) throw new Error(`Summaries: ${summariesRes.status}`);
     if (!linksRes.ok) throw new Error(`Links: ${linksRes.status}`);
-    if (!leaderboardRes.ok)
-      throw new Error(`Leaderboard: ${leaderboardRes.status}`);
+    if (!leaderboardRes.ok) throw new Error(`Leaderboard: ${leaderboardRes.status}`);
     if (!settingsRes.ok) throw new Error(`Settings: ${settingsRes.status}`);
 
     stats = await statsRes.json();
@@ -78,6 +85,9 @@ async function loadDashboard() {
     links = await linksRes.json();
     leaderboard = await leaderboardRes.json();
     settings = await settingsRes.json();
+    dailyDigests = dailyRes.ok ? await dailyRes.json() : [];
+    upcomingEvents = eventsRes.ok ? await eventsRes.json() : [];
+    topics = topicsRes.ok ? await topicsRes.json() : [];
 
     renderDashboard();
   } catch (err) {
@@ -162,6 +172,30 @@ function updateDayRowVisibility() {
   }
 }
 
+// ── Topic Period Tabs ──
+
+function setupTopicPeriodTabs() {
+  const container = document.getElementById("topic-period-tabs");
+  if (!container) return;
+  container.addEventListener("click", async (e) => {
+    const tab = e.target.closest(".topic-period-tab");
+    if (!tab) return;
+    activeTopicPeriod = tab.dataset.period;
+    container.querySelectorAll(".topic-period-tab").forEach((t) => t.classList.remove("active"));
+    tab.classList.add("active");
+    // Fetch new topic data for the selected period
+    try {
+      const res = await adminFetch(`/api/metacrisis/topics?period=${activeTopicPeriod}`);
+      if (res.ok) {
+        topics = await res.json();
+        renderTopics();
+      }
+    } catch (err) {
+      console.error("Failed to load topics:", err);
+    }
+  });
+}
+
 // ── Settings Save ──
 
 function setupSettingsSave() {
@@ -208,6 +242,9 @@ function renderDashboard() {
 
   renderMonitorBar();
   renderStats();
+  renderDailyDigest();
+  renderUpcomingEvents();
+  renderTopics();
   renderLinks();
   renderLeaderboard();
   renderSummaries();
@@ -260,6 +297,120 @@ function renderStats() {
   document.getElementById("stat-members").textContent = (
     leaderboard?.length ?? 0
   ).toLocaleString();
+}
+
+// ── Daily Digest ──
+
+function renderDailyDigest() {
+  const container = document.getElementById("digest-content");
+  if (!container) return;
+
+  if (!dailyDigests || dailyDigests.length === 0) {
+    container.innerHTML = '<div class="digest-empty">No daily digests yet. They run automatically at 9 AM.</div>';
+    return;
+  }
+
+  // Show the most recent daily digest
+  const latest = dailyDigests[0];
+  const dateObj = new Date(latest.date + "T00:00:00");
+  const dateLabel = dateObj.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+
+  let html = `<div class="digest-date-label">${escapeHtml(dateLabel)} &middot; ${latest.message_count ?? 0} messages</div>`;
+
+  // Who Said What
+  const whoSaidWhat = safeJsonParse(latest.who_said_what_json);
+  if (whoSaidWhat.length > 0) {
+    html += '<ul class="digest-who-list">';
+    for (const entry of whoSaidWhat) {
+      html += `<li class="digest-who-item"><span class="digest-who-name">${escapeHtml(entry.sender || entry.name || "Unknown")}</span>: ${escapeHtml(entry.summary || entry.contribution || "")}</li>`;
+    }
+    html += '</ul>';
+  }
+
+  // General Reaction / Mood
+  if (latest.summary) {
+    html += `<div class="digest-mood">${escapeHtml(latest.summary)}</div>`;
+  }
+
+  // Recommendations
+  const recs = safeJsonParse(latest.recommendations_json);
+  if (recs.length > 0) {
+    html += '<div class="digest-recs">';
+    html += '<div class="digest-recs-title">Action Needed</div>';
+    for (const rec of recs) {
+      html += `<div class="digest-rec-item">${escapeHtml(typeof rec === "string" ? rec : rec.text || rec.recommendation || JSON.stringify(rec))}</div>`;
+    }
+    html += '</div>';
+  }
+
+  container.innerHTML = html;
+}
+
+// ── Upcoming Events ──
+
+function renderUpcomingEvents() {
+  const container = document.getElementById("events-list");
+  if (!container) return;
+
+  if (!upcomingEvents || upcomingEvents.length === 0) {
+    container.innerHTML = '<div class="events-empty">No upcoming events tracked.</div>';
+    return;
+  }
+
+  container.innerHTML = upcomingEvents.map((evt) => {
+    const dateObj = evt.date ? new Date(evt.date + "T00:00:00") : null;
+    const monthStr = dateObj ? dateObj.toLocaleDateString("en-US", { month: "short" }) : "TBA";
+    const dayStr = dateObj ? dateObj.getDate() : "?";
+
+    let details = [];
+    if (evt.start_time) details.push(evt.start_time);
+    if (evt.location) details.push(evt.location);
+    const detailStr = details.join(" &middot; ");
+
+    const nameHtml = evt.url
+      ? `<a href="${escapeAttr(evt.url)}" target="_blank" rel="noopener">${escapeHtml(evt.name || "Untitled Event")}</a>`
+      : escapeHtml(evt.name || "Untitled Event");
+
+    return `
+    <div class="event-card">
+      <div class="event-date-box">
+        <div class="event-date-month">${escapeHtml(monthStr)}</div>
+        <div class="event-date-day">${escapeHtml(String(dayStr))}</div>
+      </div>
+      <div class="event-info">
+        <div class="event-name">${nameHtml}</div>
+        ${detailStr ? `<div class="event-detail">${detailStr}</div>` : ""}
+        ${evt.description ? `<div class="event-detail">${escapeHtml(evt.description)}</div>` : ""}
+      </div>
+    </div>`;
+  }).join("");
+}
+
+// ── Topic Trends ──
+
+function renderTopics() {
+  const container = document.getElementById("topics-list");
+  if (!container) return;
+
+  if (!topics || topics.length === 0) {
+    container.innerHTML = '<div class="topics-empty">No topic data yet for this period.</div>';
+    return;
+  }
+
+  const maxCount = topics[0]?.total_mentions || topics[0]?.count || 1;
+
+  container.innerHTML = topics.map((t) => {
+    const count = t.total_mentions || t.count || 0;
+    const pct = Math.max(2, Math.round((count / maxCount) * 100));
+    return `
+    <div class="topic-bar-item">
+      <span class="topic-bar-name">${escapeHtml(t.topic)}</span>
+      <div class="topic-bar-bg">
+        <div class="topic-bar-fill" style="width: ${pct}%"></div>
+      </div>
+      <span class="topic-bar-count">${count}</span>
+    </div>`;
+  }).join("");
 }
 
 // ── Links ──
@@ -512,4 +663,15 @@ function escapeAttr(str) {
     .replace(/'/g, "&#39;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
+}
+
+function safeJsonParse(json) {
+  if (!json) return [];
+  if (Array.isArray(json)) return json;
+  try {
+    const parsed = JSON.parse(json);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
