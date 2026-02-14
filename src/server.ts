@@ -67,6 +67,9 @@ export interface ServerOptions {
   qrCodeGetter?: () => string | null;
   backfillTrigger?: (hours: number) => Promise<number>;
   backfillProgressGetter?: () => BackfillProgress;
+  // IndexedDB inspection/cleanup (runs inside Puppeteer page)
+  idbInspect?: () => Promise<any>;
+  idbClean?: (opts: { dryRun?: boolean }) => Promise<any>;
   // App routers mounted under /api/<app> (all admin-protected)
   appRouters?: { path: string; router: any }[];
 }
@@ -561,6 +564,35 @@ export function startServer(opts: ServerOptions): void {
       tableCounts,
       tableSizes,
     });
+  });
+
+  // GET /api/idb-inspect — inspect WhatsApp Web's IndexedDB contents
+  app.get("/api/idb-inspect", requireAdmin, async (_req, res) => {
+    if (!opts.idbInspect) {
+      res.status(503).json({ error: "IndexedDB inspection not available (WhatsApp not connected)" });
+      return;
+    }
+    try {
+      const result = await opts.idbInspect();
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || "Inspection failed" });
+    }
+  });
+
+  // POST /api/idb-clean — clean media/thumbnail data from WhatsApp Web's IndexedDB
+  app.post("/api/idb-clean", requireAdmin, async (req, res) => {
+    if (!opts.idbClean) {
+      res.status(503).json({ error: "IndexedDB cleanup not available (WhatsApp not connected)" });
+      return;
+    }
+    const dryRun = req.query.dry !== "false"; // default to dry run for safety
+    try {
+      const result = await opts.idbClean({ dryRun });
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || "Cleanup failed" });
+    }
   });
 
   // POST /api/cleanup — vacuum DB, clear Chrome cache, prune old data

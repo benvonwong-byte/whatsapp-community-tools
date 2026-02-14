@@ -616,6 +616,8 @@ async function main() {
     qrCodeGetter: () => whatsapp.getQrCode(),
     backfillTrigger: runBackfill,
     backfillProgressGetter: () => backfillProgress,
+    idbInspect: () => whatsapp.inspectIndexedDB(),
+    idbClean: (opts) => whatsapp.cleanIndexedDB(opts),
     appRouters,
   });
 

@@ -410,6 +410,208 @@ export class WhatsAppClient {
     await this.client.initialize();
   }
 
+  /**
+   * Inspect WhatsApp Web's IndexedDB to understand storage usage.
+   * Runs JavaScript inside the Puppeteer page context.
+   */
+  async inspectIndexedDB(): Promise<any> {
+    if (!this.ready) throw new Error("WhatsApp client not connected");
+    const page = (this.client as any).pupPage;
+    if (!page) throw new Error("No Puppeteer page available");
+
+    return page.evaluate(() => {
+      return new Promise((resolve, reject) => {
+        const results: any = { databases: [] };
+        const idb = (globalThis as any).indexedDB;
+
+        // List all IndexedDB databases
+        idb.databases().then(async (dbs: any[]) => {
+          results.totalDatabases = dbs.length;
+
+          for (const dbInfo of dbs) {
+            const dbName = dbInfo.name || "unknown";
+            try {
+              const db: any = await new Promise((res, rej) => {
+                const req = idb.open(dbName);
+                req.onsuccess = () => res(req.result);
+                req.onerror = () => rej(req.error);
+              });
+
+              const storeNames = Array.from(db.objectStoreNames);
+              const stores: any[] = [];
+
+              for (const storeName of storeNames) {
+                try {
+                  const tx = db.transaction(storeName, "readonly");
+                  const store = tx.objectStore(storeName);
+                  const count: number = await new Promise((res) => {
+                    const req = store.count();
+                    req.onsuccess = () => res(req.result);
+                    req.onerror = () => res(-1);
+                  });
+
+                  // Sample a few records to understand the data shape
+                  const sample: any = await new Promise((res) => {
+                    const req = store.openCursor();
+                    const samples: any[] = [];
+                    req.onsuccess = () => {
+                      const cursor = req.result;
+                      if (cursor && samples.length < 2) {
+                        const val = cursor.value;
+                        // Estimate record size and collect field names
+                        let sampleInfo: any = { type: typeof val };
+                        if (val && typeof val === "object") {
+                          const keys = Object.keys(val);
+                          sampleInfo.fields = keys;
+                          // Check for media/thumbnail fields
+                          const mediaFields = keys.filter(k =>
+                            /thumb|media|image|blob|data|body|preview/i.test(k)
+                          );
+                          sampleInfo.mediaFields = mediaFields;
+                          // Estimate size of this record
+                          try {
+                            const json = JSON.stringify(val);
+                            sampleInfo.sizeBytes = json.length;
+                          } catch { sampleInfo.sizeBytes = -1; }
+                        }
+                        samples.push(sampleInfo);
+                        cursor.continue();
+                      } else {
+                        res(samples);
+                      }
+                    };
+                    req.onerror = () => res([]);
+                  });
+
+                  stores.push({ name: storeName, count, samples: sample });
+                } catch { stores.push({ name: storeName, count: -1, error: "access denied" }); }
+              }
+
+              db.close();
+              results.databases.push({ name: dbName, version: dbInfo.version, stores });
+            } catch (err: any) {
+              results.databases.push({ name: dbName, error: err?.message || "failed to open" });
+            }
+          }
+
+          resolve(results);
+        }).catch(reject);
+      });
+    });
+  }
+
+  /**
+   * Clean thumbnail/media blob data from WhatsApp Web's IndexedDB.
+   * Returns stats about what was cleaned.
+   */
+  async cleanIndexedDB(options: { dryRun?: boolean } = {}): Promise<any> {
+    if (!this.ready) throw new Error("WhatsApp client not connected");
+    const page = (this.client as any).pupPage;
+    if (!page) throw new Error("No Puppeteer page available");
+
+    const dryRun = options.dryRun ?? true;
+    return page.evaluate((dry: boolean) => {
+      return new Promise((resolve, reject) => {
+        const results: any = { dryRun: dry, cleaned: [], errors: [], totalRecordsProcessed: 0, totalBytesFreed: 0 };
+        const idb = (globalThis as any).indexedDB;
+
+        idb.databases().then(async (dbs: any[]) => {
+          for (const dbInfo of dbs) {
+            const dbName = dbInfo.name || "unknown";
+            // Skip non-WhatsApp databases
+            if (!dbName.toLowerCase().includes("wawc") && !dbName.toLowerCase().includes("model-storage")) continue;
+
+            try {
+              const db: any = await new Promise((res, rej) => {
+                const req = idb.open(dbName);
+                req.onsuccess = () => res(req.result);
+                req.onerror = () => rej(req.error);
+              });
+
+              const storeNames: string[] = Array.from(db.objectStoreNames);
+
+              for (const storeName of storeNames) {
+                // Target stores that might hold media/thumbnails
+                const isMediaStore = /thumb|media|image|blob|sticker|preview/i.test(storeName);
+                if (!isMediaStore) continue;
+
+                try {
+                  const mode: any = dry ? "readonly" : "readwrite";
+                  const tx = db.transaction(storeName, mode);
+                  const store = tx.objectStore(storeName);
+
+                  const count: number = await new Promise((res) => {
+                    const req = store.count();
+                    req.onsuccess = () => res(req.result);
+                    req.onerror = () => res(0);
+                  });
+
+                  if (count === 0) continue;
+
+                  if (dry) {
+                    // Estimate size by sampling
+                    let sampleSize = 0;
+                    let sampled = 0;
+                    await new Promise<void>((res) => {
+                      const req = store.openCursor();
+                      req.onsuccess = () => {
+                        const cursor = req.result;
+                        if (cursor && sampled < 10) {
+                          try {
+                            sampleSize += JSON.stringify(cursor.value).length;
+                          } catch {}
+                          sampled++;
+                          cursor.continue();
+                        } else {
+                          res();
+                        }
+                      };
+                      req.onerror = () => res();
+                    });
+
+                    const avgSize = sampled > 0 ? sampleSize / sampled : 0;
+                    const estimatedTotal = Math.round(avgSize * count);
+                    results.cleaned.push({
+                      db: dbName,
+                      store: storeName,
+                      records: count,
+                      estimatedBytes: estimatedTotal,
+                      action: "would clear",
+                    });
+                    results.totalRecordsProcessed += count;
+                    results.totalBytesFreed += estimatedTotal;
+                  } else {
+                    // Actually clear the store
+                    await new Promise<void>((res, rej) => {
+                      const req = store.clear();
+                      req.onsuccess = () => res();
+                      req.onerror = () => rej(req.error);
+                    });
+                    results.cleaned.push({
+                      db: dbName,
+                      store: storeName,
+                      records: count,
+                      action: "cleared",
+                    });
+                    results.totalRecordsProcessed += count;
+                  }
+                } catch (err: any) {
+                  results.errors.push({ db: dbName, store: storeName, error: err?.message || "failed" });
+                }
+              }
+
+              db.close();
+            } catch (err: any) {
+              results.errors.push({ db: dbName, error: err?.message || "failed to open" });
+            }
+          }
+
+          resolve(results);
+        }).catch(reject);
+      });
+    }, dryRun);
+  }
+
   async stop() {
     this.stopTimers();
     // Flush remaining messages
