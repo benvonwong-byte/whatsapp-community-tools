@@ -506,14 +506,36 @@ export function startServer(opts: ServerOptions): void {
     const shmSize = getFileSize(shmFile);
     const authSize = getDirSize(authDir);
 
-    // Chrome cache is inside auth dir
-    let chromeCacheSize = 0;
-    const defaultDir = path.join(authDir, "session-whatsapp-events-nyc", "Default");
-    if (fs.existsSync(defaultDir)) {
-      for (const sub of ["Cache", "Code Cache", "GPUCache", "Service Worker"]) {
-        chromeCacheSize += getDirSize(path.join(defaultDir, sub));
+    // Scan auth subdirectories for size breakdown
+    const authBreakdown: Record<string, string> = {};
+    let clearableCacheSize = 0;
+    const clearableDirNames = ["Cache", "Code Cache", "GPUCache", "Service Worker", "blob_storage", "Session Storage", "WebStorage"];
+    try {
+      const sessionDirs = fs.readdirSync(authDir, { withFileTypes: true })
+        .filter(e => e.isDirectory());
+      for (const sessionDir of sessionDirs) {
+        const sessionPath = path.join(authDir, sessionDir.name);
+        const sessionSize = getDirSize(sessionPath);
+        authBreakdown[sessionDir.name] = formatBytes(sessionSize);
+        // Scan Default/ inside session dirs
+        const defPath = path.join(sessionPath, "Default");
+        if (fs.existsSync(defPath)) {
+          try {
+            const subs = fs.readdirSync(defPath, { withFileTypes: true })
+              .filter(e => e.isDirectory());
+            for (const sub of subs) {
+              const subSize = getDirSize(path.join(defPath, sub.name));
+              if (subSize > 1024 * 1024) {
+                authBreakdown[`  ${sessionDir.name}/Default/${sub.name}`] = formatBytes(subSize);
+              }
+              if (clearableDirNames.includes(sub.name)) {
+                clearableCacheSize += subSize;
+              }
+            }
+          } catch { /* skip */ }
+        }
       }
-    }
+    } catch { /* skip */ }
 
     // Table row counts
     const tableCounts = store.getTableCounts();
@@ -528,9 +550,9 @@ export function startServer(opts: ServerOptions): void {
         "events.db-wal": formatBytes(walSize),
         "events.db-shm": formatBytes(shmSize),
         ".auth/ (total)": formatBytes(authSize),
-        "Chrome cache": formatBytes(chromeCacheSize),
-        ".auth/ (without cache)": formatBytes(authSize - chromeCacheSize),
+        "Clearable cache": formatBytes(clearableCacheSize),
       },
+      authBreakdown,
       tableCounts,
     });
   });
@@ -552,28 +574,37 @@ export function startServer(opts: ServerOptions): void {
       actions.push("[dry-run] Would checkpoint WAL and VACUUM database");
     }
 
-    // 2. Clear Chrome cache directories
+    // 2. Clear Chrome cache directories (scan all session-* dirs)
     const authDir = config.authDir;
-    const defaultDir = path.join(authDir, "session-whatsapp-events-nyc", "Default");
-    const cacheDirs = ["Cache", "Code Cache", "GPUCache", "Service Worker"];
+    const cacheDirNames = ["Cache", "Code Cache", "GPUCache", "Service Worker", "blob_storage", "Session Storage", "WebStorage"];
     let cacheCleared = 0;
-    for (const sub of cacheDirs) {
-      const cacheDir = path.join(defaultDir, sub);
-      if (fs.existsSync(cacheDir)) {
-        const size = getDirSize(cacheDir);
-        if (!dryRun) {
-          try {
-            fs.rmSync(cacheDir, { recursive: true, force: true });
-            cacheCleared += size;
-            actions.push(`Cleared ${sub}/ (${formatBytes(size)})`);
-          } catch (err: any) {
-            actions.push(`Failed to clear ${sub}/: ${err.message}`);
+    try {
+      const sessionDirs = fs.readdirSync(authDir, { withFileTypes: true })
+        .filter(e => e.isDirectory() && e.name.startsWith("session-"));
+      for (const sessionDir of sessionDirs) {
+        const defPath = path.join(authDir, sessionDir.name, "Default");
+        if (!fs.existsSync(defPath)) continue;
+        for (const sub of cacheDirNames) {
+          const cacheDir = path.join(defPath, sub);
+          if (fs.existsSync(cacheDir)) {
+            const size = getDirSize(cacheDir);
+            if (!dryRun) {
+              try {
+                fs.rmSync(cacheDir, { recursive: true, force: true });
+                cacheCleared += size;
+                actions.push(`Cleared ${sessionDir.name}/Default/${sub}/ (${formatBytes(size)})`);
+              } catch (err: any) {
+                actions.push(`Failed to clear ${sub}/: ${err.message}`);
+              }
+            } else {
+              cacheCleared += size;
+              actions.push(`[dry-run] Would clear ${sessionDir.name}/Default/${sub}/ (${formatBytes(size)})`);
+            }
           }
-        } else {
-          cacheCleared += size;
-          actions.push(`[dry-run] Would clear ${sub}/ (${formatBytes(size)})`);
         }
       }
+    } catch (err: any) {
+      actions.push("Cache scan failed: " + err.message);
     }
 
     // 3. Prune processed_messages body text older than 30 days (keep metadata for dedup)
