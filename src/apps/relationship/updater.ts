@@ -1,7 +1,8 @@
 import { RelationshipStore, RelationshipAnalysis } from "./store";
 
 /**
- * Format a single day's analysis into a concise WhatsApp message.
+ * Format a concise daily check-in message.
+ * Structure: 1 thing for Hope, 1 for Ben, 1 for the relationship, brief stats.
  */
 function formatDailyUpdate(analysis: RelationshipAnalysis): string {
   const m = JSON.parse(analysis.metricsJson);
@@ -9,90 +10,77 @@ function formatDailyUpdate(analysis: RelationshipAnalysis): string {
   const scoreEmoji = score >= 70 ? "🟢" : score >= 40 ? "🟡" : "🔴";
 
   const lines: string[] = [];
-  lines.push(`💕 *Relationship Check-in* — ${formatDate(analysis.date)}`);
+  lines.push(`💕 *Daily Check-in* — ${formatDate(analysis.date)}`);
   lines.push("");
-  lines.push(`${scoreEmoji} *Health Score: ${score}/100*`);
 
-  // Emotional bank account
+  // One thing for each person + relationship
+  const recs = m.recommendations || {};
+  const hopeRec = (recs.forHope && recs.forHope[0]) || null;
+  const benRec = (recs.forBen && recs.forBen[0]) || null;
+  const togetherRec = (recs.forBoth && recs.forBoth[0]) || null;
+
+  if (hopeRec) lines.push(`💗 *Hope:* ${hopeRec}`);
+  if (benRec) lines.push(`💙 *Ben:* ${benRec}`);
+  if (togetherRec) lines.push(`🌱 *Together:* ${togetherRec}`);
+
+  // Brief stats
+  lines.push("");
+  lines.push(`${scoreEmoji} Health: ${score}/100`);
+
   if (m.emotionalBankAccount) {
     const bank = m.emotionalBankAccount;
     const bankEmoji = bank.status === "healthy" ? "✅" : bank.status === "watch" ? "⚠️" : "🚨";
-    lines.push(`🏦 Bank Account: ${bank.ratio.toFixed(1)}:1 ${bankEmoji} (${bank.deposits} deposits, ${bank.withdrawals} withdrawals)`);
+    lines.push(`🏦 Bank: ${bank.ratio.toFixed(1)}:1 ${bankEmoji}`);
   }
 
-  // Bids
   if (m.bids) {
     const total = (m.bids.turnedToward || 0) + (m.bids.turnedAway || 0) + (m.bids.turnedAgainst || 0);
-    const towardPct = total > 0 ? Math.round((m.bids.turnedToward / total) * 100) : 0;
-    lines.push(`🤝 Bids: ${towardPct}% turned toward (${m.bids.turnedToward}/${total})`);
-  }
-
-  // Pursue-withdraw
-  if (m.pursueWithdraw && m.pursueWithdraw.pattern !== "balanced") {
-    lines.push(`🔄 Pattern: ${m.pursueWithdraw.description}`);
-  }
-
-  // Summary
-  if (analysis.summary) {
-    lines.push("");
-    lines.push(`📝 ${analysis.summary}`);
-  }
-
-  // Recommendations
-  if (m.recommendations) {
-    const recs = m.recommendations;
-    if (recs.forBoth && recs.forBoth.length > 0) {
-      lines.push("");
-      lines.push("🌱 *Together:*");
-      for (const rec of recs.forBoth) {
-        lines.push(`• ${rec}`);
-      }
-    }
-    if (recs.forBen && recs.forBen.length > 0) {
-      lines.push("");
-      lines.push("💙 *For Ben:*");
-      for (const rec of recs.forBen) {
-        lines.push(`• ${rec}`);
-      }
-    }
-    if (recs.forHope && recs.forHope.length > 0) {
-      lines.push("");
-      lines.push("💗 *For Hope:*");
-      for (const rec of recs.forHope) {
-        lines.push(`• ${rec}`);
-      }
+    if (total > 0) {
+      const towardPct = Math.round((m.bids.turnedToward / total) * 100);
+      lines.push(`🤝 Bids: ${towardPct}% toward (${m.bids.turnedToward}/${total})`);
     }
   }
 
   lines.push("");
-  lines.push(`_${analysis.messageCount} messages analyzed_`);
+  lines.push(`_${analysis.messageCount} msgs analyzed_`);
 
   return lines.join("\n");
 }
 
 /**
- * Format a weekly summary from the last 7 days of analyses.
+ * Format a weekly summary — same concise structure with trend line.
  */
 function formatWeeklyUpdate(analyses: RelationshipAnalysis[]): string {
   if (analyses.length === 0) return "";
 
-  const lines: string[] = [];
   const scores = analyses.map((a) => {
     try { return JSON.parse(a.metricsJson).overallHealthScore ?? 0; } catch { return 0; }
   });
   const avgScore = Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
   const scoreEmoji = avgScore >= 70 ? "🟢" : avgScore >= 40 ? "🟡" : "🔴";
   const totalMsgs = analyses.reduce((s, a) => s + (a.messageCount || 0), 0);
-
   const startDate = analyses[analyses.length - 1].date;
   const endDate = analyses[0].date;
 
-  lines.push(`💕 *Weekly Relationship Summary*`);
-  lines.push(`📅 ${formatDate(startDate)} — ${formatDate(endDate)}`);
+  const lines: string[] = [];
+  lines.push(`💕 *Weekly Summary* — ${formatDate(startDate)} to ${formatDate(endDate)}`);
   lines.push("");
-  lines.push(`${scoreEmoji} *Average Score: ${avgScore}/100* (${analyses.length} days)`);
 
-  // Trend
+  // One thing for each person + relationship from most recent analysis
+  const latestM = JSON.parse(analyses[0].metricsJson);
+  const recs = latestM.recommendations || {};
+  const hopeRec = (recs.forHope && recs.forHope[0]) || null;
+  const benRec = (recs.forBen && recs.forBen[0]) || null;
+  const togetherRec = (recs.forBoth && recs.forBoth[0]) || null;
+
+  if (hopeRec) lines.push(`💗 *Hope:* ${hopeRec}`);
+  if (benRec) lines.push(`💙 *Ben:* ${benRec}`);
+  if (togetherRec) lines.push(`🌱 *Together:* ${togetherRec}`);
+
+  // Brief stats
+  lines.push("");
+  lines.push(`${scoreEmoji} Avg Score: ${avgScore}/100 (${analyses.length} days)`);
+
   if (scores.length >= 2) {
     const first = scores[scores.length - 1];
     const last = scores[0];
@@ -101,39 +89,14 @@ function formatWeeklyUpdate(analyses: RelationshipAnalysis[]): string {
     lines.push(`${trendEmoji} Trend: ${first} → ${last} (${diff > 0 ? "+" : ""}${diff})`);
   }
 
-  // Aggregate bank account from most recent
-  const latest = analyses[0];
-  const latestM = JSON.parse(latest.metricsJson);
   if (latestM.emotionalBankAccount) {
     const bank = latestM.emotionalBankAccount;
     const bankEmoji = bank.status === "healthy" ? "✅" : bank.status === "watch" ? "⚠️" : "🚨";
-    lines.push(`🏦 Latest Bank Account: ${bank.ratio.toFixed(1)}:1 ${bankEmoji}`);
-  }
-
-  // Day-by-day scores
-  lines.push("");
-  lines.push("*Daily Scores:*");
-  for (const a of [...analyses].reverse()) {
-    const s = scores[analyses.indexOf(a)];
-    const dayEmoji = s >= 70 ? "🟢" : s >= 40 ? "🟡" : "🔴";
-    const dayName = new Date(a.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
-    lines.push(`${dayEmoji} ${dayName}: ${s}/100 (${a.messageCount} msgs)`);
-  }
-
-  // Recommendations from latest analysis
-  if (latestM.recommendations) {
-    const recs = latestM.recommendations;
-    if (recs.forBoth && recs.forBoth.length > 0) {
-      lines.push("");
-      lines.push("🌱 *Focus for next week:*");
-      for (const rec of recs.forBoth) {
-        lines.push(`• ${rec}`);
-      }
-    }
+    lines.push(`🏦 Bank: ${bank.ratio.toFixed(1)}:1 ${bankEmoji}`);
   }
 
   lines.push("");
-  lines.push(`_${totalMsgs} messages across ${analyses.length} days_`);
+  lines.push(`_${totalMsgs} msgs across ${analyses.length} days_`);
 
   return lines.join("\n");
 }

@@ -394,20 +394,28 @@ export function createRelationshipRouter(
   router.get("/settings", (_req: Request, res: Response) => {
     res.json({
       updateFrequency: store.getSetting("update_frequency") || "off",
+      updateSendHour: parseInt(store.getSetting("update_send_hour") || "7", 10),
       updateLastSent: store.getSetting("update_last_sent") || null,
     });
   });
 
   // POST /api/relationship/settings — update settings
-  // Body: { updateFrequency: "daily" | "weekly" | "off" }
+  // Body: { updateFrequency?, updateSendHour? }
   router.post("/settings", (req: Request, res: Response) => {
-    const { updateFrequency } = req.body;
+    const { updateFrequency, updateSendHour } = req.body;
     if (updateFrequency && ["daily", "weekly", "off"].includes(updateFrequency)) {
       store.setSetting("update_frequency", updateFrequency);
+    }
+    if (updateSendHour !== undefined) {
+      const hour = parseInt(updateSendHour, 10);
+      if (!isNaN(hour) && hour >= 0 && hour <= 23) {
+        store.setSetting("update_send_hour", String(hour));
+      }
     }
     res.json({
       ok: true,
       updateFrequency: store.getSetting("update_frequency") || "off",
+      updateSendHour: parseInt(store.getSetting("update_send_hour") || "7", 10),
     });
   });
 

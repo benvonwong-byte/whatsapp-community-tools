@@ -487,6 +487,7 @@ function setupTranscribeButton() {
 
 function setupUpdateControls() {
   const freqSelect = $("update-frequency");
+  const hourSelect = $("update-send-hour");
   const sendBtn = $("send-update-btn");
   const previewBtn = $("preview-update-btn");
   const modal = $("preview-modal");
@@ -497,6 +498,7 @@ function setupUpdateControls() {
   // Load current settings
   adminFetch("/api/relationship/settings").then(r => r.json()).then(data => {
     if (freqSelect) freqSelect.value = data.updateFrequency || "off";
+    if (hourSelect) hourSelect.value = String(data.updateSendHour ?? 7);
   }).catch(() => {});
 
   // Save frequency when changed
@@ -507,6 +509,21 @@ function setupUpdateControls() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ updateFrequency: freqSelect.value }),
+        });
+      } catch (err) {
+        alert("Failed to save setting: " + err.message);
+      }
+    });
+  }
+
+  // Save send hour when changed
+  if (hourSelect) {
+    hourSelect.addEventListener("change", async () => {
+      try {
+        await adminFetch("/api/relationship/settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ updateSendHour: parseInt(hourSelect.value, 10) }),
         });
       } catch (err) {
         alert("Failed to save setting: " + err.message);

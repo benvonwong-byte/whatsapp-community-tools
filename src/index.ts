@@ -641,22 +641,37 @@ async function main() {
   scheduleDailyTask(config.analysisHour, async () => {
     console.log("[scheduler] Running daily relationship analysis...");
     await relationshipAnalyze();
-
-    // Auto-send dashboard update to Hope if enabled
-    if (shouldSendUpdate(relationshipStore)) {
-      const freq = (relationshipStore.getSetting("update_frequency") || "daily") as "daily" | "weekly";
-      const message = buildUpdateMessage(relationshipStore, freq);
-      if (message) {
-        try {
-          await relationshipSendUpdate(message);
-          relationshipStore.setSetting("update_last_sent", new Date().toISOString());
-          console.log(`[scheduler] Sent ${freq} relationship update to Hope.`);
-        } catch (err: any) {
-          console.error(`[scheduler] Failed to send relationship update:`, err?.message || err);
-        }
-      }
-    }
   });
+
+  // Schedule daily update send to Hope (configurable hour, default 7 AM EST)
+  const scheduleUpdateSend = () => {
+    const sendHour = parseInt(relationshipStore.getSetting("update_send_hour") || "7", 10);
+    const now = new Date();
+    const next = new Date(now);
+    next.setHours(sendHour, 0, 0, 0);
+    if (next <= now) next.setDate(next.getDate() + 1);
+
+    const delay = next.getTime() - now.getTime();
+    console.log(`[scheduler] Next relationship update send in ${(delay / 3600000).toFixed(1)}h at ${next.toISOString()}`);
+
+    setTimeout(async () => {
+      try {
+        if (shouldSendUpdate(relationshipStore)) {
+          const freq = (relationshipStore.getSetting("update_frequency") || "daily") as "daily" | "weekly";
+          const message = buildUpdateMessage(relationshipStore, freq);
+          if (message) {
+            await relationshipSendUpdate(message);
+            relationshipStore.setSetting("update_last_sent", new Date().toISOString());
+            console.log(`[scheduler] Sent ${freq} relationship update to Hope.`);
+          }
+        }
+      } catch (err: any) {
+        console.error(`[scheduler] Failed to send relationship update:`, err?.message || err);
+      }
+      scheduleUpdateSend(); // reschedule, re-reading the hour from settings
+    }, delay);
+  };
+  scheduleUpdateSend();
 
   // Schedule metacrisis daily digest at 9AM
   scheduleDailyTask(9, async () => {
