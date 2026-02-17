@@ -332,6 +332,27 @@ export class RelationshipStore {
     return { lastMessageTimestamp: lastTs, todayMessageCount: todayCount };
   }
 
+  getInPersonStats() {
+    const total = this.db.prepare(
+      `SELECT COUNT(*) as count FROM relationship_messages WHERE source = 'in-person'`
+    ).get() as { count: number };
+    const today = this.db.prepare(
+      `SELECT COUNT(*) as count FROM relationship_messages WHERE source = 'in-person' AND date(datetime(timestamp, 'unixepoch')) = date('now')`
+    ).get() as { count: number };
+    const lastMsg = this.db.prepare(
+      `SELECT * FROM relationship_messages WHERE source = 'in-person' ORDER BY timestamp DESC LIMIT 1`
+    ).get() as RelationshipMessage | undefined;
+    const recent = this.db.prepare(
+      `SELECT * FROM relationship_messages WHERE source = 'in-person' ORDER BY timestamp DESC LIMIT 20`
+    ).all() as RelationshipMessage[];
+    return {
+      totalMessages: total?.count ?? 0,
+      todayMessages: today?.count ?? 0,
+      lastMessageAt: lastMsg ? lastMsg.timestamp : null,
+      recentMessages: recent,
+    };
+  }
+
   close() {
     this.db.close();
   }

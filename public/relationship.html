@@ -106,6 +106,8 @@
     .monitor-dot.green { background: var(--green); box-shadow: 0 0 6px var(--green); }
     .monitor-dot.yellow { background: var(--yellow); box-shadow: 0 0 6px var(--yellow); }
     .monitor-dot.red { background: var(--red); box-shadow: 0 0 6px var(--red); }
+    .monitor-dot.flash { animation: dot-flash 0.5s ease-in-out 3; }
+    @keyframes dot-flash { 0%,100% { opacity:1; } 50% { opacity:0.2; box-shadow: 0 0 12px var(--green); } }
 
     .monitor-item { font-size: 11px; color: var(--text-dim); }
     .monitor-item strong { color: var(--text); }
@@ -587,6 +589,37 @@
         </select>
         <button id="send-update-btn" class="action-btn" title="Send dashboard update to Hope now">Send Now</button>
         <button id="preview-update-btn" class="action-btn" title="Preview the update message">Preview</button>
+      </div>
+
+      <!-- =============================================
+           ZONE: IN-PERSON LIVE MONITOR
+           ============================================= -->
+      <div class="zone" id="zone-in-person">
+        <div class="zone-label">IN-PERSON CONVERSATIONS</div>
+        <div class="section">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+            <span id="in-person-dot" class="monitor-dot red" style="flex-shrink:0;"></span>
+            <div style="flex:1;">
+              <div style="font-size:13px;font-weight:600;color:var(--text);">Live Import Monitor</div>
+              <div id="in-person-status" style="font-size:11px;color:var(--text-dim);margin-top:2px;">Checking...</div>
+            </div>
+            <div style="display:flex;gap:16px;">
+              <div class="stat-card" style="padding:8px 12px;margin:0;min-width:auto;">
+                <div id="in-person-total" class="stat-value" style="font-size:18px;">0</div>
+                <div class="stat-label">Total</div>
+              </div>
+              <div class="stat-card" style="padding:8px 12px;margin:0;min-width:auto;">
+                <div id="in-person-today" class="stat-value" style="font-size:18px;">0</div>
+                <div class="stat-label">Today</div>
+              </div>
+            </div>
+          </div>
+          <div id="in-person-messages" style="max-height:300px;overflow-y:auto;"></div>
+          <div id="in-person-empty" style="text-align:center;padding:20px;color:var(--text-dim);font-size:12px;">
+            No in-person conversations imported yet.<br>
+            Send messages from your transcription app to see them here.
+          </div>
+        </div>
       </div>
 
       <!-- =============================================

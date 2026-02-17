@@ -88,6 +88,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupTranscribeButton();
   setupImportButton();
   setupUpdateControls();
+  setupInPersonMonitor();
   setupTrendChartInteractivity();
   setupPersonToggle();
   loadDashboard();
@@ -603,6 +604,97 @@ function setupUpdateControls() {
       }
     });
   }
+}
+
+// ── In-Person Live Monitor ──
+
+let inPersonPollTimer = null;
+let lastInPersonCount = 0;
+
+function setupInPersonMonitor() {
+  loadInPersonData();
+  inPersonPollTimer = setInterval(loadInPersonData, 10000); // poll every 10s
+}
+
+async function loadInPersonData() {
+  try {
+    const res = await adminFetch("/api/relationship/in-person");
+    const data = await res.json();
+    renderInPersonMonitor(data);
+  } catch {
+    // silently ignore poll failures
+  }
+}
+
+function renderInPersonMonitor(data) {
+  const dot = $("in-person-dot");
+  const status = $("in-person-status");
+  const totalEl = $("in-person-total");
+  const todayEl = $("in-person-today");
+  const msgsEl = $("in-person-messages");
+  const emptyEl = $("in-person-empty");
+
+  if (totalEl) totalEl.textContent = data.totalMessages;
+  if (todayEl) todayEl.textContent = data.todayMessages;
+
+  // Flash green when new messages arrive
+  if (data.totalMessages > lastInPersonCount && lastInPersonCount > 0) {
+    dot?.classList.add("flash");
+    setTimeout(() => dot?.classList.remove("flash"), 2000);
+  }
+  lastInPersonCount = data.totalMessages;
+
+  // Status text
+  if (status) {
+    if (data.lastMessageAt) {
+      const ago = timeAgo(data.lastMessageAt * 1000);
+      status.textContent = `Last import: ${ago}`;
+      dot?.classList.remove("red");
+      dot?.classList.add("green");
+    } else {
+      status.textContent = "Waiting for first import...";
+    }
+  }
+
+  // Render recent messages
+  if (data.recentMessages && data.recentMessages.length > 0) {
+    if (emptyEl) emptyEl.style.display = "none";
+    if (msgsEl) {
+      msgsEl.innerHTML = data.recentMessages.map(m => {
+        const time = new Date(m.timestamp * 1000).toLocaleTimeString("en-US", {
+          hour: "numeric", minute: "2-digit"
+        });
+        const date = new Date(m.timestamp * 1000).toLocaleDateString("en-US", {
+          month: "short", day: "numeric"
+        });
+        const speaker = m.speaker === "self" ? "Ben" : "Hope";
+        const color = m.speaker === "self" ? "var(--accent)" : "var(--pink)";
+        const body = m.body.length > 120 ? m.body.slice(0, 120) + "..." : m.body;
+        return `<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;">
+          <span style="color:var(--text-dim);margin-right:6px;">${date} ${time}</span>
+          <span style="color:${color};font-weight:600;">${speaker}:</span>
+          <span style="color:var(--text);">${escapeHtml(body)}</span>
+        </div>`;
+      }).join("");
+    }
+  } else {
+    if (emptyEl) emptyEl.style.display = "block";
+    if (msgsEl) msgsEl.innerHTML = "";
+  }
+}
+
+function timeAgo(ts) {
+  const sec = Math.floor((Date.now() - ts) / 1000);
+  if (sec < 60) return "just now";
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
+  return `${Math.floor(sec / 86400)}d ago`;
+}
+
+function escapeHtml(str) {
+  const d = document.createElement("div");
+  d.textContent = str;
+  return d.innerHTML;
 }
 
 // ── Import .txt ──

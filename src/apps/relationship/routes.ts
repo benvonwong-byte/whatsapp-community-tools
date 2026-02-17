@@ -444,6 +444,11 @@ export function createRelationshipRouter(
     });
   });
 
+  // GET /api/relationship/in-person — get in-person conversation stats + recent messages
+  router.get("/in-person", (_req: Request, res: Response) => {
+    res.json(store.getInPersonStats());
+  });
+
   // GET /api/relationship/settings — get update settings
   router.get("/settings", (_req: Request, res: Response) => {
     res.json({
