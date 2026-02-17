@@ -17,9 +17,20 @@ export function createRecordingRouter(
   relationshipStore: RelationshipStore
 ): Router {
   const router = Router();
+  const ALLOWED_AUDIO_TYPES = new Set([
+    "audio/webm", "audio/mp4", "audio/mpeg", "audio/ogg",
+    "audio/wav", "audio/x-m4a", "audio/aac",
+  ]);
   const upload = multer({
     storage: multer.memoryStorage(),
-    limits: { fileSize: 100 * 1024 * 1024 }, // 100MB max
+    limits: { fileSize: 50 * 1024 * 1024 }, // 50MB max
+    fileFilter: (_req, file, cb) => {
+      if (ALLOWED_AUDIO_TYPES.has(file.mimetype)) {
+        cb(null, true);
+      } else {
+        cb(new Error(`Invalid audio format: ${file.mimetype}`));
+      }
+    },
   });
 
   // Initialize AssemblyAI client lazily
@@ -88,8 +99,15 @@ export function createRecordingRouter(
   router.post("/save-transcript", (req: Request, res: Response) => {
     const { utterances, source } = req.body;
 
+    const MAX_UTTERANCES = 500;
+    const MAX_BODY_LENGTH = 10000;
+
     if (!Array.isArray(utterances) || utterances.length === 0) {
       res.status(400).json({ error: "Missing 'utterances' array" });
+      return;
+    }
+    if (utterances.length > MAX_UTTERANCES) {
+      res.status(400).json({ error: `Too many utterances (max ${MAX_UTTERANCES})` });
       return;
     }
 
@@ -104,8 +122,8 @@ export function createRecordingRouter(
         errors.push(`utterance[${i}]: invalid speaker "${u.speaker}" (must be "self" or "hope")`);
         continue;
       }
-      if (!u.body || typeof u.body !== "string") {
-        errors.push(`utterance[${i}]: missing body`);
+      if (!u.body || typeof u.body !== "string" || u.body.length > MAX_BODY_LENGTH) {
+        errors.push(`utterance[${i}]: missing or too long body (max ${MAX_BODY_LENGTH} chars)`);
         continue;
       }
       if (!u.timestamp || typeof u.timestamp !== "number") {
