@@ -7,13 +7,10 @@ export function createFriendsHandler(store: FriendsStore) {
   const relationshipNameLower = config.relationshipChatName.toLowerCase();
 
   return async (msg: Message, chat: any) => {
-    // 1. Filter: private chat OR small group (2-6 participants)
+    // 1. Filter: private (1:1) chats ONLY — no groups, no announcements
     const isPrivate = !chat.isGroup;
-    const participants = (chat as any).participants;
-    const participantCount = participants ? participants.length : 1;
-    const isSmallGroup = chat.isGroup && participantCount >= 2 && participantCount <= 6;
-
-    if (!isPrivate && !isSmallGroup) return;
+    if (!isPrivate) return;
+    const participantCount = 1;
 
     // 2. Skip the relationship chat
     if (isPrivate && chat.name && chat.name.toLowerCase().includes(relationshipNameLower)) return;
@@ -36,21 +33,14 @@ export function createFriendsHandler(store: FriendsStore) {
     if (msg.fromMe) {
       senderId = "self";
       senderName = "Me";
-    } else if (chat.isGroup) {
-      senderId = (msg as any).author || msg.from;
-      try {
-        const contact = await msg.getContact();
-        senderName = contact?.pushname || contact?.name || senderId;
-      } catch {
-        senderName = senderId;
-      }
     } else {
       // Private chat: use the chat ID as the contact identifier
       senderId = chatId;
       senderName = chat.name || "";
       try {
         const contact = await msg.getContact();
-        senderName = contact?.pushname || contact?.name || chat.name || "";
+        // Prefer full name (address book) > pushname > chat name
+        senderName = contact?.name || contact?.pushname || chat.name || "";
       } catch {}
     }
 

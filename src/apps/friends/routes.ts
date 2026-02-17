@@ -142,6 +142,28 @@ export function createFriendsRouter(
     res.json(tags);
   });
 
+  router.post("/contacts/:id/tags", (req: Request, res: Response) => {
+    const contactId = decodeURIComponent(req.params.id as string);
+    const { name } = req.body;
+    if (!name || typeof name !== "string" || !name.trim()) {
+      res.status(400).json({ error: "Tag name required" });
+      return;
+    }
+    const timestamp = Math.floor(Date.now() / 1000);
+    store.addContactTag(contactId, name.trim(), timestamp, 1.0);
+    const tags = store.getContactTags(contactId);
+    res.json(tags);
+  });
+
+  router.delete("/contacts/:id/tags/:tagId", (req: Request, res: Response) => {
+    const contactId = decodeURIComponent(req.params.id as string);
+    const tagId = parseInt(req.params.tagId as string);
+    if (isNaN(tagId)) { res.status(400).json({ error: "Invalid tag ID" }); return; }
+    store.removeContactTag(contactId, tagId);
+    const tags = store.getContactTags(contactId);
+    res.json(tags);
+  });
+
   // ── Chats ──
 
   router.get("/chats", (_req: Request, res: Response) => {

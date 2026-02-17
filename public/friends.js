@@ -65,7 +65,6 @@ document.addEventListener("DOMContentLoaded", () => {
       else if (target === "contacts") loadContacts();
       else if (target === "tiers") loadTiers();
       else if (target === "groups") loadGroups();
-      else if (target === "calendar") loadCalendar();
       else if (target === "messaging") loadMessagingRecipients();
       else if (target === "chats") loadChats();
     });
@@ -207,6 +206,8 @@ async function loadDashboard() {
     renderNeglectedList(data.neglected);
     renderInitiatorsList(data.topInitiators);
     renderTierPills(data.tierDistribution);
+    // Calendar is now part of dashboard
+    loadCalendar();
   } catch (err) {
     console.error("Failed to load dashboard:", err);
   }
@@ -349,7 +350,7 @@ function renderTopFriends(data) {
     const trendClass = diff > 0 ? "up" : diff < 0 ? "down" : "flat";
     const trendIcon = diff > 0 ? "\u25B2" : diff < 0 ? "\u25BC" : "\u2022";
     const trendLabel = diff !== 0 ? " " + Math.abs(diff) : "";
-    return '<div class="top-friend-row">' +
+    return '<div class="top-friend-row" data-contact-id="' + esc(String(f.id)) + '" style="cursor:pointer;">' +
       '<div class="top-friend-rank ' + rankClass + '">' + (i + 1) + '</div>' +
       '<div class="top-friend-info">' +
         '<div class="top-friend-name">' + esc(f.name) + '</div>' +
@@ -360,6 +361,14 @@ function renderTopFriends(data) {
       '</div>' +
     '</div>';
   }).join("");
+
+  // Make rows clickable to open detail panel
+  container.querySelectorAll(".top-friend-row").forEach(row => {
+    row.addEventListener("click", () => {
+      const id = row.dataset.contactId;
+      if (id) openContactDetail(id);
+    });
+  });
 }
 
 // ── Reciprocity (Message Balance) ──
@@ -732,15 +741,8 @@ async function openContactDetail(contactId) {
         : '<span class="empty-state">No groups</span>';
     }
 
-    // Tags
-    const detailTags = $("detail-tags");
-    if (detailTags && detailData.tags) {
-      detailTags.innerHTML = detailData.tags.length > 0
-        ? detailData.tags.map((t) =>
-            '<span class="detail-tag">' + esc(t.name) + (t.mention_count > 1 ? ' <small>(' + t.mention_count + ')</small>' : '') + '</span>'
-          ).join("")
-        : '';
-    }
+    // Tags (editable)
+    renderDetailTags(contactId, detailData.tags || []);
 
     // Voice stats
     const detailVoice = $("detail-voice-stats");
@@ -825,6 +827,97 @@ function renderDetailChart(data) {
       },
     },
   });
+}
+
+// ── Detail Tags (editable) ──
+
+function renderDetailTags(contactId, tags) {
+  const container = $("detail-tags");
+  if (!container) return;
+
+  let html = tags.map((t) =>
+    '<span class="detail-tag" data-tag-id="' + t.tag_id + '">' +
+      esc(t.name) +
+      (t.mention_count > 1 ? ' <small>(' + t.mention_count + ')</small>' : '') +
+      ' <span class="tag-remove" data-contact="' + esc(contactId) + '" data-tag-id="' + t.tag_id + '">&times;</span>' +
+    '</span>'
+  ).join("");
+
+  html += '<span class="tag-add-form">' +
+    '<input type="text" id="tag-add-input" placeholder="+ add tag" maxlength="40">' +
+    '<button id="tag-add-btn" type="button">+</button>' +
+    '</span>';
+
+  html += ' <button class="tag-extract-btn" id="tag-extract-btn" title="AI-generate tags from conversation">AI Tags</button>';
+
+  container.innerHTML = html;
+
+  // Remove tag handlers
+  container.querySelectorAll(".tag-remove").forEach(btn => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const cId = btn.dataset.contact;
+      const tId = btn.dataset.tagId;
+      try {
+        const res = await adminFetch("/api/friends/contacts/" + encodeURIComponent(cId) + "/tags/" + tId, { method: "DELETE" });
+        if (!res.ok) throw new Error("Failed");
+        const updated = await res.json();
+        renderDetailTags(cId, updated);
+      } catch (err) {
+        console.error("Failed to remove tag:", err);
+      }
+    });
+  });
+
+  // Add tag handler
+  const addBtn = $("tag-add-btn");
+  const addInput = $("tag-add-input");
+  if (addBtn && addInput) {
+    const doAdd = async () => {
+      const name = addInput.value.trim();
+      if (!name) return;
+      addInput.value = "";
+      try {
+        const res = await adminFetch("/api/friends/contacts/" + encodeURIComponent(contactId) + "/tags", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name }),
+        });
+        if (!res.ok) throw new Error("Failed");
+        const updated = await res.json();
+        renderDetailTags(contactId, updated);
+      } catch (err) {
+        console.error("Failed to add tag:", err);
+      }
+    };
+    addBtn.addEventListener("click", doAdd);
+    addInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); doAdd(); }
+    });
+  }
+
+  // AI extract handler
+  const extractBtn = $("tag-extract-btn");
+  if (extractBtn) {
+    extractBtn.addEventListener("click", async () => {
+      extractBtn.disabled = true;
+      extractBtn.textContent = "Extracting...";
+      try {
+        const res = await adminFetch("/api/friends/tags/extract", { method: "POST" });
+        if (!res.ok) throw new Error("Extraction failed");
+        // Refresh tags for this contact
+        const tagRes = await adminFetch("/api/friends/contacts/" + encodeURIComponent(contactId) + "/tags");
+        if (tagRes.ok) {
+          const updated = await tagRes.json();
+          renderDetailTags(contactId, updated);
+        }
+      } catch (err) {
+        console.error("Tag extraction failed:", err);
+        extractBtn.textContent = "Failed";
+        setTimeout(() => { extractBtn.textContent = "AI Tags"; extractBtn.disabled = false; }, 2000);
+      }
+    });
+  }
 }
 
 // ── Groups Tab ──

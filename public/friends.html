@@ -756,14 +756,59 @@
     .tag-mode-toggle:hover { color: var(--accent); border-color: var(--accent); }
 
     /* Detail panel tags */
-    .detail-tags { padding: 0 0 8px; display: flex; flex-wrap: wrap; gap: 4px; }
+    .detail-tags { padding: 0 0 8px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
     .detail-tag {
       background: var(--surface2);
       border-radius: 4px;
       padding: 2px 8px;
       font-size: 11px;
       color: var(--accent);
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
     }
+    .detail-tag .tag-remove {
+      cursor: pointer;
+      opacity: 0.5;
+      font-size: 10px;
+      line-height: 1;
+    }
+    .detail-tag .tag-remove:hover { opacity: 1; color: #f44; }
+    .tag-add-form {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+    }
+    .tag-add-form input {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 2px 6px;
+      font-size: 11px;
+      color: var(--text);
+      width: 80px;
+      outline: none;
+    }
+    .tag-add-form input:focus { border-color: var(--accent); }
+    .tag-add-form button {
+      background: var(--accent);
+      border: none;
+      border-radius: 4px;
+      padding: 2px 6px;
+      font-size: 10px;
+      color: #fff;
+      cursor: pointer;
+    }
+    .tag-extract-btn {
+      background: none;
+      border: 1px dashed var(--border);
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: 10px;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .tag-extract-btn:hover { border-color: var(--accent); color: var(--accent); }
 
     /* Detail voice stats */
     .detail-voice-stats {
@@ -933,7 +978,6 @@
     <div class="tab" data-tab="contacts">Contacts</div>
     <div class="tab" data-tab="tiers">Tiers</div>
     <div class="tab" data-tab="groups">Groups</div>
-    <div class="tab" data-tab="calendar">Calendar</div>
     <div class="tab" data-tab="messaging">Messaging</div>
     <div class="tab" data-tab="chats">Manage Chats</div>
   </div>
@@ -965,6 +1009,16 @@
         <div id="top-friends-list">
           <div class="chart-empty">No data yet.</div>
         </div>
+      </div>
+
+      <!-- Calendar (integrated into dashboard) -->
+      <div class="section">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+          <button id="cal-prev" class="header-btn secondary" style="font-size:11px;padding:5px 12px;">&larr;</button>
+          <div class="section-title" style="margin-bottom:0;" id="cal-month-title">--</div>
+          <button id="cal-next" class="header-btn secondary" style="font-size:11px;padding:5px 12px;">&rarr;</button>
+        </div>
+        <div id="calendar-grid" class="calendar-grid"></div>
       </div>
 
       <!-- Two-column grid for charts -->
@@ -1103,16 +1157,6 @@
         </div>
       </div>
 
-    </div>
-
-    <!-- ==================== Calendar Tab ==================== -->
-    <div id="tab-calendar" class="tab-content">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
-        <button id="cal-prev" class="header-btn secondary" style="font-size:11px;padding:5px 12px;">&larr; Prev</button>
-        <div class="section-title" style="margin-bottom:0;" id="cal-month-title">--</div>
-        <button id="cal-next" class="header-btn secondary" style="font-size:11px;padding:5px 12px;">Next &rarr;</button>
-      </div>
-      <div id="calendar-grid" class="calendar-grid"></div>
     </div>
 
     <!-- ==================== Messaging Tab ==================== -->
