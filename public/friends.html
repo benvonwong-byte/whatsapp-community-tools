@@ -132,6 +132,24 @@
     .neglected-card .name { font-size: 13px; font-weight: 600; color: var(--text); }
     .neglected-card .days { font-size: 11px; color: var(--red); }
     .neglected-card .group-tag { font-size: 10px; color: var(--text-dim); margin-left: 8px; }
+    .neglected-dismiss {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      font-size: 14px;
+      line-height: 1;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      margin-left: 8px;
+      transition: all 0.15s;
+    }
+    .neglected-dismiss:hover { border-color: var(--red); color: var(--red); background: rgba(214, 48, 49, 0.1); }
 
     /* Initiators list */
     .initiator-row {
@@ -891,15 +909,18 @@
     }
     .tf-nav-btn:hover { border-color: var(--accent); color: var(--accent); }
     .tf-nav-btn:disabled { opacity: 0.3; cursor: default; }
-    .tf-window-select {
+    .tf-window-btns { display: flex; gap: 2px; }
+    .tf-window-btn {
       background: var(--surface2);
       border: 1px solid var(--border);
       border-radius: 4px;
-      padding: 4px 8px;
+      padding: 4px 10px;
       font-size: 11px;
-      color: var(--text);
+      color: var(--muted);
       cursor: pointer;
     }
+    .tf-window-btn:hover { border-color: var(--accent); color: var(--text); }
+    .tf-window-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 
     /* Top friends leaderboard */
     .top-friend-row {
@@ -1030,19 +1051,19 @@
       </div>
 
       <!-- Top Friends leaderboard -->
-      <div class="section">
+      <div class="section" id="tf-section" tabindex="0" style="outline:none;">
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
-          <div class="section-title" style="margin:0;">Top 5 Friends</div>
-          <div style="display:flex;align-items:center;gap:4px;">
-            <button id="tf-prev" class="tf-nav-btn" title="Previous period">&larr;</button>
-            <select id="tf-window" class="tf-window-select">
-              <option value="7">7 days</option>
-              <option value="14">14 days</option>
-              <option value="30" selected>30 days</option>
-              <option value="60">60 days</option>
-              <option value="90">90 days</option>
-            </select>
-            <button id="tf-next" class="tf-nav-btn" title="Next period">&rarr;</button>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <button id="tf-prev" class="tf-nav-btn" title="Previous period (Left arrow)">&larr;</button>
+            <div class="section-title" style="margin:0;">Top 10 Friends</div>
+            <button id="tf-next" class="tf-nav-btn" title="Next period (Right arrow)">&rarr;</button>
+          </div>
+          <div class="tf-window-btns" id="tf-window-btns">
+            <button class="tf-window-btn" data-days="7">7d</button>
+            <button class="tf-window-btn active" data-days="14">14d</button>
+            <button class="tf-window-btn" data-days="30">30d</button>
+            <button class="tf-window-btn" data-days="60">60d</button>
+            <button class="tf-window-btn" data-days="90">90d</button>
           </div>
         </div>
         <div id="tf-date-range" style="font-size:10px;color:var(--muted);margin-bottom:6px;"></div>
@@ -1088,6 +1109,11 @@
             <select id="recip-sort" style="font-size:10px;padding:2px 4px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;">
               <option value="balance">Best Balance</option>
               <option value="volume">Most Messages</option>
+              <option value="most-sent">Most Sent</option>
+              <option value="most-received">Most Received</option>
+              <option value="least-active">Least Active</option>
+              <option value="worst-balance">Worst Balance</option>
+              <option value="name">Name A-Z</option>
             </select>
             <select id="recip-group-filter" style="font-size:10px;padding:2px 4px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;">
               <option value="">All Groups</option>

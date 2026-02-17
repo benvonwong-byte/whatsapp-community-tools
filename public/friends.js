@@ -79,6 +79,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupTierHandlers();
   setupGroupHandlers();
   setupCalendarHandlers();
+  _initNameEditHandlers();
 
   // Load initial tab
   loadDashboard();
@@ -168,66 +169,60 @@ function closeDetailPanel() {
   }
 }
 
-function setupNameEditing(contactId, currentDisplayName, existingDisplayName) {
+// Global state for name editing — avoids cloning/listener issues
+let _nameEditContactId = null;
+let _nameEditOriginal = "";
+
+function setupNameEditing(contactId, currentDisplayName) {
+  _nameEditContactId = contactId;
+  _nameEditOriginal = currentDisplayName;
+}
+
+function _initNameEditHandlers() {
   const nameEl = $("detail-name");
   const editDiv = $("detail-name-edit");
   const input = $("detail-name-input");
-  const saveBtn = $("detail-name-save");
-  const resetBtn = $("detail-name-reset");
-  const cancelBtn = $("detail-name-cancel");
+
   if (!nameEl || !editDiv || !input) return;
 
-  // Remove old listeners by cloning
-  const newNameEl = nameEl.cloneNode(true);
-  nameEl.parentNode.replaceChild(newNameEl, nameEl);
-
-  newNameEl.addEventListener("click", () => {
-    newNameEl.style.display = "none";
+  const showEdit = () => {
+    if (!_nameEditContactId) return;
+    nameEl.style.display = "none";
     editDiv.classList.remove("hidden");
-    input.value = currentDisplayName;
+    input.value = nameEl.textContent || _nameEditOriginal;
     input.focus();
     input.select();
-  });
+  };
 
-  const doCancel = () => {
+  const hideEdit = () => {
     editDiv.classList.add("hidden");
-    newNameEl.style.display = "";
+    nameEl.style.display = "";
   };
 
   const doSave = async (displayName) => {
+    if (!_nameEditContactId) return;
     try {
-      const res = await adminFetch("/api/friends/contacts/" + encodeURIComponent(contactId) + "/display-name", {
+      const res = await adminFetch("/api/friends/contacts/" + encodeURIComponent(_nameEditContactId) + "/display-name", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ display_name: displayName }),
       });
       if (!res.ok) throw new Error("Failed");
-      newNameEl.textContent = displayName || currentDisplayName;
-      doCancel();
+      nameEl.textContent = displayName || _nameEditOriginal;
+      hideEdit();
     } catch (err) {
       console.error("Failed to save display name:", err);
+      alert("Failed to save name");
     }
   };
 
-  if (saveBtn) {
-    const newSave = saveBtn.cloneNode(true);
-    saveBtn.parentNode.replaceChild(newSave, saveBtn);
-    newSave.addEventListener("click", () => doSave(input.value.trim()));
-  }
-  if (resetBtn) {
-    const newReset = resetBtn.cloneNode(true);
-    resetBtn.parentNode.replaceChild(newReset, resetBtn);
-    newReset.addEventListener("click", () => doSave(null));
-  }
-  if (cancelBtn) {
-    const newCancel = cancelBtn.cloneNode(true);
-    cancelBtn.parentNode.replaceChild(newCancel, cancelBtn);
-    newCancel.addEventListener("click", doCancel);
-  }
-
+  nameEl.addEventListener("click", showEdit);
+  $("detail-name-save")?.addEventListener("click", () => doSave(input.value.trim()));
+  $("detail-name-reset")?.addEventListener("click", () => doSave(null));
+  $("detail-name-cancel")?.addEventListener("click", hideEdit);
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter") { e.preventDefault(); doSave(input.value.trim()); }
-    if (e.key === "Escape") doCancel();
+    if (e.key === "Escape") hideEdit();
   });
 }
 
@@ -372,10 +367,30 @@ function renderNeglectedList(contactsList) {
     return '<div class="neglected-card" data-contact-id="' + esc(c.id) + '" style="cursor:pointer;">' +
       '<span class="neglected-name">' + esc(c.name) + '</span>' +
       '<span class="neglected-time">' + esc(label) + '</span>' +
+      '<button class="neglected-dismiss" title="Dismiss from neglected list" data-dismiss-id="' + esc(c.id) + '">&times;</button>' +
     '</div>';
   }).join("");
   container.querySelectorAll("[data-contact-id]").forEach(el => {
-    el.addEventListener("click", () => { if (el.dataset.contactId) openContactDetail(el.dataset.contactId); });
+    el.addEventListener("click", (e) => {
+      if (e.target.classList.contains("neglected-dismiss")) return;
+      if (el.dataset.contactId) openContactDetail(el.dataset.contactId);
+    });
+  });
+  container.querySelectorAll(".neglected-dismiss").forEach(btn => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.dismissId;
+      if (!id) return;
+      try {
+        await adminFetch("/api/friends/contacts/" + encodeURIComponent(id) + "/dismiss-neglected", { method: "POST" });
+        btn.closest(".neglected-card")?.remove();
+        if (container.querySelectorAll(".neglected-card").length === 0) {
+          container.innerHTML = '<div class="empty-state">No neglected contacts</div>';
+        }
+      } catch (err) {
+        console.error("Dismiss failed:", err);
+      }
+    });
   });
 }
 
@@ -407,7 +422,7 @@ function renderInitiatorsList(data) {
 
 // ── Top Friends (time-browsable) ──
 
-let tfWindowDays = 30;
+let tfWindowDays = 14;
 let tfOffsetDays = 0;
 let tfNavBound = false;
 
@@ -415,17 +430,21 @@ function setupTopFriendsNav() {
   if (tfNavBound) return;
   tfNavBound = true;
 
-  const windowSel = $("tf-window");
   const prevBtn = $("tf-prev");
   const nextBtn = $("tf-next");
+  const section = $("tf-section");
 
-  if (windowSel) {
-    windowSel.addEventListener("change", () => {
-      tfWindowDays = parseInt(windowSel.value);
-      tfOffsetDays = 0; // reset to current period
+  // Window buttons
+  document.querySelectorAll(".tf-window-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      tfWindowDays = parseInt(btn.dataset.days);
+      tfOffsetDays = 0;
+      document.querySelectorAll(".tf-window-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
       loadTopFriends();
     });
-  }
+  });
+
   if (prevBtn) {
     prevBtn.addEventListener("click", () => {
       tfOffsetDays += tfWindowDays;
@@ -438,6 +457,23 @@ function setupTopFriendsNav() {
       loadTopFriends();
     });
   }
+
+  // Keyboard navigation (left/right arrows)
+  if (section) {
+    section.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        tfOffsetDays += tfWindowDays;
+        loadTopFriends();
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        tfOffsetDays = Math.max(0, tfOffsetDays - tfWindowDays);
+        loadTopFriends();
+      }
+    });
+    // Auto-focus when scrolled into view
+    section.addEventListener("mouseenter", () => section.focus());
+  }
 }
 
 async function loadTopFriends() {
@@ -446,7 +482,7 @@ async function loadTopFriends() {
   const nextBtn = $("tf-next");
 
   try {
-    const res = await adminFetch("/api/friends/top-friends?days=" + tfWindowDays + "&offset=" + tfOffsetDays);
+    const res = await adminFetch("/api/friends/top-friends?days=" + tfWindowDays + "&offset=" + tfOffsetDays + "&limit=10");
     if (!res.ok) throw new Error("Failed");
     const data = await res.json();
 
@@ -556,6 +592,16 @@ function filterAndRenderReciprocity() {
 
   if (sortMode === "balance") {
     filtered.sort((a, b) => b.ratio - a.ratio);
+  } else if (sortMode === "most-sent") {
+    filtered.sort((a, b) => b.sent - a.sent);
+  } else if (sortMode === "most-received") {
+    filtered.sort((a, b) => b.received - a.received);
+  } else if (sortMode === "least-active") {
+    filtered.sort((a, b) => (a.sent + a.received) - (b.sent + b.received));
+  } else if (sortMode === "worst-balance") {
+    filtered.sort((a, b) => a.ratio - b.ratio);
+  } else if (sortMode === "name") {
+    filtered.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
   } else {
     filtered.sort((a, b) => (b.sent + b.received) - (a.sent + a.received));
   }
@@ -899,15 +945,15 @@ async function openContactDetail(contactId) {
 
     // Populate detail panel with editable name
     const displayName = contact.name || "Unknown";
-    if (nameEl) {
-      nameEl.textContent = displayName;
-      nameEl.style.display = "";
+    const nameDisplay = $("detail-name");
+    if (nameDisplay) {
+      nameDisplay.textContent = displayName;
+      nameDisplay.style.display = "";
     }
     const nameEdit = $("detail-name-edit");
     if (nameEdit) nameEdit.classList.add("hidden");
 
-    // Setup name editing (contact.name is COALESCE'd, contact.original_name is raw WA name)
-    setupNameEditing(contactId, displayName, contact.display_name);
+    setupNameEditing(contactId, displayName);
 
     const detailStats = $("detail-stats");
     if (detailStats) {

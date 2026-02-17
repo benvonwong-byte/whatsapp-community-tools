@@ -159,6 +159,16 @@ export function createFriendsRouter(
     res.json({ ok: true });
   });
 
+  router.post("/contacts/:id/dismiss-neglected", (req: Request, res: Response) => {
+    store.dismissNeglectedContact(decodeURIComponent(req.params.id as string));
+    res.json({ ok: true });
+  });
+
+  router.delete("/contacts/:id/dismiss-neglected", (req: Request, res: Response) => {
+    store.undismissNeglectedContact(decodeURIComponent(req.params.id as string));
+    res.json({ ok: true });
+  });
+
   router.get("/contacts/:id/voice", (req: Request, res: Response) => {
     const contactId = decodeURIComponent(req.params.id as string);
     const notes = store.getVoiceNotesByContact(contactId);

@@ -262,6 +262,11 @@ export class FriendsStore {
       this.db.exec(`ALTER TABLE friends_contacts ADD COLUMN display_name TEXT DEFAULT NULL`);
     } catch { /* column already exists */ }
 
+    // Migration: add hidden_from_neglected column
+    try {
+      this.db.exec(`ALTER TABLE friends_contacts ADD COLUMN hidden_from_neglected INTEGER DEFAULT 0`);
+    } catch { /* column already exists */ }
+
     // Seed default tiers if none exist
     const tierCount = (this.db.prepare(`SELECT COUNT(*) as c FROM friends_tiers`).get() as any).c;
     if (tierCount === 0) {
@@ -487,9 +492,18 @@ export class FriendsStore {
     return this.db.prepare(`
       SELECT *, COALESCE(display_name, name) as name FROM friends_contacts
       WHERE last_seen < ? AND last_seen > 0 AND id NOT LIKE '%@broadcast'
+        AND COALESCE(hidden_from_neglected, 0) = 0
       ORDER BY last_seen ASC
       LIMIT 20
     `).all(cutoff) as FriendsContact[];
+  }
+
+  dismissNeglectedContact(contactId: string): void {
+    this.db.prepare(`UPDATE friends_contacts SET hidden_from_neglected = 1 WHERE id = ?`).run(contactId);
+  }
+
+  undismissNeglectedContact(contactId: string): void {
+    this.db.prepare(`UPDATE friends_contacts SET hidden_from_neglected = 0 WHERE id = ?`).run(contactId);
   }
 
   getTopInitiators(limit: number): Array<{ contact_id: string; name: string; my_initiations: number; their_initiations: number }> {
