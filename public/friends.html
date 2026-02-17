@@ -879,6 +879,28 @@
     /* Dashboard 2-col grid */
     .dash-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
 
+    /* Top friends navigation */
+    .tf-nav-btn {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 4px 10px;
+      font-size: 12px;
+      color: var(--text);
+      cursor: pointer;
+    }
+    .tf-nav-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .tf-nav-btn:disabled { opacity: 0.3; cursor: default; }
+    .tf-window-select {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 4px 8px;
+      font-size: 11px;
+      color: var(--text);
+      cursor: pointer;
+    }
+
     /* Top friends leaderboard */
     .top-friend-row {
       display: flex; align-items: center; gap: 12px;
@@ -1009,7 +1031,21 @@
 
       <!-- Top Friends leaderboard -->
       <div class="section">
-        <div class="section-title">Top 5 Friends (30d)</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
+          <div class="section-title" style="margin:0;">Top 5 Friends</div>
+          <div style="display:flex;align-items:center;gap:4px;">
+            <button id="tf-prev" class="tf-nav-btn" title="Previous period">&larr;</button>
+            <select id="tf-window" class="tf-window-select">
+              <option value="7">7 days</option>
+              <option value="14">14 days</option>
+              <option value="30" selected>30 days</option>
+              <option value="60">60 days</option>
+              <option value="90">90 days</option>
+            </select>
+            <button id="tf-next" class="tf-nav-btn" title="Next period">&rarr;</button>
+          </div>
+        </div>
+        <div id="tf-date-range" style="font-size:10px;color:var(--muted);margin-bottom:6px;"></div>
         <div id="top-friends-list">
           <div class="chart-empty">No data yet.</div>
         </div>

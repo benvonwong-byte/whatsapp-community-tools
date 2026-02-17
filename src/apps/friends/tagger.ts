@@ -2,11 +2,19 @@ import Anthropic from "@anthropic-ai/sdk";
 import { FriendsStore } from "./store";
 import { config } from "../../config";
 
-const TAG_PROMPT = `Analyze these messages from a WhatsApp contact and extract relevant topic tags that describe what this person talks about, their interests, and conversation themes.
+const TAG_PROMPT = `Analyze these WhatsApp messages from a contact and extract rich context tags across multiple categories.
 
-Return ONLY a JSON array of lowercase tag strings (3-15 tags). Examples: ["music", "tech", "travel", "crypto", "fitness", "philosophy", "food", "art", "politics", "startups", "meditation", "parenting"]
+Return ONLY a JSON object with these category keys, each containing an array of lowercase tag strings:
 
-Focus on recurring themes, not one-off mentions. Keep tags concise (1-2 words each).
+{
+  "topics": ["..."],      // What you talk about: interests, projects, subjects (3-8 tags)
+  "location": ["..."],    // Places mentioned: cities, countries, neighborhoods (0-3 tags)
+  "context": ["..."],     // How you know them: "work", "college friend", "met at conference", "mutual friend" (1-3 tags)
+  "tone": ["..."],        // Conversation style: "deep talks", "casual banter", "advice seeker", "supportive", "intellectual", "humorous" (1-3 tags)
+  "emotion": ["..."]      // Emotional quality: "warm", "energetic", "thoughtful", "inspiring", "vulnerable" (1-2 tags)
+}
+
+Focus on recurring patterns, not one-off mentions. Keep each tag 1-3 words. Be specific and insightful.
 
 Messages:
 `;
@@ -44,16 +52,58 @@ export async function runTagExtraction(store: FriendsStore): Promise<number> {
       });
 
       const text = response.content[0].type === "text" ? response.content[0].text : "";
-      const match = text.match(/\[[\s\S]*\]/);
-      if (match) {
-        const tags: string[] = JSON.parse(match[0]);
-        const latestTs = messages[messages.length - 1]?.timestamp || Math.floor(Date.now() / 1000);
-        for (const tag of tags) {
-          if (typeof tag === "string" && tag.trim().length > 0) {
-            store.addContactTag(contact_id, tag.trim(), latestTs);
+      const latestTs = messages[messages.length - 1]?.timestamp || Math.floor(Date.now() / 1000);
+
+      // Try parsing as categorized JSON object first
+      const objMatch = text.match(/\{[\s\S]*\}/);
+      if (objMatch) {
+        try {
+          const parsed = JSON.parse(objMatch[0]);
+          let tagCount = 0;
+          const categoryPrefixes: Record<string, string> = {
+            topics: "",
+            location: "loc:",
+            context: "ctx:",
+            tone: "tone:",
+            emotion: "emo:",
+          };
+          for (const [category, prefix] of Object.entries(categoryPrefixes)) {
+            const tags = parsed[category];
+            if (Array.isArray(tags)) {
+              for (const tag of tags) {
+                if (typeof tag === "string" && tag.trim().length > 0) {
+                  store.addContactTag(contact_id, prefix + tag.trim().toLowerCase(), latestTs);
+                  tagCount++;
+                }
+              }
+            }
+          }
+          console.log(`[tagger] ${contact_id}: extracted ${tagCount} categorized tags from ${message_count} messages`);
+        } catch {
+          // Fall back to array format
+          const arrMatch = text.match(/\[[\s\S]*\]/);
+          if (arrMatch) {
+            const tags: string[] = JSON.parse(arrMatch[0]);
+            for (const tag of tags) {
+              if (typeof tag === "string" && tag.trim().length > 0) {
+                store.addContactTag(contact_id, tag.trim(), latestTs);
+              }
+            }
+            console.log(`[tagger] ${contact_id}: extracted ${tags.length} tags from ${message_count} messages`);
           }
         }
-        console.log(`[tagger] ${contact_id}: extracted ${tags.length} tags from ${message_count} messages`);
+      } else {
+        // Fall back to flat array
+        const arrMatch = text.match(/\[[\s\S]*\]/);
+        if (arrMatch) {
+          const tags: string[] = JSON.parse(arrMatch[0]);
+          for (const tag of tags) {
+            if (typeof tag === "string" && tag.trim().length > 0) {
+              store.addContactTag(contact_id, tag.trim(), latestTs);
+            }
+          }
+          console.log(`[tagger] ${contact_id}: extracted ${tags.length} tags from ${message_count} messages`);
+        }
       }
 
       // Clear buffer (bodies permanently deleted after extraction)

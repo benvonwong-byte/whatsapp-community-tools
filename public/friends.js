@@ -262,7 +262,8 @@ async function loadDashboard() {
     renderSummaryCards(data.stats, data.voiceTotal);
     renderWeeklyChart(data.weeklyVolume);
     renderHourlyChart(data.hourly);
-    renderTopFriends(data.topFriends);
+    setupTopFriendsNav();
+    loadTopFriends();
     renderReciprocity(data.reciprocity);
     renderStreaks(data.streaks);
     renderFastResponders(data.fastResponders);
@@ -404,18 +405,75 @@ function renderInitiatorsList(data) {
   });
 }
 
-// ── Top Friends ──
+// ── Top Friends (time-browsable) ──
+
+let tfWindowDays = 30;
+let tfOffsetDays = 0;
+let tfNavBound = false;
+
+function setupTopFriendsNav() {
+  if (tfNavBound) return;
+  tfNavBound = true;
+
+  const windowSel = $("tf-window");
+  const prevBtn = $("tf-prev");
+  const nextBtn = $("tf-next");
+
+  if (windowSel) {
+    windowSel.addEventListener("change", () => {
+      tfWindowDays = parseInt(windowSel.value);
+      tfOffsetDays = 0; // reset to current period
+      loadTopFriends();
+    });
+  }
+  if (prevBtn) {
+    prevBtn.addEventListener("click", () => {
+      tfOffsetDays += tfWindowDays;
+      loadTopFriends();
+    });
+  }
+  if (nextBtn) {
+    nextBtn.addEventListener("click", () => {
+      tfOffsetDays = Math.max(0, tfOffsetDays - tfWindowDays);
+      loadTopFriends();
+    });
+  }
+}
+
+async function loadTopFriends() {
+  const container = $("top-friends-list");
+  const rangeEl = $("tf-date-range");
+  const nextBtn = $("tf-next");
+
+  try {
+    const res = await adminFetch("/api/friends/top-friends?days=" + tfWindowDays + "&offset=" + tfOffsetDays);
+    if (!res.ok) throw new Error("Failed");
+    const data = await res.json();
+
+    // Update date range label
+    if (rangeEl && data.dateRange) {
+      rangeEl.textContent = data.dateRange.start + " \u2192 " + data.dateRange.end;
+    }
+
+    // Disable "next" if at current period
+    if (nextBtn) nextBtn.disabled = tfOffsetDays <= 0;
+
+    renderTopFriends(data.friends);
+  } catch (err) {
+    if (container) container.innerHTML = '<div class="chart-empty">Failed to load.</div>';
+  }
+}
 
 function renderTopFriends(data) {
   const container = $("top-friends-list");
   if (!container) return;
   if (!data || data.length === 0) {
-    container.innerHTML = '<div class="chart-empty">No data yet.</div>';
+    container.innerHTML = '<div class="chart-empty">No data for this period.</div>';
     return;
   }
   container.innerHTML = data.map((f, i) => {
     const rankClass = i === 0 ? "gold" : i === 1 ? "silver" : i === 2 ? "bronze" : "";
-    const diff = f.messages_30d - (f.messages_prev30d || 0);
+    const diff = (f.messages || 0) - (f.messages_prev || 0);
     const trendClass = diff > 0 ? "up" : diff < 0 ? "down" : "flat";
     const trendIcon = diff > 0 ? "\u25B2" : diff < 0 ? "\u25BC" : "\u2022";
     const trendLabel = diff !== 0 ? " " + Math.abs(diff) : "";
@@ -425,13 +483,12 @@ function renderTopFriends(data) {
         '<div class="top-friend-name">' + esc(f.name) + '</div>' +
       '</div>' +
       '<div>' +
-        '<span class="top-friend-count">' + f.messages_30d + '</span>' +
+        '<span class="top-friend-count">' + (f.messages || 0) + '</span>' +
         '<span class="top-friend-trend ' + trendClass + '">' + trendIcon + trendLabel + '</span>' +
       '</div>' +
     '</div>';
   }).join("");
 
-  // Make rows clickable to open detail panel
   container.querySelectorAll(".top-friend-row").forEach(row => {
     row.addEventListener("click", () => {
       const id = row.dataset.contactId;
@@ -716,10 +773,11 @@ function renderTagFilters(tags) {
     if (container) container.innerHTML = '';
     return;
   }
-  let html = tags.slice(0, 20).map(t => {
+  let html = tags.slice(0, 30).map(t => {
     const active = activeTagFilters.has(t.name) ? ' active' : '';
-    return '<span class="tag-chip' + active + '" data-tag="' + esc(t.name) + '">' +
-      esc(t.name) + ' <span class="tag-count">' + t.contact_count + '</span>' +
+    const p = parseTagCategory(t.name);
+    return '<span class="tag-chip' + active + '" data-tag="' + esc(t.name) + '" style="' + (active ? '' : 'border-color:' + p.color + '40;color:' + p.color + ';') + '">' +
+      esc(p.label) + ' <span class="tag-count">' + t.contact_count + '</span>' +
     '</span>';
   }).join("");
 
@@ -767,7 +825,7 @@ function renderContactsTable(data) {
       ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + esc(c.tier_color) + ';margin-right:4px;"></span>'
       : '';
     const tagChips = c.tag_names
-      ? c.tag_names.split(', ').slice(0, 3).map(t => '<span class="detail-tag" style="font-size:9px;padding:1px 5px;">' + esc(t) + '</span>').join('')
+      ? c.tag_names.split(', ').slice(0, 3).map(t => { const p = parseTagCategory(t); return '<span class="detail-tag" style="font-size:9px;padding:1px 5px;background:' + p.color + '20;color:' + p.color + ';border:1px solid ' + p.color + '40;">' + esc(p.label) + '</span>'; }).join('')
       : '';
     return '<tr class="contact-row" data-id="' + esc(String(c.id)) + '">' +
       '<td class="contact-name-cell"><strong>' + esc(c.name) + '</strong>' + (tagChips ? '<div style="margin-top:2px;">' + tagChips + '</div>' : '') + '</td>' +
@@ -982,17 +1040,35 @@ function renderDetailChart(data) {
 
 // ── Detail Tags (editable) ──
 
+const TAG_COLORS = {
+  "loc:": "#4fc3f7",    // location - blue
+  "ctx:": "#81c784",    // context - green
+  "tone:": "#ffb74d",   // tone - orange
+  "emo:": "#f06292",    // emotion - pink
+  "": "#b39ddb",        // topics (no prefix) - purple
+};
+
+function parseTagCategory(name) {
+  for (const [prefix, color] of Object.entries(TAG_COLORS)) {
+    if (prefix && name.startsWith(prefix)) {
+      return { label: name.slice(prefix.length), color, category: prefix.slice(0, -1) };
+    }
+  }
+  return { label: name, color: TAG_COLORS[""], category: "topic" };
+}
+
 function renderDetailTags(contactId, tags) {
   const container = $("detail-tags");
   if (!container) return;
 
-  let html = tags.map((t) =>
-    '<span class="detail-tag" data-tag-id="' + t.tag_id + '">' +
-      esc(t.name) +
+  let html = tags.map((t) => {
+    const { label, color } = parseTagCategory(t.name);
+    return '<span class="detail-tag" data-tag-id="' + t.tag_id + '" style="background:' + color + '20;color:' + color + ';border:1px solid ' + color + '40;">' +
+      esc(label) +
       (t.mention_count > 1 ? ' <small>(' + t.mention_count + ')</small>' : '') +
       ' <span class="tag-remove" data-contact="' + esc(contactId) + '" data-tag-id="' + t.tag_id + '">&times;</span>' +
-    '</span>'
-  ).join("");
+    '</span>';
+  }).join("");
 
   html += '<span class="tag-add-form">' +
     '<input type="text" id="tag-add-input" placeholder="+ add tag" maxlength="40">' +

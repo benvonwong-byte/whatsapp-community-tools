@@ -44,6 +44,28 @@ export function createFriendsRouter(
       topFriends, reciprocity, streaks, hourly, fastResponders, mostBalanced });
   });
 
+  // ── Top Friends (time-browsable) ──
+
+  router.get("/top-friends", (req: Request, res: Response) => {
+    const days = parseInt(req.query.days as string) || 30;
+    const offset = parseInt(req.query.offset as string) || 0;
+    const limit = parseInt(req.query.limit as string) || 5;
+    const topFriends = store.getTopFriends(Math.min(limit, 20), days, offset);
+
+    // Compute date labels for the window
+    const now = new Date();
+    const windowEnd = new Date(now.getTime() - offset * 86400000);
+    const windowStart = new Date(windowEnd.getTime() - days * 86400000);
+    res.json({
+      friends: topFriends,
+      window: { days, offset },
+      dateRange: {
+        start: windowStart.toISOString().slice(0, 10),
+        end: windowEnd.toISOString().slice(0, 10),
+      },
+    });
+  });
+
   // ── Contacts ──
 
   router.get("/contacts", (req: Request, res: Response) => {

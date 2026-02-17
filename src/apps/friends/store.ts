@@ -994,16 +994,17 @@ export class FriendsStore {
 
   // ── Enhanced Dashboard Analytics ──
 
-  /** Top 5 friends by message volume (30d) with trend — DM chats only */
-  getTopFriends(limit = 5): Array<{ id: string; name: string; messages_30d: number; messages_prev30d: number; tier_color: string | null }> {
+  /** Top friends by message volume within a time window — DM chats only */
+  getTopFriends(limit = 5, windowDays = 30, offsetDays = 0): Array<{ id: string; name: string; messages: number; messages_prev: number; tier_color: string | null }> {
     const now = Math.floor(Date.now() / 1000);
-    const d30 = now - 30 * 86400;
-    const d60 = now - 60 * 86400;
+    const windowEnd = now - offsetDays * 86400;
+    const windowStart = windowEnd - windowDays * 86400;
+    const prevStart = windowStart - windowDays * 86400;
     return this.db.prepare(`
       SELECT
         c.id, COALESCE(c.display_name, c.name) as name,
-        SUM(CASE WHEN m.timestamp >= ? THEN 1 ELSE 0 END) as messages_30d,
-        SUM(CASE WHEN m.timestamp >= ? AND m.timestamp < ? THEN 1 ELSE 0 END) as messages_prev30d,
+        SUM(CASE WHEN m.timestamp >= ? AND m.timestamp < ? THEN 1 ELSE 0 END) as messages,
+        SUM(CASE WHEN m.timestamp >= ? AND m.timestamp < ? THEN 1 ELSE 0 END) as messages_prev,
         t.color as tier_color
       FROM friends_contacts c
       JOIN friends_chats ch ON ch.chat_id = c.id AND ch.is_group = 0
@@ -1012,9 +1013,9 @@ export class FriendsStore {
       WHERE m.timestamp >= ?
         AND c.id NOT LIKE '%@broadcast'
       GROUP BY c.id
-      ORDER BY messages_30d DESC
+      ORDER BY messages DESC
       LIMIT ?
-    `).all(d30, d60, d30, d60, limit) as any[];
+    `).all(windowStart, windowEnd, prevStart, windowStart, prevStart, limit) as any[];
   }
 
   /** Reciprocity stats per contact — sent/received balance (DM only), sorted by healthiest balance */
