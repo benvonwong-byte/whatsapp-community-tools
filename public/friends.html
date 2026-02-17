@@ -553,6 +553,10 @@
       font-weight: 700;
       margin-bottom: 4px;
     }
+    .detail-name:hover { color: var(--accent); }
+    .detail-name-edit { margin-bottom: 8px; }
+    .detail-name-edit.hidden { display: none;
+    }
     .detail-groups {
       font-size: 11px;
       color: var(--text-dim);
@@ -1044,6 +1048,18 @@
       <div class="dash-grid-2">
         <div class="section">
           <div class="section-title">Message Balance</div>
+          <div id="recip-filters" style="display:flex;gap:4px;margin-bottom:6px;flex-wrap:wrap;">
+            <select id="recip-sort" style="font-size:10px;padding:2px 4px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;">
+              <option value="balance">Best Balance</option>
+              <option value="volume">Most Messages</option>
+            </select>
+            <select id="recip-group-filter" style="font-size:10px;padding:2px 4px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;">
+              <option value="">All Groups</option>
+            </select>
+            <select id="recip-tag-filter" style="font-size:10px;padding:2px 4px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;">
+              <option value="">All Tags</option>
+            </select>
+          </div>
           <div id="reciprocity-list">
             <div class="chart-empty">No data yet.</div>
           </div>
@@ -1226,7 +1242,15 @@
       <button class="close-btn" id="detail-close">&times;</button>
     </div>
     <div class="detail-body">
-      <div id="detail-name" class="detail-name">--</div>
+      <div id="detail-name" class="detail-name" style="cursor:pointer;" title="Click to edit display name">--</div>
+      <div id="detail-name-edit" class="detail-name-edit hidden">
+        <input type="text" id="detail-name-input" placeholder="Display name..." style="background:var(--surface2);border:1px solid var(--accent);border-radius:4px;padding:4px 8px;font-size:16px;font-weight:600;color:var(--text);width:100%;outline:none;">
+        <div style="display:flex;gap:4px;margin-top:4px;">
+          <button id="detail-name-save" style="font-size:10px;padding:2px 8px;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;">Save</button>
+          <button id="detail-name-reset" style="font-size:10px;padding:2px 8px;background:var(--surface2);color:var(--muted);border:1px solid var(--border);border-radius:4px;cursor:pointer;">Reset to Original</button>
+          <button id="detail-name-cancel" style="font-size:10px;padding:2px 8px;background:var(--surface2);color:var(--muted);border:1px solid var(--border);border-radius:4px;cursor:pointer;">Cancel</button>
+        </div>
+      </div>
       <div id="detail-groups" class="detail-groups">No groups</div>
 
       <div id="detail-tags" class="detail-tags"></div>

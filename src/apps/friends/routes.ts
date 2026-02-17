@@ -124,6 +124,13 @@ export function createFriendsRouter(
     res.json({ ok: true });
   });
 
+  router.put("/contacts/:id/display-name", (req: Request, res: Response) => {
+    const contactId = decodeURIComponent(req.params.id as string);
+    const displayName = req.body.display_name;
+    store.updateDisplayName(contactId, typeof displayName === "string" ? displayName.trim() || null : null);
+    res.json({ ok: true });
+  });
+
   router.put("/contacts/:id/tier", (req: Request, res: Response) => {
     const tierId = req.body.tier_id;
     store.setContactTier(decodeURIComponent(req.params.id as string), tierId ?? null);

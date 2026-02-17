@@ -168,6 +168,69 @@ function closeDetailPanel() {
   }
 }
 
+function setupNameEditing(contactId, currentDisplayName, existingDisplayName) {
+  const nameEl = $("detail-name");
+  const editDiv = $("detail-name-edit");
+  const input = $("detail-name-input");
+  const saveBtn = $("detail-name-save");
+  const resetBtn = $("detail-name-reset");
+  const cancelBtn = $("detail-name-cancel");
+  if (!nameEl || !editDiv || !input) return;
+
+  // Remove old listeners by cloning
+  const newNameEl = nameEl.cloneNode(true);
+  nameEl.parentNode.replaceChild(newNameEl, nameEl);
+
+  newNameEl.addEventListener("click", () => {
+    newNameEl.style.display = "none";
+    editDiv.classList.remove("hidden");
+    input.value = currentDisplayName;
+    input.focus();
+    input.select();
+  });
+
+  const doCancel = () => {
+    editDiv.classList.add("hidden");
+    newNameEl.style.display = "";
+  };
+
+  const doSave = async (displayName) => {
+    try {
+      const res = await adminFetch("/api/friends/contacts/" + encodeURIComponent(contactId) + "/display-name", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ display_name: displayName }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      newNameEl.textContent = displayName || currentDisplayName;
+      doCancel();
+    } catch (err) {
+      console.error("Failed to save display name:", err);
+    }
+  };
+
+  if (saveBtn) {
+    const newSave = saveBtn.cloneNode(true);
+    saveBtn.parentNode.replaceChild(newSave, saveBtn);
+    newSave.addEventListener("click", () => doSave(input.value.trim()));
+  }
+  if (resetBtn) {
+    const newReset = resetBtn.cloneNode(true);
+    resetBtn.parentNode.replaceChild(newReset, resetBtn);
+    newReset.addEventListener("click", () => doSave(null));
+  }
+  if (cancelBtn) {
+    const newCancel = cancelBtn.cloneNode(true);
+    cancelBtn.parentNode.replaceChild(newCancel, cancelBtn);
+    newCancel.addEventListener("click", doCancel);
+  }
+
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); doSave(input.value.trim()); }
+    if (e.key === "Escape") doCancel();
+  });
+}
+
 // ── Contact Filters ──
 
 function setupContactFilters() {
@@ -305,11 +368,14 @@ function renderNeglectedList(contactsList) {
   container.innerHTML = contactsList.map((c) => {
     const daysAgo = c.last_seen ? Math.floor((Date.now() / 1000 - c.last_seen) / 86400) : null;
     const label = daysAgo !== null ? daysAgo + " days ago" : "never";
-    return '<div class="neglected-card">' +
+    return '<div class="neglected-card" data-contact-id="' + esc(c.id) + '" style="cursor:pointer;">' +
       '<span class="neglected-name">' + esc(c.name) + '</span>' +
       '<span class="neglected-time">' + esc(label) + '</span>' +
     '</div>';
   }).join("");
+  container.querySelectorAll("[data-contact-id]").forEach(el => {
+    el.addEventListener("click", () => { if (el.dataset.contactId) openContactDetail(el.dataset.contactId); });
+  });
 }
 
 function renderInitiatorsList(data) {
@@ -325,7 +391,7 @@ function renderInitiatorsList(data) {
     const total = myInit + theirInit || 1;
     const myPct = Math.round((myInit / total) * 100);
     const theirPct = 100 - myPct;
-    return '<div class="initiator-row">' +
+    return '<div class="initiator-row" data-contact-id="' + esc(item.contact_id || '') + '" style="cursor:pointer;">' +
       '<div class="initiator-name">' + esc(item.name) + '</div>' +
       '<div class="initiator-bar-bg">' +
         '<div class="initiator-bar-fill" style="width:' + myPct + '%"></div>' +
@@ -333,6 +399,9 @@ function renderInitiatorsList(data) {
       '<div class="initiator-value">' + myPct + '%</div>' +
     '</div>';
   }).join("");
+  container.querySelectorAll("[data-contact-id]").forEach(el => {
+    el.addEventListener("click", () => { if (el.dataset.contactId) openContactDetail(el.dataset.contactId); });
+  });
 }
 
 // ── Top Friends ──
@@ -373,18 +442,77 @@ function renderTopFriends(data) {
 
 // ── Reciprocity (Message Balance) ──
 
+let reciprocityData = [];
+
 function renderReciprocity(data) {
+  reciprocityData = data || [];
+  populateRecipFilters(reciprocityData);
+  filterAndRenderReciprocity();
+}
+
+function populateRecipFilters(data) {
+  const groupSel = $("recip-group-filter");
+  const tagSel = $("recip-tag-filter");
+  if (groupSel) {
+    const groups = new Set();
+    data.forEach(r => (r.group_names || "").split(", ").filter(Boolean).forEach(g => groups.add(g)));
+    groupSel.innerHTML = '<option value="">All Groups</option>' +
+      [...groups].sort().map(g => '<option value="' + esc(g) + '">' + esc(g) + '</option>').join("");
+  }
+  if (tagSel) {
+    const tags = new Set();
+    data.forEach(r => (r.tag_names || "").split(", ").filter(Boolean).forEach(t => tags.add(t)));
+    tagSel.innerHTML = '<option value="">All Tags</option>' +
+      [...tags].sort().map(t => '<option value="' + esc(t) + '">' + esc(t) + '</option>').join("");
+  }
+  // Attach change listeners (only once)
+  if (!groupSel?.dataset.bound) {
+    groupSel?.addEventListener("change", filterAndRenderReciprocity);
+    if (groupSel) groupSel.dataset.bound = "1";
+  }
+  if (!tagSel?.dataset.bound) {
+    tagSel?.addEventListener("change", filterAndRenderReciprocity);
+    if (tagSel) tagSel.dataset.bound = "1";
+  }
+  const sortSel = $("recip-sort");
+  if (sortSel && !sortSel.dataset.bound) {
+    sortSel.addEventListener("change", filterAndRenderReciprocity);
+    sortSel.dataset.bound = "1";
+  }
+}
+
+function filterAndRenderReciprocity() {
   const container = $("reciprocity-list");
   if (!container) return;
-  if (!data || data.length === 0) {
-    container.innerHTML = '<div class="chart-empty">No data yet.</div>';
+
+  let filtered = [...reciprocityData];
+  const groupFilter = $("recip-group-filter")?.value;
+  const tagFilter = $("recip-tag-filter")?.value;
+  const sortMode = $("recip-sort")?.value || "balance";
+
+  if (groupFilter) {
+    filtered = filtered.filter(r => (r.group_names || "").includes(groupFilter));
+  }
+  if (tagFilter) {
+    filtered = filtered.filter(r => (r.tag_names || "").includes(tagFilter));
+  }
+
+  if (sortMode === "balance") {
+    filtered.sort((a, b) => b.ratio - a.ratio);
+  } else {
+    filtered.sort((a, b) => (b.sent + b.received) - (a.sent + a.received));
+  }
+
+  if (filtered.length === 0) {
+    container.innerHTML = '<div class="chart-empty">No data matching filters.</div>';
     return;
   }
-  container.innerHTML = data.slice(0, 10).map(r => {
+
+  container.innerHTML = filtered.slice(0, 15).map(r => {
     const total = r.sent + r.received || 1;
     const sentPct = Math.round((r.sent / total) * 100);
     const recvPct = 100 - sentPct;
-    return '<div class="recip-row">' +
+    return '<div class="recip-row" data-contact-id="' + esc(r.id) + '" style="cursor:pointer;">' +
       '<div class="recip-name">' + esc(r.name) + '</div>' +
       '<div class="recip-bar">' +
         '<div class="recip-bar-sent" style="width:' + sentPct + '%" title="Sent: ' + r.sent + '"></div>' +
@@ -398,6 +526,14 @@ function renderReciprocity(data) {
     '<span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--green);margin-right:3px;"></span>Received</span>' +
     '<span style="margin-left:auto;">% = balance (100=perfect)</span>' +
   '</div>';
+
+  // Make rows clickable
+  container.querySelectorAll(".recip-row[data-contact-id]").forEach(row => {
+    row.addEventListener("click", () => {
+      const id = row.dataset.contactId;
+      if (id) openContactDetail(id);
+    });
+  });
 }
 
 // ── Streaks ──
@@ -410,7 +546,7 @@ function renderStreaks(data) {
     return;
   }
   container.innerHTML = data.map(s => {
-    return '<div class="streak-row">' +
+    return '<div class="streak-row" data-contact-id="' + esc(s.id) + '" style="cursor:pointer;">' +
       '<div class="streak-name">' + esc(s.name) + '</div>' +
       (s.current_streak > 0
         ? '<span class="streak-badge active">\uD83D\uDD25 ' + s.current_streak + 'd</span>'
@@ -418,6 +554,9 @@ function renderStreaks(data) {
       '<span class="streak-badge record">\uD83C\uDFC6 ' + s.longest_streak + 'd best</span>' +
     '</div>';
   }).join("");
+  container.querySelectorAll("[data-contact-id]").forEach(el => {
+    el.addEventListener("click", () => { if (el.dataset.contactId) openContactDetail(el.dataset.contactId); });
+  });
 }
 
 // ── Fastest Responders ──
@@ -430,12 +569,15 @@ function renderFastResponders(data) {
     return;
   }
   container.innerHTML = data.map((f, i) => {
-    return '<div class="fast-row">' +
+    return '<div class="fast-row" data-contact-id="' + esc(f.id) + '" style="cursor:pointer;">' +
       '<div class="fast-rank">' + (i + 1) + '</div>' +
       '<div class="fast-name">' + esc(f.name) + '</div>' +
       '<div class="fast-time">' + formatDuration(f.avg_response_sec) + '</div>' +
     '</div>';
   }).join("");
+  container.querySelectorAll("[data-contact-id]").forEach(el => {
+    el.addEventListener("click", () => { if (el.dataset.contactId) openContactDetail(el.dataset.contactId); });
+  });
 }
 
 // ── Hourly Activity Chart ──
@@ -697,8 +839,17 @@ async function openContactDetail(contactId) {
     const contact = detailData.contact;
     const stats = detailData.stats;
 
-    // Populate detail panel
-    if (nameEl) nameEl.textContent = contact.name || "Unknown";
+    // Populate detail panel with editable name
+    const displayName = contact.name || "Unknown";
+    if (nameEl) {
+      nameEl.textContent = displayName;
+      nameEl.style.display = "";
+    }
+    const nameEdit = $("detail-name-edit");
+    if (nameEdit) nameEdit.classList.add("hidden");
+
+    // Setup name editing (contact.name is COALESCE'd, contact.original_name is raw WA name)
+    setupNameEditing(contactId, displayName, contact.display_name);
 
     const detailStats = $("detail-stats");
     if (detailStats) {
@@ -1426,7 +1577,7 @@ function renderCalendar(year, month, days) {
       '<div class="cal-day-num">' + d + '</div>';
 
     contactsList.slice(0, 5).forEach(c => {
-      html += '<div class="cal-contact">' +
+      html += '<div class="cal-contact" data-contact-id="' + esc(c.id || '') + '" style="cursor:pointer;">' +
         '<span class="dot" style="background:' + esc(c.tier_color || '#666') + '"></span>' +
         '<span>' + esc(c.name || '') + '</span>' +
         '<span class="cnt">' + (c.count || 0) + '</span>' +
@@ -1441,6 +1592,15 @@ function renderCalendar(year, month, days) {
   }
 
   grid.innerHTML = html;
+
+  // Make calendar contact names clickable
+  grid.querySelectorAll(".cal-contact[data-contact-id]").forEach(el => {
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const id = el.dataset.contactId;
+      if (id) openContactDetail(id);
+    });
+  });
 }
 
 // ── Messaging Tab ──

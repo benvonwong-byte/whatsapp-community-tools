@@ -257,6 +257,11 @@ export class FriendsStore {
     } catch { /* column already exists */ }
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_friends_contacts_tier ON friends_contacts(tier_id)`);
 
+    // Migration: add display_name column to friends_contacts
+    try {
+      this.db.exec(`ALTER TABLE friends_contacts ADD COLUMN display_name TEXT DEFAULT NULL`);
+    } catch { /* column already exists */ }
+
     // Seed default tiers if none exist
     const tierCount = (this.db.prepare(`SELECT COUNT(*) as c FROM friends_tiers`).get() as any).c;
     if (tierCount === 0) {
@@ -290,7 +295,7 @@ export class FriendsStore {
       `),
       updateLastSeen: this.db.prepare(`UPDATE friends_contacts SET last_seen = MAX(last_seen, ?) WHERE id = ?`),
       getContacts: this.db.prepare(`SELECT * FROM friends_contacts ORDER BY last_seen DESC`),
-      getContact: this.db.prepare(`SELECT * FROM friends_contacts WHERE id = ?`),
+      getContact: this.db.prepare(`SELECT *, COALESCE(display_name, name) as name, name as original_name FROM friends_contacts WHERE id = ?`),
       updateContactNotes: this.db.prepare(`UPDATE friends_contacts SET notes = ? WHERE id = ?`),
 
       saveMessage: this.db.prepare(`
@@ -371,6 +376,10 @@ export class FriendsStore {
     this.stmts.updateContactNotes.run(notes, id);
   }
 
+  updateDisplayName(id: string, displayName: string | null) {
+    this.db.prepare(`UPDATE friends_contacts SET display_name = ? WHERE id = ?`).run(displayName || null, id);
+  }
+
   // ── Message methods ──
 
   saveMessage(msg: FriendsMessageInput) {
@@ -426,24 +435,26 @@ export class FriendsStore {
     const thirtyDaysAgo = now - 30 * 86400;
     const weekAgo = now - 7 * 86400;
 
-    // Only count contacts that have DM chats (not group-only contacts)
+    // Only count contacts that have DM chats (not group-only contacts, not broadcasts)
     const total = this.db.prepare(`
       SELECT COUNT(DISTINCT c.id) as c FROM friends_contacts c
-      WHERE EXISTS (SELECT 1 FROM friends_messages m JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0
-        WHERE m.sender_id = c.id OR m.chat_id = c.id)
+      WHERE c.id NOT LIKE '%@broadcast'
+        AND EXISTS (SELECT 1 FROM friends_messages m JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0
+          WHERE m.chat_id NOT LIKE '%@broadcast' AND (m.sender_id = c.id OR m.chat_id = c.id))
     `).get() as any;
     const active = this.db.prepare(`
       SELECT COUNT(DISTINCT c.id) as c FROM friends_contacts c
       WHERE c.last_seen >= ?
+        AND c.id NOT LIKE '%@broadcast'
         AND EXISTS (SELECT 1 FROM friends_messages m JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0
-          WHERE m.sender_id = c.id OR m.chat_id = c.id)
+          WHERE m.chat_id NOT LIKE '%@broadcast' AND (m.sender_id = c.id OR m.chat_id = c.id))
     `).get(thirtyDaysAgo) as any;
     const groups = this.db.prepare(`SELECT COUNT(*) as c FROM friends_groups`).get() as any;
     const weekMsgs = this.db.prepare(
-      `SELECT COUNT(*) as c FROM friends_messages m JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0 WHERE m.timestamp >= ?`
+      `SELECT COUNT(*) as c FROM friends_messages m JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0 WHERE m.chat_id NOT LIKE '%@broadcast' AND m.timestamp >= ?`
     ).get(weekAgo) as any;
     const totalMsgs = this.db.prepare(
-      `SELECT COUNT(*) as c FROM friends_messages m JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0`
+      `SELECT COUNT(*) as c FROM friends_messages m JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0 WHERE m.chat_id NOT LIKE '%@broadcast'`
     ).get() as any;
 
     return {
@@ -465,7 +476,7 @@ export class FriendsStore {
         SUM(CASE WHEN m.is_from_me = 0 THEN 1 ELSE 0 END) as received
       FROM friends_messages m
       JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0
-      WHERE m.timestamp >= ?
+      WHERE m.timestamp >= ? AND m.chat_id NOT LIKE '%@broadcast'
       GROUP BY week
       ORDER BY week ASC
     `).all(startTs) as any[];
@@ -474,8 +485,8 @@ export class FriendsStore {
   getNeglectedContacts(daysSilent: number): FriendsContact[] {
     const cutoff = Math.floor(Date.now() / 1000) - daysSilent * 86400;
     return this.db.prepare(`
-      SELECT * FROM friends_contacts
-      WHERE last_seen < ? AND last_seen > 0
+      SELECT *, COALESCE(display_name, name) as name FROM friends_contacts
+      WHERE last_seen < ? AND last_seen > 0 AND id NOT LIKE '%@broadcast'
       ORDER BY last_seen ASC
       LIMIT 20
     `).all(cutoff) as FriendsContact[];
@@ -507,7 +518,7 @@ export class FriendsStore {
       )
       SELECT
         cm.contact_id,
-        fc.name,
+        COALESCE(fc.display_name, fc.name) as name,
         SUM(CASE WHEN i.is_from_me = 1 THEN 1 ELSE 0 END) as my_initiations,
         SUM(CASE WHEN i.is_from_me = 0 THEN 1 ELSE 0 END) as their_initiations
       FROM initiations i
@@ -527,7 +538,7 @@ export class FriendsStore {
     // Get all contacts with basic message stats, tier info, and tags (DM chats only)
     const contacts = this.db.prepare(`
       SELECT
-        c.id, c.name, c.first_seen, c.last_seen, c.notes,
+        c.id, COALESCE(c.display_name, c.name) as name, c.first_seen, c.last_seen, c.notes,
         c.tier_id, t.name as tier_name, t.color as tier_color,
         COALESCE(stats.total_messages, 0) as total_messages,
         COALESCE(stats.sent_messages, 0) as sent_messages,
@@ -556,9 +567,10 @@ export class FriendsStore {
           SUM(CASE WHEN fm.timestamp >= ? THEN 1 ELSE 0 END) as messages_30d
         FROM friends_messages fm
         JOIN friends_chats ch ON ch.chat_id = fm.chat_id AND ch.is_group = 0
+        WHERE fm.chat_id NOT LIKE '%@broadcast'
         GROUP BY contact_id
       ) stats ON stats.contact_id = c.id
-      WHERE stats.total_messages > 0
+      WHERE stats.total_messages > 0 AND c.id NOT LIKE '%@broadcast'
       ORDER BY c.last_seen DESC
     `).all(thirtyDaysAgo) as any[];
 
@@ -814,7 +826,7 @@ export class FriendsStore {
   getVoiceStatsAll(): Array<{ contact_id: string; name: string; total_notes: number; total_minutes: number; sent_notes: number; received_notes: number }> {
     return this.db.prepare(`
       SELECT
-        v.contact_id, c.name,
+        v.contact_id, COALESCE(c.display_name, c.name) as name,
         COUNT(*) as total_notes,
         ROUND(SUM(v.duration_estimate) / 60.0, 1) as total_minutes,
         SUM(CASE WHEN v.is_from_me = 1 THEN 1 ELSE 0 END) as sent_notes,
@@ -953,6 +965,7 @@ export class FriendsStore {
         FROM friends_messages m
         JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0
         WHERE date(datetime(m.timestamp, 'unixepoch')) >= ? AND date(datetime(m.timestamp, 'unixepoch')) < ?
+          AND m.chat_id NOT LIKE '%@broadcast'
         GROUP BY day, contact_id
       ),
       ranked AS (
@@ -961,7 +974,7 @@ export class FriendsStore {
         FROM daily
         WHERE contact_id IS NOT NULL
       )
-      SELECT r.day, r.contact_id as id, c.name, r.msg_count as count, t.color as tier_color
+      SELECT r.day, r.contact_id as id, COALESCE(c.display_name, c.name) as name, r.msg_count as count, t.color as tier_color
       FROM ranked r
       LEFT JOIN friends_contacts c ON c.id = r.contact_id
       LEFT JOIN friends_tiers t ON t.id = c.tier_id
@@ -987,76 +1000,64 @@ export class FriendsStore {
     const d30 = now - 30 * 86400;
     const d60 = now - 60 * 86400;
     return this.db.prepare(`
-      WITH dm_contacts AS (
-        SELECT DISTINCT m.sender_id as contact_id, m.chat_id
-        FROM friends_messages m
-        JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0
-        WHERE m.is_from_me = 0
-      ),
-      stats AS (
-        SELECT
-          dc.contact_id,
-          SUM(CASE WHEN m.timestamp >= ? THEN 1 ELSE 0 END) as messages_30d,
-          SUM(CASE WHEN m.timestamp >= ? AND m.timestamp < ? THEN 1 ELSE 0 END) as messages_prev30d
-        FROM friends_messages m
-        JOIN dm_contacts dc ON dc.chat_id = m.chat_id
-        JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0
-        WHERE m.timestamp >= ?
-        GROUP BY dc.contact_id
-      )
-      SELECT s.contact_id as id, c.name, s.messages_30d, s.messages_prev30d,
+      SELECT
+        c.id, COALESCE(c.display_name, c.name) as name,
+        SUM(CASE WHEN m.timestamp >= ? THEN 1 ELSE 0 END) as messages_30d,
+        SUM(CASE WHEN m.timestamp >= ? AND m.timestamp < ? THEN 1 ELSE 0 END) as messages_prev30d,
         t.color as tier_color
-      FROM stats s
-      JOIN friends_contacts c ON c.id = s.contact_id
+      FROM friends_contacts c
+      JOIN friends_chats ch ON ch.chat_id = c.id AND ch.is_group = 0
+      JOIN friends_messages m ON m.chat_id = c.id
       LEFT JOIN friends_tiers t ON t.id = c.tier_id
-      ORDER BY s.messages_30d DESC
+      WHERE m.timestamp >= ?
+        AND c.id NOT LIKE '%@broadcast'
+      GROUP BY c.id
+      ORDER BY messages_30d DESC
       LIMIT ?
     `).all(d30, d60, d30, d60, limit) as any[];
   }
 
-  /** Reciprocity stats per contact — sent/received balance (DM only) */
-  getReciprocityStats(): Array<{ id: string; name: string; sent: number; received: number; ratio: number }> {
+  /** Reciprocity stats per contact — sent/received balance (DM only), sorted by healthiest balance */
+  getReciprocityStats(): Array<{ id: string; name: string; sent: number; received: number; ratio: number; tag_names: string | null; group_names: string | null }> {
     return this.db.prepare(`
-      WITH dm_contacts AS (
-        SELECT DISTINCT m.sender_id as contact_id, m.chat_id
-        FROM friends_messages m
-        JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0
-        WHERE m.is_from_me = 0
-      )
       SELECT
-        dc.contact_id as id,
-        c.name,
+        c.id, COALESCE(c.display_name, c.name) as name,
         SUM(CASE WHEN m.is_from_me = 1 THEN 1 ELSE 0 END) as sent,
-        SUM(CASE WHEN m.is_from_me = 0 THEN 1 ELSE 0 END) as received
-      FROM friends_messages m
-      JOIN dm_contacts dc ON dc.chat_id = m.chat_id
-      JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0
-      JOIN friends_contacts c ON c.id = dc.contact_id
-      GROUP BY dc.contact_id
+        SUM(CASE WHEN m.is_from_me = 0 THEN 1 ELSE 0 END) as received,
+        (SELECT GROUP_CONCAT(tg.name, ', ')
+         FROM friends_contact_tags ct JOIN friends_tags tg ON tg.id = ct.tag_id
+         WHERE ct.contact_id = c.id) as tag_names,
+        (SELECT GROUP_CONCAT(g.name, ', ')
+         FROM friends_contact_groups cg JOIN friends_groups g ON g.id = cg.group_id
+         WHERE cg.contact_id = c.id) as group_names
+      FROM friends_contacts c
+      JOIN friends_chats ch ON ch.chat_id = c.id AND ch.is_group = 0
+      JOIN friends_messages m ON m.chat_id = c.id
+      WHERE c.id NOT LIKE '%@broadcast'
+      GROUP BY c.id
       HAVING (sent + received) > 10
       ORDER BY (sent + received) DESC
-      LIMIT 20
     `).all().map((r: any) => ({
       ...r,
       ratio: Math.round(Math.min(r.sent, r.received) / Math.max(r.sent, r.received, 1) * 100),
-    })) as any[];
+    })).sort((a: any, b: any) => b.ratio - a.ratio) as any[];
   }
 
   /** Streak data: consecutive days with messages per contact (DM only) */
   getLongestStreaks(limit = 5): Array<{ id: string; name: string; current_streak: number; longest_streak: number }> {
-    const contacts = this.db.prepare(`SELECT id, name FROM friends_contacts ORDER BY last_seen DESC LIMIT 50`).all() as any[];
+    const contacts = this.db.prepare(`
+      SELECT c.id, COALESCE(c.display_name, c.name) as name FROM friends_contacts c
+      JOIN friends_chats ch ON ch.chat_id = c.id AND ch.is_group = 0
+      WHERE c.id NOT LIKE '%@broadcast'
+      ORDER BY c.last_seen DESC LIMIT 50
+    `).all() as any[];
     const results: Array<{ id: string; name: string; current_streak: number; longest_streak: number }> = [];
 
     for (const c of contacts) {
       const days = this.db.prepare(`
-        WITH contact_chats AS (
-          SELECT DISTINCT m.chat_id FROM friends_messages m
-          JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0
-          WHERE m.sender_id = ?
-        )
-        SELECT DISTINCT date(datetime(timestamp, 'unixepoch')) as day
-        FROM friends_messages
-        WHERE chat_id IN (SELECT chat_id FROM contact_chats)
+        SELECT DISTINCT date(datetime(m.timestamp, 'unixepoch')) as day
+        FROM friends_messages m
+        WHERE m.chat_id = ?
         ORDER BY day ASC
       `).all(c.id) as Array<{ day: string }>;
 
@@ -1090,6 +1091,7 @@ export class FriendsStore {
         COUNT(*) as count
       FROM friends_messages m
       JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0
+      WHERE m.chat_id NOT LIKE '%@broadcast'
       GROUP BY hour
       ORDER BY hour ASC
     `).all() as any[];
@@ -1099,7 +1101,7 @@ export class FriendsStore {
   getFastestResponders(limit = 5): Array<{ id: string; name: string; avg_response_sec: number }> {
     const now = Math.floor(Date.now() / 1000);
     const ninetyDaysAgo = now - 90 * 86400;
-    const contacts = this.db.prepare(`SELECT id, name FROM friends_contacts WHERE last_seen >= ? ORDER BY last_seen DESC`).all(ninetyDaysAgo) as any[];
+    const contacts = this.db.prepare(`SELECT id, COALESCE(display_name, name) as name FROM friends_contacts WHERE last_seen >= ? ORDER BY last_seen DESC`).all(ninetyDaysAgo) as any[];
     const results: Array<{ id: string; name: string; avg_response_sec: number }> = [];
     for (const c of contacts) {
       const resp = this.getResponseTimesForContact(c.id, ninetyDaysAgo, now);

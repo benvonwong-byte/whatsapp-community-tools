@@ -7,9 +7,11 @@ export function createFriendsHandler(store: FriendsStore) {
   const relationshipNameLower = config.relationshipChatName.toLowerCase();
 
   return async (msg: Message, chat: any) => {
-    // 1. Filter: private (1:1) chats ONLY — no groups, no announcements
+    // 1. Filter: private (1:1) chats ONLY — no groups, no announcements, no broadcasts
     const isPrivate = !chat.isGroup;
     if (!isPrivate) return;
+    const chatId = chat.id._serialized;
+    if (chatId === "status@broadcast" || chatId.endsWith("@broadcast")) return;
     const participantCount = 1;
 
     // 2. Skip the relationship chat
@@ -19,7 +21,6 @@ export function createFriendsHandler(store: FriendsStore) {
     if (!msg.body && !msg.hasMedia) return;
 
     // 4. Auto-register and check monitoring
-    const chatId = chat.id._serialized;
     store.upsertChat(chatId, chat.name || "", chat.isGroup, participantCount);
     if (!store.getChatMonitored(chatId)) return;
 
