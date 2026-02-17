@@ -1,8 +1,17 @@
-import { Router, Request, Response } from "express";
+import { Router, Request, Response, NextFunction } from "express";
 import { RelationshipStore, RelationshipAnalysis } from "./store";
 import { AnalyzeProgress } from "./analyzer";
 import { buildUpdateMessage } from "./updater";
 import { config } from "../../config";
+
+/** Block guest users from mutating endpoints — admin only */
+function requireAdminRole(req: Request, res: Response, next: NextFunction): void {
+  if ((res as any).locals.role !== "admin") {
+    res.status(403).json({ error: "Admin access required for this action." });
+    return;
+  }
+  next();
+}
 
 /** Parse a stored analysis into a frontend-friendly shape */
 function parseAnalysisForFrontend(a: RelationshipAnalysis) {
@@ -309,13 +318,13 @@ export function createRelationshipRouter(
   });
 
   // POST /api/relationship/reset-analyzed — reset all messages to unanalyzed
-  router.post("/reset-analyzed", (_req: Request, res: Response) => {
+  router.post("/reset-analyzed", requireAdminRole, (_req: Request, res: Response) => {
     const count = store.resetAnalyzedFlags();
     res.json({ ok: true, messagesReset: count });
   });
 
   // POST /api/relationship/analyze — start analysis in background
-  router.post("/analyze", (req: Request, res: Response) => {
+  router.post("/analyze", requireAdminRole, (req: Request, res: Response) => {
     if (analyzeProgress.active) {
       res.status(409).json({ error: "Analysis already in progress" });
       return;
@@ -330,7 +339,7 @@ export function createRelationshipRouter(
   });
 
   // POST /api/relationship/backfill — fetch WhatsApp history for Hope's chat
-  router.post("/backfill", async (req: Request, res: Response) => {
+  router.post("/backfill", requireAdminRole, async (req: Request, res: Response) => {
     try {
       const count = await backfillTrigger();
       res.json({ ok: true, messagesImported: count });
@@ -340,7 +349,7 @@ export function createRelationshipRouter(
   });
 
   // POST /api/relationship/transcribe — retro-transcribe voice messages with empty transcripts
-  router.post("/transcribe", async (req: Request, res: Response) => {
+  router.post("/transcribe", requireAdminRole, async (req: Request, res: Response) => {
     try {
       const count = await transcribeTrigger();
       res.json({ ok: true, transcribed: count });
@@ -350,7 +359,7 @@ export function createRelationshipRouter(
   });
 
   // POST /api/relationship/fix-voice-minutes — recalculate voice_minutes in analyses from actual message data
-  router.post("/fix-voice-minutes", (_req: Request, res: Response) => {
+  router.post("/fix-voice-minutes", requireAdminRole, (_req: Request, res: Response) => {
     const analyses = store.getAnalyses(999);
     let fixed = 0;
     for (const a of analyses) {
@@ -366,7 +375,7 @@ export function createRelationshipRouter(
 
   // POST /api/relationship/import — import WhatsApp .txt export
   // Body: { text: "...raw .txt file content..." }
-  router.post("/import", (req: Request, res: Response) => {
+  router.post("/import", requireAdminRole, (req: Request, res: Response) => {
     const { text } = req.body;
     if (!text || typeof text !== "string") {
       res.status(400).json({ error: "Missing 'text' field with .txt file content" });
@@ -392,7 +401,7 @@ export function createRelationshipRouter(
 
   // POST /api/relationship/import-json — import structured JSON messages (for external apps)
   // Body: { messages: [{ speaker, body, timestamp, type?, source? }], source?: "in-person" }
-  router.post("/import-json", (req: Request, res: Response) => {
+  router.post("/import-json", requireAdminRole, (req: Request, res: Response) => {
     const { messages, source } = req.body;
     if (!Array.isArray(messages) || messages.length === 0) {
       res.status(400).json({ error: "Missing 'messages' array" });
@@ -460,7 +469,7 @@ export function createRelationshipRouter(
 
   // POST /api/relationship/settings — update settings
   // Body: { updateFrequency?, updateSendHour? }
-  router.post("/settings", (req: Request, res: Response) => {
+  router.post("/settings", requireAdminRole, (req: Request, res: Response) => {
     const { updateFrequency, updateSendHour } = req.body;
     if (updateFrequency && ["daily", "weekly", "off"].includes(updateFrequency)) {
       store.setSetting("update_frequency", updateFrequency);
@@ -480,7 +489,7 @@ export function createRelationshipRouter(
 
   // POST /api/relationship/send-update — manually send a dashboard update to Hope
   // Optional body: { frequency: "daily" | "weekly" } — defaults to current setting
-  router.post("/send-update", async (req: Request, res: Response) => {
+  router.post("/send-update", requireAdminRole, async (req: Request, res: Response) => {
     const freq = req.body.frequency || store.getSetting("update_frequency") || "daily";
     const message = buildUpdateMessage(store, freq as "daily" | "weekly");
     if (!message) {
@@ -504,7 +513,7 @@ export function createRelationshipRouter(
   });
 
   // POST /api/relationship/send-custom — send a custom message to Hope via WhatsApp
-  router.post("/send-custom", async (req: Request, res: Response) => {
+  router.post("/send-custom", requireAdminRole, async (req: Request, res: Response) => {
     const { message } = req.body;
     if (!message || typeof message !== "string" || !message.trim()) {
       res.status(400).json({ error: "Message body is required" });
@@ -515,6 +524,162 @@ export function createRelationshipRouter(
       res.json({ ok: true });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || "Failed to send message" });
+    }
+  });
+
+  // DELETE /api/relationship/messages/:id — delete a message (admin only)
+  router.delete("/messages/:id", requireAdminRole, (req: Request, res: Response) => {
+    const deleted = store.deleteMessage(req.params.id as string);
+    if (deleted) {
+      res.json({ ok: true });
+    } else {
+      res.status(404).json({ error: "Message not found" });
+    }
+  });
+
+  // POST /api/relationship/chat — AI chat with tiered context + tool use
+  // Accessible to both admin and guest (no requireAdminRole)
+  router.post("/chat", async (req: Request, res: Response) => {
+    const { messages: chatMessages } = req.body;
+    if (!Array.isArray(chatMessages) || chatMessages.length === 0) {
+      res.status(400).json({ error: "Missing 'messages' array" });
+      return;
+    }
+    if (!config.anthropicApiKey) {
+      res.status(503).json({ error: "No ANTHROPIC_API_KEY configured" });
+      return;
+    }
+
+    try {
+      const Anthropic = (await import("@anthropic-ai/sdk")).default;
+      const client = new Anthropic({ apiKey: config.anthropicApiKey });
+
+      // Build tiered context (Tier 1 — always included)
+      const allSummaries = store.getAllAnalysisSummaries();
+      const stats = store.getStats();
+      const dailyCounts = store.getDailyMessageCounts(30);
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      const recentMessages = store.getMessagesByRange(
+        sevenDaysAgo.toISOString().split("T")[0],
+        new Date().toISOString().split("T")[0]
+      );
+
+      // Format recent messages compactly
+      const recentMsgText = recentMessages.map(m => {
+        const date = new Date(m.timestamp * 1000).toISOString().split("T")[0];
+        const time = new Date(m.timestamp * 1000).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+        const speaker = m.speaker === "self" ? "Ben" : "Hope";
+        const content = m.type === "voice"
+          ? (m.transcript || m.body || "[voice note]")
+          : (m.body || "[media]");
+        return `[${date} ${time}] ${speaker}: ${content}`;
+      }).join("\n");
+
+      // Format analysis summaries
+      const summaryText = allSummaries.map(s =>
+        `${s.date}: Score ${Math.round(s.score ?? 0)}/100 — ${s.summary}`
+      ).join("\n");
+
+      // Format daily counts
+      const countsText = dailyCounts.map(d => `${d.day}: ${d.count} msgs`).join(", ");
+
+      const systemPrompt = `You are a relationship counselor AI with access to Ben and Hope's communication data. You help them understand their relationship patterns using Gottman and Esther Perel frameworks.
+
+RELATIONSHIP DATA CONTEXT:
+
+=== Overall Stats ===
+Total messages: ${stats.totalMessages ?? 0}
+Date range: ${stats.firstTimestamp ? new Date(stats.firstTimestamp * 1000).toISOString().split("T")[0] : "N/A"} to ${stats.lastTimestamp ? new Date(stats.lastTimestamp * 1000).toISOString().split("T")[0] : "N/A"}
+
+=== Analysis Summaries (all dates) ===
+${summaryText || "No analyses yet."}
+
+=== Daily Message Counts (last 30 days) ===
+${countsText || "No data."}
+
+=== Full Messages (last 7 days) ===
+${recentMsgText || "No recent messages."}
+
+INSTRUCTIONS:
+- Answer questions about Ben and Hope's relationship based on the data above.
+- If the user asks about conversations older than 7 days, use the fetch_messages tool to retrieve them.
+- Be warm, supportive, and insightful. Reference specific quotes when relevant.
+- Keep responses concise but meaningful.`;
+
+      // Tool definition for fetching older messages
+      const tools: any[] = [{
+        name: "fetch_messages",
+        description: "Fetch full message history for a specific date range. Use this when the user asks about conversations that happened more than 7 days ago.",
+        input_schema: {
+          type: "object" as const,
+          properties: {
+            start_date: { type: "string", description: "Start date in YYYY-MM-DD format" },
+            end_date: { type: "string", description: "End date in YYYY-MM-DD format" },
+          },
+          required: ["start_date", "end_date"],
+        },
+      }];
+
+      // Prepare conversation messages (cap at last 20)
+      const userMessages = chatMessages.slice(-20).map((m: any) => ({
+        role: m.role as "user" | "assistant",
+        content: m.content,
+      }));
+
+      // Tool-use loop (max 3 iterations)
+      let currentMessages = userMessages;
+      let finalResponse = "";
+      for (let i = 0; i < 4; i++) {
+        const apiRes = await client.messages.create({
+          model: "claude-opus-4-20250514",
+          max_tokens: 2048,
+          system: systemPrompt,
+          messages: currentMessages,
+          tools: i < 3 ? tools : [], // don't offer tools on last iteration
+        });
+
+        // Check if tool use was requested
+        const toolUseBlock = apiRes.content.find((b: any) => b.type === "tool_use");
+        if (toolUseBlock && toolUseBlock.type === "tool_use" && i < 3) {
+          const { start_date, end_date } = toolUseBlock.input as any;
+          const fetchedMessages = store.getMessagesByRange(start_date, end_date);
+          const fetchedText = fetchedMessages.map(m => {
+            const date = new Date(m.timestamp * 1000).toISOString().split("T")[0];
+            const time = new Date(m.timestamp * 1000).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+            const speaker = m.speaker === "self" ? "Ben" : "Hope";
+            const content = m.type === "voice"
+              ? (m.transcript || m.body || "[voice note]")
+              : (m.body || "[media]");
+            return `[${date} ${time}] ${speaker}: ${content}`;
+          }).join("\n");
+
+          // Append assistant + tool_result to messages and loop
+          currentMessages = [
+            ...currentMessages,
+            { role: "assistant" as const, content: apiRes.content },
+            {
+              role: "user" as const,
+              content: [{
+                type: "tool_result" as const,
+                tool_use_id: toolUseBlock.id,
+                content: fetchedText || "No messages found for this date range.",
+              }],
+            },
+          ];
+          continue;
+        }
+
+        // Extract text response
+        const textBlock = apiRes.content.find((b: any) => b.type === "text");
+        finalResponse = textBlock && textBlock.type === "text" ? textBlock.text : "I couldn't generate a response.";
+        break;
+      }
+
+      res.json({ response: finalResponse });
+    } catch (err: any) {
+      console.error("[relationship-chat] Error:", err?.message || err);
+      res.status(500).json({ error: "Chat failed: " + (err?.message || "Unknown error") });
     }
   });
 

@@ -18,6 +18,7 @@ import { createMetacrisisRouter } from "./apps/metacrisis/routes";
 import { FriendsStore } from "./apps/friends/store";
 import { createFriendsHandler } from "./apps/friends/handler";
 import { createFriendsRouter, SendProgress } from "./apps/friends/routes";
+import { runTagExtraction } from "./apps/friends/tagger";
 import { createRecordingRouter } from "./apps/recording/routes";
 
 // ── Event link enrichment ──
@@ -240,7 +241,7 @@ async function main() {
   const relationshipStore = new RelationshipStore();
   console.log("Relationship store initialized.");
 
-  const appRouters: { path: string; router: any }[] = [];
+  const appRouters: { path: string; router: any; authLevel?: "admin" | "auth" }[] = [];
 
   // Relationship app: monitor private chat, transcribe voice notes, analyze communication
   const relationshipAnalyzeProgress: AnalyzeProgress = {
@@ -382,6 +383,7 @@ async function main() {
   appRouters.push({
     path: "/api/relationship",
     router: createRelationshipRouter(relationshipStore, relationshipAnalyze, relationshipBackfill, relationshipTranscribe, relationshipSendUpdate, relationshipAnalyzeProgress),
+    authLevel: "auth",
   });
 
   // Recording app: transcribe in-person conversations and import to relationship store
@@ -612,9 +614,11 @@ async function main() {
     setTimeout(() => { if (friendsSendProgress.phase === "done") friendsSendProgress.phase = "idle"; }, 15000);
   };
 
+  const friendsTagExtract = () => runTagExtraction(friendsStore);
+
   appRouters.push({
     path: "/api/friends",
-    router: createFriendsRouter(friendsStore, friendsScan, friendsBackfill, friendsSendMessage, friendsSendProgress),
+    router: createFriendsRouter(friendsStore, friendsScan, friendsBackfill, friendsSendMessage, friendsSendProgress, friendsTagExtract),
   });
 
   startServer({
@@ -728,6 +732,16 @@ async function main() {
 
     console.log(`[cleanup] Cleared ${cleared} cache directories.`);
   });
+
+  // ── Hourly tag extraction for friends ──
+  setInterval(async () => {
+    try {
+      const count = await friendsTagExtract();
+      if (count > 0) console.log(`[tagger] Extracted tags for ${count} contacts.`);
+    } catch (err: any) {
+      console.error("[tagger] Hourly extraction failed:", err?.message || err);
+    }
+  }, 60 * 60 * 1000); // every hour
 
   // ── Real-time relationship auto-analysis ──
   // Every 30 minutes, reset today's analyzed flags and re-analyze

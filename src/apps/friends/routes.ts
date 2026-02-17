@@ -19,7 +19,8 @@ export function createFriendsRouter(
     message: string,
     media: { base64: string; mimetype: string; filename: string } | null
   ) => Promise<void>,
-  sendProgress: SendProgress
+  sendProgress: SendProgress,
+  tagExtractTrigger?: () => Promise<number>
 ): Router {
   const router = Router();
 
@@ -31,7 +32,9 @@ export function createFriendsRouter(
     const neglected = store.getNeglectedContacts(30);
     const topInitiators = store.getTopInitiators(10);
     const health = store.getHealth();
-    res.json({ stats, weeklyVolume, neglected, topInitiators, health });
+    const tierDistribution = store.getTierDistribution();
+    const voiceTotal = store.getDashboardVoiceTotal();
+    res.json({ stats, weeklyVolume, neglected, topInitiators, health, tierDistribution, voiceTotal });
   });
 
   // ── Contacts ──
@@ -43,6 +46,28 @@ export function createFriendsRouter(
     const groupFilter = req.query.group as string;
     if (groupFilter) {
       contacts = contacts.filter(c => c.group_names?.includes(groupFilter));
+    }
+
+    // Filter by tier
+    const tierFilter = req.query.tier as string;
+    if (tierFilter) {
+      const tierId = parseInt(tierFilter);
+      if (tierFilter === "none") {
+        contacts = contacts.filter(c => c.tier_id === null);
+      } else if (!isNaN(tierId)) {
+        contacts = contacts.filter(c => c.tier_id === tierId);
+      }
+    }
+
+    // Filter by tags
+    const tagsParam = req.query.tags as string;
+    if (tagsParam) {
+      const tagNames = tagsParam.split(",").map(t => t.trim().toLowerCase()).filter(Boolean);
+      const tagMode = (req.query.tagMode as string || "OR").toUpperCase() as "AND" | "OR";
+      if (tagNames.length > 0) {
+        const matchingIds = new Set(store.getContactsWithTags(tagNames, tagMode));
+        contacts = contacts.filter(c => matchingIds.has(c.id));
+      }
     }
 
     // Filter by minimum quality score
@@ -73,7 +98,9 @@ export function createFriendsRouter(
     const ninetyDaysAgo = now - 90 * 86400;
     const stats = store.getContactStats(contact.id, ninetyDaysAgo, now);
     const groups = store.getContactGroups(contact.id);
-    res.json({ contact, stats, groups });
+    const tags = store.getContactTags(contact.id);
+    const voiceStats = store.getVoiceStatsByContact(contact.id);
+    res.json({ contact, stats, groups, tags, voiceStats });
   });
 
   router.get("/contacts/:id/activity", (req: Request, res: Response) => {
@@ -88,6 +115,24 @@ export function createFriendsRouter(
   router.put("/contacts/:id/notes", (req: Request, res: Response) => {
     store.updateContactNotes(decodeURIComponent(req.params.id as string), req.body.notes || "");
     res.json({ ok: true });
+  });
+
+  router.put("/contacts/:id/tier", (req: Request, res: Response) => {
+    const tierId = req.body.tier_id;
+    store.setContactTier(decodeURIComponent(req.params.id as string), tierId ?? null);
+    res.json({ ok: true });
+  });
+
+  router.get("/contacts/:id/voice", (req: Request, res: Response) => {
+    const contactId = decodeURIComponent(req.params.id as string);
+    const notes = store.getVoiceNotesByContact(contactId);
+    const stats = store.getVoiceStatsByContact(contactId);
+    res.json({ notes, stats });
+  });
+
+  router.get("/contacts/:id/tags", (req: Request, res: Response) => {
+    const tags = store.getContactTags(decodeURIComponent(req.params.id as string));
+    res.json(tags);
   });
 
   // ── Chats ──
@@ -236,6 +281,66 @@ export function createFriendsRouter(
       }
     }
     res.json({ ok: true });
+  });
+
+  // ── Tiers ──
+
+  router.get("/tiers", (_req: Request, res: Response) => {
+    const tiers = store.getTiers();
+    res.json(tiers);
+  });
+
+  router.post("/tiers", (req: Request, res: Response) => {
+    const { name, color } = req.body;
+    if (!name) { res.status(400).json({ error: "Name required" }); return; }
+    const id = store.createTier(name, color || "#4fc3f7");
+    res.json({ ok: true, id });
+  });
+
+  router.put("/tiers/:id", (req: Request, res: Response) => {
+    const { name, color, sort_order } = req.body;
+    store.updateTier(parseInt(req.params.id as string), name, color, sort_order ?? 0);
+    res.json({ ok: true });
+  });
+
+  router.delete("/tiers/:id", (req: Request, res: Response) => {
+    store.deleteTier(parseInt(req.params.id as string));
+    res.json({ ok: true });
+  });
+
+  // ── Voice ──
+
+  router.get("/voice/stats", (_req: Request, res: Response) => {
+    res.json(store.getVoiceStatsAll());
+  });
+
+  // ── Tags ──
+
+  router.get("/tags", (_req: Request, res: Response) => {
+    res.json(store.getAllTags());
+  });
+
+  router.post("/tags/extract", async (_req: Request, res: Response) => {
+    if (!tagExtractTrigger) {
+      res.status(503).json({ error: "Tag extraction not configured" });
+      return;
+    }
+    try {
+      const count = await tagExtractTrigger();
+      res.json({ ok: true, contactsProcessed: count });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || "Tag extraction failed" });
+    }
+  });
+
+  // ── Calendar ──
+
+  router.get("/calendar", (req: Request, res: Response) => {
+    const now = new Date();
+    const year = parseInt(req.query.year as string) || now.getFullYear();
+    const month = parseInt(req.query.month as string) || (now.getMonth() + 1);
+    const data = store.getCalendarData(year, month);
+    res.json({ year, month, days: data });
   });
 
   // ── Health ──

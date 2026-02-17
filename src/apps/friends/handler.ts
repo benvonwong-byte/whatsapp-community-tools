@@ -1,6 +1,7 @@
 import { Message } from "../../whatsapp";
 import { FriendsStore } from "./store";
 import { config } from "../../config";
+import { transcribeVoiceNote } from "../../utils/transcription";
 
 export function createFriendsHandler(store: FriendsStore) {
   const relationshipNameLower = config.relationshipChatName.toLowerCase();
@@ -72,5 +73,50 @@ export function createFriendsHandler(store: FriendsStore) {
       message_type: messageType,
       char_count: charCount,
     });
+
+    // 9. Voice note detection + transcription
+    if (msg.hasMedia && messageType === "ptt") {
+      const contactForVoice = senderId === "self"
+        ? (isPrivate ? chatId : senderId)
+        : senderId;
+
+      if (!store.isVoiceNoteDuplicate(msg.id._serialized)) {
+        try {
+          const media = await msg.downloadMedia();
+          let transcript = "";
+          if (media) {
+            transcript = await transcribeVoiceNote(media.data, media.mimetype);
+          }
+          store.saveVoiceNote({
+            id: msg.id._serialized,
+            contact_id: contactForVoice,
+            chat_id: chatId,
+            transcript: transcript || "[transcription failed]",
+            duration_estimate: 30,
+            timestamp: msg.timestamp,
+            is_from_me: msg.fromMe,
+          });
+          if (transcript) {
+            console.log(`[friends] Voice from ${senderName}: "${transcript.slice(0, 60)}..."`);
+          }
+        } catch (err: any) {
+          console.log(`[friends] Voice transcription failed: ${err?.message || err}`);
+          store.saveVoiceNote({
+            id: msg.id._serialized,
+            contact_id: contactForVoice,
+            chat_id: chatId,
+            transcript: "[transcription failed]",
+            duration_estimate: 30,
+            timestamp: msg.timestamp,
+            is_from_me: msg.fromMe,
+          });
+        }
+      }
+    }
+
+    // 10. Buffer text messages for tag extraction (only from others)
+    if (senderId !== "self" && msg.body && msg.body.trim().length > 3 && messageType === "chat") {
+      store.addToTagBuffer(senderId, msg.body, msg.timestamp);
+    }
   };
 }

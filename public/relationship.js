@@ -1,10 +1,20 @@
 // Auth: check URL params (?token= or ?admin=) then localStorage
 const _params = new URLSearchParams(window.location.search);
-const adminToken = _params.get("token") || _params.get("admin") || localStorage.getItem("adminToken");
-const isAdmin = !!adminToken;
-if (adminToken && !localStorage.getItem("adminToken")) {
+let adminToken = _params.get("token") || _params.get("admin") || localStorage.getItem("adminToken");
+let userRole = localStorage.getItem("userRole") || (adminToken ? "admin" : null);
+
+// Strip token from URL immediately
+if (_params.has("token") || _params.has("admin")) {
+  if (adminToken) {
+    localStorage.setItem("adminToken", adminToken);
+    if (!userRole) { userRole = "admin"; localStorage.setItem("userRole", "admin"); }
+  }
+  const cleanUrl = window.location.pathname + window.location.hash;
+  history.replaceState(null, "", cleanUrl);
+} else if (adminToken && !localStorage.getItem("adminToken")) {
   localStorage.setItem("adminToken", adminToken);
 }
+const isAdmin = !!adminToken;
 
 // API base: use Railway URL when hosted on Firebase, relative path otherwise
 const API_BASE =
@@ -77,10 +87,58 @@ document.addEventListener("DOMContentLoaded", () => {
   if (!isAdmin) {
     $("login-gate")?.classList.remove("hidden");
     $("analyze-btn")?.classList.add("hidden");
+    setupLoginForm();
     return;
   }
 
+  initDashboard();
+});
+
+function setupLoginForm() {
+  const form = $("login-form");
+  if (!form) return;
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const username = $("login-username")?.value?.trim();
+    const password = $("login-password")?.value;
+    const errorEl = $("login-error");
+    const btn = $("login-submit-btn");
+    if (!username || !password) return;
+
+    if (btn) { btn.disabled = true; btn.textContent = "Signing in..."; }
+    if (errorEl) errorEl.textContent = "";
+
+    try {
+      const res = await fetch(`${API_BASE}/api/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: username, password }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Login failed");
+
+      adminToken = data.token;
+      userRole = data.role || "admin";
+      localStorage.setItem("adminToken", adminToken);
+      localStorage.setItem("userRole", userRole);
+
+      $("login-gate")?.classList.add("hidden");
+      initDashboard();
+    } catch (err) {
+      if (errorEl) errorEl.textContent = err.message || "Login failed";
+      if (btn) { btn.disabled = false; btn.textContent = "Sign In"; }
+    }
+  });
+}
+
+function initDashboard() {
   $("main-content")?.classList.remove("hidden");
+
+  // Hide admin-only elements for guests
+  if (userRole === "guest") {
+    hideAdminElements();
+  }
+
   setPresetRange("7");
   setupDateRangeControls();
   setupAnalyzeButton();
@@ -91,9 +149,33 @@ document.addEventListener("DOMContentLoaded", () => {
   setupInPersonMonitor();
   setupTrendChartInteractivity();
   setupPersonToggle();
+  setupInPersonPanel();
+  setupChat();
   loadDashboard();
   refreshTimer = setInterval(loadDashboard, 30000);
-});
+}
+
+function hideAdminElements() {
+  // Hide action buttons that require admin role
+  const hideIds = [
+    "analyze-btn", "reset-analyze-btn", "backfill-btn", "transcribe-btn",
+    "import-btn", "import-file", "send-update-btn", "preview-update-btn",
+    "text-hope-btn", "update-frequency", "update-send-hour",
+  ];
+  for (const id of hideIds) {
+    const el = $(id);
+    if (el) el.style.display = "none";
+  }
+  // Hide the settings row items (auto-update label + selects)
+  document.querySelectorAll(".toolbar .monitor-item").forEach(el => {
+    if (el.textContent?.includes("Auto-update") || el.textContent?.includes("at")) {
+      el.style.display = "none";
+    }
+  });
+  // Hide the toolbar-sep before settings if visible
+  const seps = document.querySelectorAll(".toolbar .toolbar-sep");
+  if (seps.length > 1) seps[seps.length - 1].style.display = "none";
+}
 
 // ── Date Range Controls ──
 
@@ -606,36 +688,56 @@ function setupUpdateControls() {
   }
 }
 
-// ── In-Person Live Monitor ──
+// ── In-Person Compact Monitor + Slide-Out Panel ──
 
 let inPersonPollTimer = null;
 let lastInPersonCount = 0;
+let inPersonData = null;
 
 function setupInPersonMonitor() {
+  // Toolbar click opens panel
+  const toolbar = $("in-person-toolbar");
+  if (toolbar) toolbar.addEventListener("click", toggleInPersonPanel);
+
   loadInPersonData();
   inPersonPollTimer = setInterval(loadInPersonData, 10000); // poll every 10s
+}
+
+function setupInPersonPanel() {
+  const closeBtn = $("in-person-panel-close");
+  const backdrop = $("in-person-backdrop");
+  if (closeBtn) closeBtn.addEventListener("click", toggleInPersonPanel);
+  if (backdrop) backdrop.addEventListener("click", toggleInPersonPanel);
+}
+
+function toggleInPersonPanel() {
+  const panel = $("in-person-panel");
+  const backdrop = $("in-person-backdrop");
+  if (!panel) return;
+  const isOpen = panel.classList.contains("open");
+  panel.classList.toggle("open", !isOpen);
+  if (backdrop) backdrop.classList.toggle("open", !isOpen);
+  if (!isOpen && inPersonData) renderInPersonPanel(inPersonData);
 }
 
 async function loadInPersonData() {
   try {
     const res = await adminFetch("/api/relationship/in-person");
     const data = await res.json();
-    renderInPersonMonitor(data);
+    inPersonData = data;
+    renderInPersonToolbar(data);
+    // If panel is open, update it too
+    if ($("in-person-panel")?.classList.contains("open")) {
+      renderInPersonPanel(data);
+    }
   } catch {
     // silently ignore poll failures
   }
 }
 
-function renderInPersonMonitor(data) {
+function renderInPersonToolbar(data) {
   const dot = $("in-person-dot");
-  const status = $("in-person-status");
-  const totalEl = $("in-person-total");
-  const todayEl = $("in-person-today");
-  const msgsEl = $("in-person-messages");
-  const emptyEl = $("in-person-empty");
-
-  if (totalEl) totalEl.textContent = data.totalMessages;
-  if (todayEl) todayEl.textContent = data.todayMessages;
+  const textEl = $("in-person-toolbar-text");
 
   // Flash green when new messages arrive
   if (data.totalMessages > lastInPersonCount && lastInPersonCount > 0) {
@@ -644,43 +746,49 @@ function renderInPersonMonitor(data) {
   }
   lastInPersonCount = data.totalMessages;
 
-  // Status text
-  if (status) {
-    if (data.lastMessageAt) {
-      const ago = timeAgo(data.lastMessageAt * 1000);
-      status.textContent = `Last import: ${ago}`;
-      dot?.classList.remove("red");
-      dot?.classList.add("green");
-    } else {
-      status.textContent = "Waiting for first import...";
-    }
+  if (dot) {
+    dot.classList.remove("red", "green", "yellow");
+    dot.classList.add(data.lastMessageAt ? "green" : "red");
+  }
+  if (textEl) {
+    textEl.innerHTML = `In-person: <strong>${data.todayMessages} today</strong>`;
+  }
+}
+
+function renderInPersonPanel(data) {
+  const totalEl = $("panel-in-person-total");
+  const todayEl = $("panel-in-person-today");
+  const feedEl = $("panel-in-person-feed");
+
+  if (totalEl) totalEl.textContent = data.totalMessages;
+  if (todayEl) todayEl.textContent = data.todayMessages;
+
+  if (!feedEl) return;
+
+  if (!data.recentMessages || data.recentMessages.length === 0) {
+    feedEl.innerHTML = '<div class="slide-panel-empty">No in-person conversations imported yet.<br>Send messages from your transcription app to see them here.</div>';
+    return;
   }
 
-  // Render recent messages
-  if (data.recentMessages && data.recentMessages.length > 0) {
-    if (emptyEl) emptyEl.style.display = "none";
-    if (msgsEl) {
-      msgsEl.innerHTML = data.recentMessages.map(m => {
-        const time = new Date(m.timestamp * 1000).toLocaleTimeString("en-US", {
-          hour: "numeric", minute: "2-digit"
-        });
-        const date = new Date(m.timestamp * 1000).toLocaleDateString("en-US", {
-          month: "short", day: "numeric"
-        });
-        const speaker = m.speaker === "self" ? "Ben" : "Hope";
-        const color = m.speaker === "self" ? "var(--accent)" : "var(--pink)";
-        const body = m.body.length > 120 ? m.body.slice(0, 120) + "..." : m.body;
-        return `<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;">
-          <span style="color:var(--text-dim);margin-right:6px;">${date} ${time}</span>
-          <span style="color:${color};font-weight:600;">${speaker}:</span>
-          <span style="color:var(--text);">${escapeHtml(body)}</span>
-        </div>`;
-      }).join("");
-    }
-  } else {
-    if (emptyEl) emptyEl.style.display = "block";
-    if (msgsEl) msgsEl.innerHTML = "";
-  }
+  const isAdminUser = userRole === "admin";
+  feedEl.innerHTML = data.recentMessages.map(m => {
+    const time = new Date(m.timestamp * 1000).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+    const date = new Date(m.timestamp * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    const speaker = m.speaker === "self" ? "Ben" : "Hope";
+    const color = m.speaker === "self" ? "var(--accent)" : "var(--pink)";
+    const body = m.body.length > 150 ? m.body.slice(0, 150) + "..." : m.body;
+    const deleteBtn = isAdminUser
+      ? `<button class="slide-panel-msg-delete" onclick="deleteInPersonMessage('${escapeAttr(m.id)}', this)" title="Delete">&times;</button>`
+      : "";
+    return `<div class="slide-panel-msg">
+      <div class="slide-panel-msg-content">
+        <span style="color:var(--text-dim);margin-right:6px;">${date} ${time}</span>
+        <span style="color:${color};font-weight:600;">${speaker}:</span>
+        <span style="color:var(--text);">${escapeHtml(body)}</span>
+      </div>
+      ${deleteBtn}
+    </div>`;
+  }).join("");
 }
 
 function timeAgo(ts) {
@@ -1902,6 +2010,121 @@ async function toggleDailyCard(card) {
   } catch (err) {
     messagesEl.innerHTML = `<div class="loading-messages" style="color:var(--red)">Failed: ${escapeHtml(err.message)}</div>`;
   }
+}
+
+// ── Delete In-Person Messages ──
+
+async function deleteInPersonMessage(id, btnEl) {
+  if (!confirm("Delete this message?")) return;
+  try {
+    const res = await adminFetch(`/api/relationship/messages/${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || "Delete failed");
+    }
+    // Remove from DOM
+    const msgEl = btnEl.closest(".slide-panel-msg");
+    if (msgEl) msgEl.remove();
+    // Refresh data
+    loadInPersonData();
+  } catch (err) {
+    alert("Failed to delete: " + err.message);
+  }
+}
+
+// ── Chat ──
+
+let chatHistory = [];
+
+function setupChat() {
+  const fab = $("chat-fab");
+  const form = $("chat-form");
+
+  if (fab) {
+    fab.classList.remove("hidden");
+    fab.addEventListener("click", toggleChat);
+  }
+  if (form) {
+    form.addEventListener("submit", handleChatSubmit);
+  }
+}
+
+function toggleChat() {
+  const panel = $("chat-panel");
+  const fab = $("chat-fab");
+  if (!panel) return;
+  const isOpen = panel.classList.contains("open");
+  panel.classList.toggle("open", !isOpen);
+  if (fab) fab.classList.toggle("open", !isOpen);
+  if (!isOpen) {
+    setTimeout(() => $("chat-input")?.focus(), 100);
+  }
+}
+
+async function handleChatSubmit(e) {
+  e.preventDefault();
+  const input = $("chat-input");
+  const sendBtn = $("chat-send");
+  if (!input || !input.value.trim()) return;
+
+  const message = input.value.trim();
+  input.value = "";
+
+  // Append user message
+  chatHistory.push({ role: "user", content: message });
+  appendChatMessage("user", message);
+
+  // Show loading
+  const loadingEl = appendChatMessage("assistant", "Thinking...", true);
+
+  if (sendBtn) sendBtn.disabled = true;
+
+  try {
+    const res = await adminFetch("/api/relationship/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages: chatHistory.slice(-20) }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Chat failed");
+
+    // Replace loading with response
+    if (loadingEl) loadingEl.remove();
+    chatHistory.push({ role: "assistant", content: data.response });
+    appendChatMessage("assistant", data.response);
+  } catch (err) {
+    if (loadingEl) loadingEl.remove();
+    appendChatMessage("assistant", "Sorry, something went wrong: " + err.message);
+  } finally {
+    if (sendBtn) sendBtn.disabled = false;
+    $("chat-input")?.focus();
+  }
+}
+
+function appendChatMessage(role, content, isLoading) {
+  const container = $("chat-messages");
+  if (!container) return null;
+
+  const msg = document.createElement("div");
+  msg.className = `chat-msg ${role}${isLoading ? " loading" : ""}`;
+
+  if (role === "assistant" && !isLoading) {
+    // Simple markdown-like rendering
+    msg.innerHTML = content
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/\*(.+?)\*/g, "<em>$1</em>")
+      .replace(/`(.+?)`/g, "<code style='background:var(--bg);padding:1px 4px;border-radius:3px;font-size:12px'>$1</code>")
+      .replace(/\n\n/g, "</p><p>")
+      .replace(/\n/g, "<br>");
+    msg.innerHTML = "<p>" + msg.innerHTML + "</p>";
+  } else {
+    msg.textContent = content;
+  }
+
+  container.appendChild(msg);
+  container.scrollTop = container.scrollHeight;
+  return msg;
 }
 
 // ── Utilities ──

@@ -332,6 +332,36 @@ export class RelationshipStore {
     return { lastMessageTimestamp: lastTs, todayMessageCount: todayCount };
   }
 
+  /** Fetch messages between two dates (for AI chat tool use) */
+  getMessagesByRange(startDate: string, endDate: string): RelationshipMessage[] {
+    return this.db.prepare(
+      `SELECT * FROM relationship_messages WHERE date(datetime(timestamp, 'unixepoch')) >= ? AND date(datetime(timestamp, 'unixepoch')) <= ? ORDER BY timestamp ASC`
+    ).all(startDate, endDate) as RelationshipMessage[];
+  }
+
+  /** Compact daily message counts for the last N days (for AI chat context) */
+  getDailyMessageCounts(days: number): Array<{ day: string; count: number }> {
+    return this.db.prepare(`
+      SELECT date(datetime(timestamp, 'unixepoch')) as day, COUNT(*) as count
+      FROM relationship_messages
+      WHERE timestamp >= unixepoch('now', '-' || ? || ' days')
+      GROUP BY day ORDER BY day DESC
+    `).all(days) as Array<{ day: string; count: number }>;
+  }
+
+  /** Get all analysis summaries (compact — for AI chat context) */
+  getAllAnalysisSummaries(): Array<{ date: string; score: number; summary: string }> {
+    return this.db.prepare(`
+      SELECT date, json_extract(metrics_json, '$.overallHealthScore') as score, summary
+      FROM relationship_analyses ORDER BY date DESC
+    `).all() as Array<{ date: string; score: number; summary: string }>;
+  }
+
+  deleteMessage(id: string): boolean {
+    const result = this.db.prepare(`DELETE FROM relationship_messages WHERE id = ?`).run(id);
+    return result.changes > 0;
+  }
+
   getInPersonStats() {
     const total = this.db.prepare(
       `SELECT COUNT(*) as count FROM relationship_messages WHERE source = 'in-person'`

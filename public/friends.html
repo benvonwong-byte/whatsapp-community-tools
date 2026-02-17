@@ -699,6 +699,134 @@
     .error-state { text-align: center; padding: 40px 20px; color: var(--red); font-size: 14px; }
     .hidden { display: none !important; }
 
+    /* Tier pills on dashboard */
+    .tier-pills { display: flex; flex-wrap: wrap; gap: 8px; }
+    .tier-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 5px 14px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: border-color 0.15s;
+    }
+    .tier-pill:hover { border-color: var(--accent); }
+    .tier-pill .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+    }
+    .tier-pill .count {
+      color: var(--text-dim);
+      font-weight: 600;
+    }
+
+    /* Tag filters */
+    .tag-filters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .tag-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 3px 10px;
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.15s;
+      user-select: none;
+    }
+    .tag-chip:hover { border-color: var(--accent); }
+    .tag-chip.active { background: var(--accent); color: #000; border-color: var(--accent); }
+    .tag-chip .tag-count { opacity: 0.6; font-size: 10px; }
+    .tag-mode-toggle {
+      font-size: 11px;
+      color: var(--text-dim);
+      cursor: pointer;
+      padding: 3px 8px;
+      border: 1px dashed var(--border);
+      border-radius: 4px;
+    }
+    .tag-mode-toggle:hover { color: var(--accent); border-color: var(--accent); }
+
+    /* Detail panel tags */
+    .detail-tags { padding: 0 0 8px; display: flex; flex-wrap: wrap; gap: 4px; }
+    .detail-tag {
+      background: var(--surface2);
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: 11px;
+      color: var(--accent);
+    }
+
+    /* Detail voice stats */
+    .detail-voice-stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .voice-stat-item {
+      background: var(--surface);
+      border-radius: 6px;
+      padding: 8px 10px;
+      text-align: center;
+    }
+    .voice-stat-item .val { font-size: 16px; font-weight: 700; }
+    .voice-stat-item .lbl { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+
+    /* Calendar grid */
+    .calendar-grid {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 2px;
+    }
+    .cal-header {
+      text-align: center;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-dim);
+      padding: 6px 2px;
+    }
+    .cal-day {
+      background: var(--surface);
+      border-radius: 6px;
+      padding: 6px;
+      min-height: 70px;
+      position: relative;
+    }
+    .cal-day.empty { background: transparent; }
+    .cal-day.today { border: 1px solid var(--accent); }
+    .cal-day-num {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-dim);
+      margin-bottom: 4px;
+    }
+    .cal-contact {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      font-size: 10px;
+      line-height: 1.5;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .cal-contact .dot {
+      width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+    }
+    .cal-contact .cnt {
+      color: var(--text-dim);
+      font-size: 9px;
+    }
+
     /* Responsive */
     @media (max-width: 768px) {
       .stats-grid { grid-template-columns: repeat(2, 1fr); }
@@ -713,6 +841,9 @@
       .contact-detail { width: 100%; max-width: 100vw; }
       .filter-bar { gap: 6px; }
       .detail-stats { grid-template-columns: 1fr 1fr; }
+      .calendar-grid { gap: 1px; }
+      .cal-day { min-height: 50px; padding: 4px; }
+      .cal-contact span:not(.dot):not(.cnt) { display: none; }
     }
   </style>
 </head>
@@ -730,7 +861,9 @@
   <div class="tabs">
     <div class="tab active" data-tab="dashboard">Dashboard</div>
     <div class="tab" data-tab="contacts">Contacts</div>
+    <div class="tab" data-tab="tiers">Tiers</div>
     <div class="tab" data-tab="groups">Groups</div>
+    <div class="tab" data-tab="calendar">Calendar</div>
     <div class="tab" data-tab="messaging">Messaging</div>
     <div class="tab" data-tab="chats">Manage Chats</div>
   </div>
@@ -765,6 +898,16 @@
           <div class="stat-value" id="stat-avg-response">--</div>
           <div class="stat-label">Avg Response</div>
         </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-voice-minutes">0</div>
+          <div class="stat-label">Voice Minutes</div>
+        </div>
+      </div>
+
+      <!-- Tier distribution -->
+      <div class="section" id="tier-distribution-section">
+        <div class="section-title">Tier Overview</div>
+        <div id="tier-pills" class="tier-pills"></div>
       </div>
 
       <!-- Weekly chart -->
@@ -801,14 +944,18 @@
         <select id="filter-group" class="filter-select">
           <option value="">All Groups</option>
         </select>
+        <select id="filter-tier" class="filter-select">
+          <option value="">All Tiers</option>
+        </select>
         <select id="filter-quality" class="filter-select">
           <option value="">All Quality</option>
           <option value="high">High</option>
           <option value="medium">Medium</option>
           <option value="low">Low</option>
         </select>
-        <input type="text" id="filter-search" class="filter-search" placeholder="Search contacts...">
+        <input type="text" id="contact-search" class="filter-search" placeholder="Search contacts...">
       </div>
+      <div id="tag-filters" class="tag-filters"></div>
 
       <!-- Contacts table -->
       <div class="section" style="padding: 0; overflow-x: auto;">
@@ -816,7 +963,7 @@
           <thead>
             <tr>
               <th data-sort="name">Name</th>
-              <th data-sort="group">Group</th>
+              <th data-sort="tier">Tier</th>
               <th data-sort="lastContact">Last Contact</th>
               <th data-sort="messages30d">30d Msgs</th>
               <th data-sort="initRatio">Init Ratio</th>
@@ -828,6 +975,22 @@
             <tr><td colspan="7" style="text-align:center;color:var(--text-dim);padding:40px;">No contacts loaded.</td></tr>
           </tbody>
         </table>
+      </div>
+
+    </div>
+
+    <!-- ==================== Tiers Tab ==================== -->
+    <div id="tab-tiers" class="tab-content">
+
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+        <div class="section-title" style="margin-bottom:0;">Friend Tiers</div>
+        <button id="create-tier-btn" class="header-btn" style="font-size:11px;padding:5px 14px;">+ New Tier</button>
+      </div>
+
+      <div id="tier-lanes" class="group-lanes">
+        <div class="chart-empty" style="flex:1;display:flex;align-items:center;justify-content:center;">
+          Loading tiers...
+        </div>
       </div>
 
     </div>
@@ -848,6 +1011,16 @@
 
     </div>
 
+    <!-- ==================== Calendar Tab ==================== -->
+    <div id="tab-calendar" class="tab-content">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+        <button id="cal-prev" class="header-btn secondary" style="font-size:11px;padding:5px 12px;">&larr; Prev</button>
+        <div class="section-title" style="margin-bottom:0;" id="cal-month-title">--</div>
+        <button id="cal-next" class="header-btn secondary" style="font-size:11px;padding:5px 12px;">Next &rarr;</button>
+      </div>
+      <div id="calendar-grid" class="calendar-grid"></div>
+    </div>
+
     <!-- ==================== Messaging Tab ==================== -->
     <div id="tab-messaging" class="tab-content">
 
@@ -856,10 +1029,10 @@
         <div class="section-title">Select Recipients</div>
 
         <!-- Group select buttons -->
-        <div id="recipient-groups" class="recipient-groups"></div>
+        <div id="msg-group-buttons" class="recipient-groups"></div>
 
         <!-- Individual contacts -->
-        <div id="recipient-contacts" class="recipient-contacts"></div>
+        <div id="msg-contact-pills" class="recipient-contacts"></div>
 
         <div id="recipient-count" class="recipient-count">0 recipients selected</div>
       </div>
@@ -867,20 +1040,20 @@
       <!-- Compose -->
       <div class="section">
         <div class="section-title">Compose Message</div>
-        <textarea id="message-text" class="composer" placeholder="Type your message..."></textarea>
+        <textarea id="msg-text" class="composer" placeholder="Type your message..."></textarea>
 
         <!-- Media upload -->
         <div id="media-upload" class="media-upload">
           Click or drag an image here to attach
         </div>
-        <input type="file" id="media-file" accept="image/*" style="display:none;">
+        <input type="file" id="media-file-input" accept="image/*" style="display:none;">
         <div id="media-preview" class="media-preview"></div>
 
         <!-- Send -->
         <div class="send-actions">
           <button id="send-btn" class="send-btn" disabled>Send to <span id="send-count">0</span></button>
 
-          <div id="send-progress-container" class="send-progress-container">
+          <div id="send-progress" class="send-progress-container">
             <div class="send-progress-bar">
               <div id="send-progress-fill" class="send-progress-fill"></div>
             </div>
@@ -909,7 +1082,7 @@
 
   <!-- ==================== Contact Detail Panel ==================== -->
   <div id="detail-overlay" class="detail-overlay"></div>
-  <div id="contact-detail" class="contact-detail">
+  <div id="detail-panel" class="contact-detail">
     <div class="detail-header">
       <span style="font-size:14px;font-weight:600;">Contact Details</span>
       <button class="close-btn" id="detail-close">&times;</button>
@@ -918,7 +1091,9 @@
       <div id="detail-name" class="detail-name">--</div>
       <div id="detail-groups" class="detail-groups">No groups</div>
 
+      <div id="detail-tags" class="detail-tags"></div>
       <div id="detail-stats" class="detail-stats"></div>
+      <div id="detail-voice-stats" class="detail-voice-stats"></div>
 
       <div class="detail-chart-section">
         <div class="section-title">Activity (30 days)</div>
@@ -927,8 +1102,8 @@
 
       <div class="detail-notes">
         <div class="section-title">Notes</div>
-        <textarea id="detail-notes" placeholder="Add notes about this contact..."></textarea>
-        <button id="detail-save-notes" class="save-notes-btn">Save Notes</button>
+        <textarea id="contact-notes" placeholder="Add notes about this contact..."></textarea>
+        <button id="save-notes-btn" class="save-notes-btn">Save Notes</button>
       </div>
     </div>
   </div>
@@ -948,6 +1123,25 @@
       <div class="modal-actions">
         <button class="modal-cancel" id="group-modal-cancel">Cancel</button>
         <button class="modal-save" id="group-modal-save">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== Create/Edit Tier Modal ==================== -->
+  <div id="tier-modal" class="modal-overlay">
+    <div class="modal-dialog">
+      <div class="modal-title">New Tier</div>
+      <div class="modal-field">
+        <label for="tier-modal-name">Tier Name</label>
+        <input type="text" id="tier-modal-name" placeholder="e.g. Inner Circle">
+      </div>
+      <div class="modal-field">
+        <label for="tier-modal-color">Color</label>
+        <input type="color" id="tier-modal-color" value="#4fc3f7">
+      </div>
+      <div class="modal-actions">
+        <button class="modal-cancel" id="tier-modal-cancel">Cancel</button>
+        <button class="modal-save" id="tier-modal-save">Save</button>
       </div>
     </div>
   </div>

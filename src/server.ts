@@ -60,7 +60,28 @@ function requireAdmin(req: Request, res: Response, next: NextFunction): void {
     res.status(401).json({ error: "Unauthorized. Provide ?token=<ADMIN_TOKEN> or Authorization header." });
     return;
   }
+  (res as any).locals.role = "admin";
   next();
+}
+
+// Auth middleware: accepts both admin and guest tokens
+function requireAuth(req: Request, res: Response, next: NextFunction): void {
+  const token = (req.query.token as string) || req.headers.authorization?.replace("Bearer ", "");
+  if (!token) {
+    res.status(401).json({ error: "Unauthorized." });
+    return;
+  }
+  if (timingSafeEqual(token, config.adminToken)) {
+    (res as any).locals.role = "admin";
+    next();
+    return;
+  }
+  if (timingSafeEqual(token, config.guestToken)) {
+    (res as any).locals.role = "guest";
+    next();
+    return;
+  }
+  res.status(401).json({ error: "Unauthorized." });
 }
 
 export interface ServerOptions {
@@ -72,8 +93,8 @@ export interface ServerOptions {
   // IndexedDB inspection/cleanup (runs inside Puppeteer page)
   idbInspect?: () => Promise<any>;
   idbClean?: (opts: { dryRun?: boolean }) => Promise<any>;
-  // App routers mounted under /api/<app> (all admin-protected)
-  appRouters?: { path: string; router: any }[];
+  // App routers mounted under /api/<app> (admin-protected by default, or auth-level for guest+admin)
+  appRouters?: { path: string; router: any; authLevel?: "admin" | "auth" }[];
 }
 
 export function startServer(opts: ServerOptions): void {
@@ -117,15 +138,20 @@ export function startServer(opts: ServerOptions): void {
   const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: { error: "Too many login attempts. Try again later." } });
   app.post("/api/login", loginLimiter, (req, res) => {
     const { email, password } = req.body;
-    if (!config.adminEmail || !config.adminPassword) {
-      res.status(503).json({ error: "Login not configured." });
+    // Check admin credentials first
+    if (config.adminEmail && config.adminPassword &&
+        timingSafeEqual(email || "", config.adminEmail) && timingSafeEqual(password || "", config.adminPassword)) {
+      res.json({ token: config.adminToken, role: "admin" });
       return;
     }
-    if (timingSafeEqual(email, config.adminEmail) && timingSafeEqual(password, config.adminPassword)) {
-      res.json({ token: config.adminToken });
-    } else {
-      res.status(401).json({ error: "Invalid credentials." });
+    // Check guest credentials (email field used as username, case-insensitive)
+    if (config.guestUsername && config.guestPassword &&
+        (email || "").toLowerCase() === config.guestUsername.toLowerCase() &&
+        timingSafeEqual(password || "", config.guestPassword)) {
+      res.json({ token: config.guestToken, role: "guest" });
+      return;
     }
+    res.status(401).json({ error: "Invalid credentials." });
   });
 
   // Connection status
@@ -670,11 +696,12 @@ export function startServer(opts: ServerOptions): void {
     res.json({ actions, cacheCleared: formatBytes(cacheCleared) });
   });
 
-  // Mount app-specific routers (all admin-protected)
+  // Mount app-specific routers (admin-protected by default, or auth-level for guest+admin)
   if (opts.appRouters) {
-    for (const { path: routePath, router } of opts.appRouters) {
-      app.use(routePath, requireAdmin, router);
-      console.log(`[server] Mounted app router at ${routePath}`);
+    for (const { path: routePath, router, authLevel } of opts.appRouters) {
+      const middleware = authLevel === "auth" ? requireAuth : requireAdmin;
+      app.use(routePath, middleware, router);
+      console.log(`[server] Mounted app router at ${routePath} (${authLevel || "admin"})`);
     }
   }
 

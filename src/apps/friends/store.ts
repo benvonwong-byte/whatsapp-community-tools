@@ -19,7 +19,42 @@ export interface FriendsContact {
   first_seen: number;
   last_seen: number;
   notes: string;
+  tier_id: number | null;
   created_at: string;
+}
+
+export interface FriendsTier {
+  id: number;
+  name: string;
+  color: string;
+  sort_order: number;
+  is_default: number;
+  created_at: string;
+}
+
+export interface FriendsVoiceNote {
+  id: string;
+  contact_id: string;
+  chat_id: string;
+  transcript: string;
+  duration_estimate: number;
+  timestamp: number;
+  is_from_me: number;
+  created_at: string;
+}
+
+export interface FriendsTag {
+  id: number;
+  name: string;
+  created_at: string;
+}
+
+export interface FriendsContactTag {
+  contact_id: string;
+  tag_id: number;
+  confidence: number;
+  last_seen: number;
+  mention_count: number;
 }
 
 export interface FriendsMessageInput {
@@ -47,11 +82,15 @@ export interface ContactWithStats {
   first_seen: number;
   last_seen: number;
   notes: string;
+  tier_id: number | null;
+  tier_name: string | null;
+  tier_color: string | null;
   total_messages: number;
   sent_messages: number;
   received_messages: number;
   messages_30d: number;
   group_names: string | null;
+  tag_names: string | null;
   initiation_ratio: number;
   my_avg_response_sec: number;
   their_avg_response_sec: number;
@@ -165,7 +204,70 @@ export class FriendsStore {
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS friends_tiers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        color TEXT DEFAULT '#4fc3f7',
+        sort_order INTEGER DEFAULT 0,
+        is_default INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS friends_voice_notes (
+        id TEXT PRIMARY KEY,
+        contact_id TEXT NOT NULL,
+        chat_id TEXT NOT NULL,
+        transcript TEXT DEFAULT '',
+        duration_estimate REAL DEFAULT 30.0,
+        timestamp INTEGER NOT NULL,
+        is_from_me INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_friends_voice_contact ON friends_voice_notes(contact_id);
+      CREATE INDEX IF NOT EXISTS idx_friends_voice_timestamp ON friends_voice_notes(timestamp);
+
+      CREATE TABLE IF NOT EXISTS friends_tags (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS friends_contact_tags (
+        contact_id TEXT NOT NULL,
+        tag_id INTEGER NOT NULL,
+        confidence REAL DEFAULT 1.0,
+        last_seen INTEGER NOT NULL,
+        mention_count INTEGER DEFAULT 1,
+        PRIMARY KEY (contact_id, tag_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS friends_tag_buffer (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        contact_id TEXT NOT NULL,
+        message_body TEXT NOT NULL,
+        timestamp INTEGER NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
     `);
+
+    // Migration: add tier_id column to friends_contacts
+    try {
+      this.db.exec(`ALTER TABLE friends_contacts ADD COLUMN tier_id INTEGER REFERENCES friends_tiers(id) ON DELETE SET NULL`);
+    } catch { /* column already exists */ }
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_friends_contacts_tier ON friends_contacts(tier_id)`);
+
+    // Seed default tiers if none exist
+    const tierCount = (this.db.prepare(`SELECT COUNT(*) as c FROM friends_tiers`).get() as any).c;
+    if (tierCount === 0) {
+      const seedTiers = this.db.prepare(`INSERT INTO friends_tiers (name, color, sort_order, is_default) VALUES (?, ?, ?, ?)`);
+      seedTiers.run("Inner Circle", "#e91e63", 0, 1);
+      seedTiers.run("Close Friends", "#4fc3f7", 1, 0);
+      seedTiers.run("Acquaintances", "#fdcb6e", 2, 0);
+      seedTiers.run("New", "#00b894", 3, 0);
+      seedTiers.run("Dormant", "#636e72", 4, 0);
+      console.log("[friends] Seeded 5 default tiers.");
+    }
 
     this.stmts = {
       upsertChat: this.db.prepare(`
@@ -411,10 +513,11 @@ export class FriendsStore {
     const thirtyDaysAgo = now - 30 * 86400;
     const ninetyDaysAgo = now - 90 * 86400;
 
-    // Get all contacts with basic message stats
+    // Get all contacts with basic message stats, tier info, and tags
     const contacts = this.db.prepare(`
       SELECT
         c.id, c.name, c.first_seen, c.last_seen, c.notes,
+        c.tier_id, t.name as tier_name, t.color as tier_color,
         COALESCE(stats.total_messages, 0) as total_messages,
         COALESCE(stats.sent_messages, 0) as sent_messages,
         COALESCE(stats.received_messages, 0) as received_messages,
@@ -422,8 +525,13 @@ export class FriendsStore {
         (SELECT GROUP_CONCAT(g.name, ', ')
          FROM friends_contact_groups cg
          JOIN friends_groups g ON g.id = cg.group_id
-         WHERE cg.contact_id = c.id) as group_names
+         WHERE cg.contact_id = c.id) as group_names,
+        (SELECT GROUP_CONCAT(tg.name, ', ')
+         FROM friends_contact_tags ct
+         JOIN friends_tags tg ON tg.id = ct.tag_id
+         WHERE ct.contact_id = c.id) as tag_names
       FROM friends_contacts c
+      LEFT JOIN friends_tiers t ON t.id = c.tier_id
       LEFT JOIN (
         SELECT
           CASE WHEN is_from_me = 0 THEN sender_id
@@ -605,6 +713,241 @@ export class FriendsStore {
 
   setSetting(key: string, value: string) {
     this.db.prepare(`INSERT OR REPLACE INTO friends_settings (key, value) VALUES (?, ?)`).run(key, value);
+  }
+
+  // ── Tier methods ──
+
+  getTiers(): FriendsTier[] {
+    return this.db.prepare(`SELECT * FROM friends_tiers ORDER BY sort_order ASC, name ASC`).all() as FriendsTier[];
+  }
+
+  createTier(name: string, color: string): number {
+    const maxOrder = (this.db.prepare(`SELECT MAX(sort_order) as m FROM friends_tiers`).get() as any)?.m || 0;
+    const result = this.db.prepare(`INSERT INTO friends_tiers (name, color, sort_order) VALUES (?, ?, ?)`).run(name, color, maxOrder + 1);
+    return result.lastInsertRowid as number;
+  }
+
+  updateTier(id: number, name: string, color: string, sortOrder: number) {
+    this.db.prepare(`UPDATE friends_tiers SET name = ?, color = ?, sort_order = ? WHERE id = ?`).run(name, color, sortOrder, id);
+  }
+
+  deleteTier(id: number) {
+    this.db.prepare(`DELETE FROM friends_tiers WHERE id = ?`).run(id);
+  }
+
+  setContactTier(contactId: string, tierId: number | null) {
+    this.db.prepare(`UPDATE friends_contacts SET tier_id = ? WHERE id = ?`).run(tierId, contactId);
+  }
+
+  getTierDistribution(): Array<{ tier_id: number | null; tier_name: string | null; tier_color: string | null; count: number }> {
+    return this.db.prepare(`
+      SELECT c.tier_id, t.name as tier_name, t.color as tier_color, COUNT(*) as count
+      FROM friends_contacts c
+      LEFT JOIN friends_tiers t ON t.id = c.tier_id
+      GROUP BY c.tier_id
+      ORDER BY t.sort_order ASC
+    `).all() as any[];
+  }
+
+  // ── Voice note methods ──
+
+  saveVoiceNote(note: { id: string; contact_id: string; chat_id: string; transcript: string; duration_estimate: number; timestamp: number; is_from_me: boolean }) {
+    this.db.prepare(`
+      INSERT OR IGNORE INTO friends_voice_notes (id, contact_id, chat_id, transcript, duration_estimate, timestamp, is_from_me)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(note.id, note.contact_id, note.chat_id, note.transcript, note.duration_estimate, note.timestamp, note.is_from_me ? 1 : 0);
+  }
+
+  isVoiceNoteDuplicate(id: string): boolean {
+    return !!this.db.prepare(`SELECT 1 FROM friends_voice_notes WHERE id = ?`).get(id);
+  }
+
+  getVoiceNotesByContact(contactId: string, limit = 50): FriendsVoiceNote[] {
+    return this.db.prepare(`
+      SELECT * FROM friends_voice_notes WHERE contact_id = ?
+      ORDER BY timestamp DESC LIMIT ?
+    `).all(contactId, limit) as FriendsVoiceNote[];
+  }
+
+  getVoiceStatsByContact(contactId: string): { total_notes: number; total_minutes: number; sent_notes: number; received_notes: number; last_voice: number | null } {
+    const row = this.db.prepare(`
+      SELECT
+        COUNT(*) as total_notes,
+        COALESCE(SUM(duration_estimate) / 60.0, 0) as total_minutes,
+        SUM(CASE WHEN is_from_me = 1 THEN 1 ELSE 0 END) as sent_notes,
+        SUM(CASE WHEN is_from_me = 0 THEN 1 ELSE 0 END) as received_notes,
+        MAX(timestamp) as last_voice
+      FROM friends_voice_notes WHERE contact_id = ?
+    `).get(contactId) as any;
+    return {
+      total_notes: row?.total_notes || 0,
+      total_minutes: Math.round((row?.total_minutes || 0) * 10) / 10,
+      sent_notes: row?.sent_notes || 0,
+      received_notes: row?.received_notes || 0,
+      last_voice: row?.last_voice || null,
+    };
+  }
+
+  getVoiceStatsAll(): Array<{ contact_id: string; name: string; total_notes: number; total_minutes: number; sent_notes: number; received_notes: number }> {
+    return this.db.prepare(`
+      SELECT
+        v.contact_id, c.name,
+        COUNT(*) as total_notes,
+        ROUND(SUM(v.duration_estimate) / 60.0, 1) as total_minutes,
+        SUM(CASE WHEN v.is_from_me = 1 THEN 1 ELSE 0 END) as sent_notes,
+        SUM(CASE WHEN v.is_from_me = 0 THEN 1 ELSE 0 END) as received_notes
+      FROM friends_voice_notes v
+      JOIN friends_contacts c ON c.id = v.contact_id
+      GROUP BY v.contact_id
+      ORDER BY total_minutes DESC
+    `).all() as any[];
+  }
+
+  getDashboardVoiceTotal(): { total_notes: number; total_minutes: number } {
+    const row = this.db.prepare(`
+      SELECT COUNT(*) as total_notes, COALESCE(SUM(duration_estimate) / 60.0, 0) as total_minutes
+      FROM friends_voice_notes
+    `).get() as any;
+    return { total_notes: row?.total_notes || 0, total_minutes: Math.round((row?.total_minutes || 0) * 10) / 10 };
+  }
+
+  // ── Tag methods ──
+
+  getOrCreateTag(name: string): number {
+    const normalized = name.toLowerCase().trim();
+    const existing = this.db.prepare(`SELECT id FROM friends_tags WHERE name = ?`).get(normalized) as { id: number } | undefined;
+    if (existing) return existing.id;
+    const result = this.db.prepare(`INSERT INTO friends_tags (name) VALUES (?)`).run(normalized);
+    return result.lastInsertRowid as number;
+  }
+
+  addContactTag(contactId: string, tagName: string, timestamp: number, confidence = 1.0) {
+    const tagId = this.getOrCreateTag(tagName);
+    this.db.prepare(`
+      INSERT INTO friends_contact_tags (contact_id, tag_id, confidence, last_seen, mention_count)
+      VALUES (?, ?, ?, ?, 1)
+      ON CONFLICT(contact_id, tag_id) DO UPDATE SET
+        confidence = MAX(friends_contact_tags.confidence, excluded.confidence),
+        last_seen = MAX(friends_contact_tags.last_seen, excluded.last_seen),
+        mention_count = friends_contact_tags.mention_count + 1
+    `).run(contactId, tagId, confidence, timestamp);
+  }
+
+  getContactTags(contactId: string): Array<{ tag_id: number; name: string; confidence: number; mention_count: number }> {
+    return this.db.prepare(`
+      SELECT ct.tag_id, t.name, ct.confidence, ct.mention_count
+      FROM friends_contact_tags ct
+      JOIN friends_tags t ON t.id = ct.tag_id
+      WHERE ct.contact_id = ?
+      ORDER BY ct.mention_count DESC
+    `).all(contactId) as any[];
+  }
+
+  getAllTags(): Array<{ id: number; name: string; contact_count: number }> {
+    return this.db.prepare(`
+      SELECT t.id, t.name, COUNT(ct.contact_id) as contact_count
+      FROM friends_tags t
+      LEFT JOIN friends_contact_tags ct ON ct.tag_id = t.id
+      GROUP BY t.id
+      ORDER BY contact_count DESC
+    `).all() as any[];
+  }
+
+  getContactsWithTags(tagNames: string[], mode: "AND" | "OR" = "OR"): string[] {
+    if (tagNames.length === 0) return [];
+    const placeholders = tagNames.map(() => "?").join(",");
+    if (mode === "OR") {
+      const rows = this.db.prepare(`
+        SELECT DISTINCT ct.contact_id
+        FROM friends_contact_tags ct
+        JOIN friends_tags t ON t.id = ct.tag_id
+        WHERE t.name IN (${placeholders})
+      `).all(...tagNames) as Array<{ contact_id: string }>;
+      return rows.map(r => r.contact_id);
+    } else {
+      const rows = this.db.prepare(`
+        SELECT ct.contact_id
+        FROM friends_contact_tags ct
+        JOIN friends_tags t ON t.id = ct.tag_id
+        WHERE t.name IN (${placeholders})
+        GROUP BY ct.contact_id
+        HAVING COUNT(DISTINCT t.name) = ?
+      `).all(...tagNames, tagNames.length) as Array<{ contact_id: string }>;
+      return rows.map(r => r.contact_id);
+    }
+  }
+
+  // ── Tag buffer methods ──
+
+  addToTagBuffer(contactId: string, body: string, timestamp: number) {
+    this.db.prepare(`INSERT INTO friends_tag_buffer (contact_id, message_body, timestamp) VALUES (?, ?, ?)`).run(contactId, body, timestamp);
+  }
+
+  getTagBufferContacts(minMessages = 20): Array<{ contact_id: string; message_count: number }> {
+    return this.db.prepare(`
+      SELECT contact_id, COUNT(*) as message_count
+      FROM friends_tag_buffer
+      GROUP BY contact_id
+      HAVING message_count >= ?
+    `).all(minMessages) as any[];
+  }
+
+  getTagBufferMessages(contactId: string): Array<{ message_body: string; timestamp: number }> {
+    return this.db.prepare(`
+      SELECT message_body, timestamp FROM friends_tag_buffer
+      WHERE contact_id = ?
+      ORDER BY timestamp ASC
+    `).all(contactId) as any[];
+  }
+
+  clearTagBufferForContact(contactId: string) {
+    this.db.prepare(`DELETE FROM friends_tag_buffer WHERE contact_id = ?`).run(contactId);
+  }
+
+  // ── Calendar ──
+
+  getCalendarData(year: number, month: number): Array<{ day: number; contacts: Array<{ id: string; name: string; count: number; tier_color: string | null }> }> {
+    const startDate = `${year}-${String(month).padStart(2, "0")}-01`;
+    const endMonth = month === 12 ? 1 : month + 1;
+    const endYear = month === 12 ? year + 1 : year;
+    const endDate = `${endYear}-${String(endMonth).padStart(2, "0")}-01`;
+
+    const rows = this.db.prepare(`
+      WITH daily AS (
+        SELECT
+          CAST(strftime('%d', datetime(m.timestamp, 'unixepoch')) AS INTEGER) as day,
+          CASE WHEN m.is_from_me = 0 THEN m.sender_id
+               ELSE (SELECT sender_id FROM friends_messages fm2
+                     WHERE fm2.chat_id = m.chat_id AND fm2.is_from_me = 0
+                     LIMIT 1)
+          END as contact_id,
+          COUNT(*) as msg_count
+        FROM friends_messages m
+        WHERE date(datetime(m.timestamp, 'unixepoch')) >= ? AND date(datetime(m.timestamp, 'unixepoch')) < ?
+        GROUP BY day, contact_id
+      ),
+      ranked AS (
+        SELECT day, contact_id, msg_count,
+          ROW_NUMBER() OVER (PARTITION BY day ORDER BY msg_count DESC) as rn
+        FROM daily
+        WHERE contact_id IS NOT NULL
+      )
+      SELECT r.day, r.contact_id as id, c.name, r.msg_count as count, t.color as tier_color
+      FROM ranked r
+      LEFT JOIN friends_contacts c ON c.id = r.contact_id
+      LEFT JOIN friends_tiers t ON t.id = c.tier_id
+      WHERE r.rn <= 5
+      ORDER BY r.day ASC, r.msg_count DESC
+    `).all(startDate, endDate) as any[];
+
+    // Group by day
+    const dayMap = new Map<number, Array<{ id: string; name: string; count: number; tier_color: string | null }>>();
+    for (const row of rows) {
+      if (!dayMap.has(row.day)) dayMap.set(row.day, []);
+      dayMap.get(row.day)!.push({ id: row.id, name: row.name || "Unknown", count: row.count, tier_color: row.tier_color });
+    }
+
+    return Array.from(dayMap.entries()).map(([day, contacts]) => ({ day, contacts }));
   }
 
   // ── Health ──
