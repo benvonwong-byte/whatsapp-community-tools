@@ -108,7 +108,7 @@
     .section-title { font-size: 12px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 14px; }
 
     /* Stats grid */
-    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
+    .stats-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 14px; }
     .stat-card { background: var(--surface); border-radius: 10px; padding: 12px; text-align: center; }
     .stat-value { font-size: 22px; font-weight: 700; color: var(--accent); }
     .stat-label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
@@ -827,9 +827,79 @@
       font-size: 9px;
     }
 
+    /* Dashboard 2-col grid */
+    .dash-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+
+    /* Top friends leaderboard */
+    .top-friend-row {
+      display: flex; align-items: center; gap: 12px;
+      padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+    .top-friend-row:last-child { border-bottom: none; }
+    .top-friend-rank {
+      font-size: 14px; font-weight: 700; color: var(--text-dim); width: 24px; text-align: center;
+    }
+    .top-friend-rank.gold { color: #ffd700; }
+    .top-friend-rank.silver { color: #c0c0c0; }
+    .top-friend-rank.bronze { color: #cd7f32; }
+    .top-friend-info { flex: 1; }
+    .top-friend-name { font-size: 14px; font-weight: 600; }
+    .top-friend-meta { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+    .top-friend-count {
+      font-size: 18px; font-weight: 700; color: var(--accent);
+    }
+    .top-friend-trend {
+      font-size: 11px; margin-left: 4px;
+    }
+    .top-friend-trend.up { color: var(--green); }
+    .top-friend-trend.down { color: var(--red); }
+    .top-friend-trend.flat { color: var(--text-dim); }
+
+    /* Reciprocity bars */
+    .recip-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.04);
+      font-size: 12px;
+    }
+    .recip-row:last-child { border-bottom: none; }
+    .recip-name { width: 90px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .recip-bar {
+      flex: 1; height: 16px; background: var(--surface2); border-radius: 8px; overflow: hidden;
+      display: flex; position: relative;
+    }
+    .recip-bar-sent { background: var(--accent); height: 100%; transition: width 0.4s; }
+    .recip-bar-received { background: var(--green); height: 100%; transition: width 0.4s; }
+    .recip-pct { width: 40px; text-align: right; font-size: 11px; color: var(--text-dim); }
+
+    /* Streaks */
+    .streak-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+    .streak-row:last-child { border-bottom: none; }
+    .streak-name { font-size: 13px; font-weight: 500; flex: 1; }
+    .streak-badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 12px; font-weight: 700;
+      padding: 3px 10px; border-radius: 999px;
+    }
+    .streak-badge.active { background: rgba(253,203,110,0.15); color: var(--yellow); }
+    .streak-badge.record { background: rgba(79,195,247,0.1); color: var(--accent); }
+
+    /* Fast responders */
+    .fast-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+    .fast-row:last-child { border-bottom: none; }
+    .fast-rank { font-size: 14px; color: var(--text-dim); width: 20px; text-align: center; }
+    .fast-name { font-size: 13px; font-weight: 500; flex: 1; }
+    .fast-time { font-size: 13px; font-weight: 600; color: var(--green); }
+
     /* Responsive */
     @media (max-width: 768px) {
-      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+      .dash-grid-2 { grid-template-columns: 1fr; }
+      .stats-grid { grid-template-columns: repeat(3, 1fr); }
       .header { padding: 10px 14px; }
       .container { padding: 12px; }
       .tabs { padding: 0 12px; }
@@ -881,28 +951,7 @@
     <div id="tab-dashboard" class="tab-content active">
 
       <!-- Summary cards -->
-      <div id="summary-cards" class="stats-grid">
-        <div class="stat-card">
-          <div class="stat-value" id="stat-total-contacts">0</div>
-          <div class="stat-label">Total Contacts</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value" id="stat-active-chats">0</div>
-          <div class="stat-label">Active Chats</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value" id="stat-messages-30d">0</div>
-          <div class="stat-label">Messages (30d)</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value" id="stat-avg-response">--</div>
-          <div class="stat-label">Avg Response</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value" id="stat-voice-minutes">0</div>
-          <div class="stat-label">Voice Minutes</div>
-        </div>
-      </div>
+      <div id="summary-cards" class="stats-grid"></div>
 
       <!-- Tier distribution -->
       <div class="section" id="tier-distribution-section">
@@ -910,11 +959,64 @@
         <div id="tier-pills" class="tier-pills"></div>
       </div>
 
-      <!-- Weekly chart -->
+      <!-- Top Friends leaderboard -->
       <div class="section">
-        <div class="section-title">Weekly Interaction Volume</div>
-        <div class="chart-container">
-          <canvas id="weekly-chart"></canvas>
+        <div class="section-title">Top 5 Friends (30d)</div>
+        <div id="top-friends-list">
+          <div class="chart-empty">No data yet.</div>
+        </div>
+      </div>
+
+      <!-- Two-column grid for charts -->
+      <div class="dash-grid-2">
+        <!-- Weekly chart -->
+        <div class="section">
+          <div class="section-title">Weekly Volume</div>
+          <div class="chart-container">
+            <canvas id="weekly-chart"></canvas>
+          </div>
+        </div>
+
+        <!-- Hourly activity -->
+        <div class="section">
+          <div class="section-title">Activity by Hour</div>
+          <div class="chart-container">
+            <canvas id="hourly-chart"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Reciprocity + Streaks row -->
+      <div class="dash-grid-2">
+        <div class="section">
+          <div class="section-title">Message Balance</div>
+          <div id="reciprocity-list">
+            <div class="chart-empty">No data yet.</div>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="section-title">Streaks</div>
+          <div id="streaks-list">
+            <div class="chart-empty">No data yet.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Fastest responders + Initiators row -->
+      <div class="dash-grid-2">
+        <div class="section">
+          <div class="section-title">Fastest Responders</div>
+          <div id="fast-responders-list">
+            <div class="chart-empty">No data yet.</div>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="section-title">Who Initiates Most</div>
+          <div id="initiators-list">
+            <div class="chart-empty">No data yet.</div>
+          </div>
         </div>
       </div>
 
@@ -923,14 +1025,6 @@
         <div class="section-title">Neglected Friends (30+ days)</div>
         <div id="neglected-list">
           <div class="chart-empty">No neglected friends found.</div>
-        </div>
-      </div>
-
-      <!-- Who initiates most -->
-      <div class="section">
-        <div class="section-title">Who Initiates Most</div>
-        <div id="initiators-list">
-          <div class="chart-empty">No data yet.</div>
         </div>
       </div>
 
@@ -949,9 +1043,9 @@
         </select>
         <select id="filter-quality" class="filter-select">
           <option value="">All Quality</option>
-          <option value="high">High</option>
-          <option value="medium">Medium</option>
-          <option value="low">Low</option>
+          <option value="70">High (70+)</option>
+          <option value="40">Medium (40+)</option>
+          <option value="1">Low (1+)</option>
         </select>
         <input type="text" id="contact-search" class="filter-search" placeholder="Search contacts...">
       </div>
@@ -963,12 +1057,12 @@
           <thead>
             <tr>
               <th data-sort="name">Name</th>
-              <th data-sort="tier">Tier</th>
-              <th data-sort="lastContact">Last Contact</th>
-              <th data-sort="messages30d">30d Msgs</th>
-              <th data-sort="initRatio">Init Ratio</th>
-              <th data-sort="avgResponse">Avg Response</th>
-              <th data-sort="quality">Quality</th>
+              <th data-sort="tier_name">Tier</th>
+              <th data-sort="last_seen">Last Contact</th>
+              <th data-sort="messages_30d">30d Msgs</th>
+              <th data-sort="initiation_ratio">Init Ratio</th>
+              <th data-sort="their_avg_response_sec">Avg Response</th>
+              <th data-sort="quality_score">Quality</th>
             </tr>
           </thead>
           <tbody id="contacts-tbody">

@@ -34,7 +34,14 @@ export function createFriendsRouter(
     const health = store.getHealth();
     const tierDistribution = store.getTierDistribution();
     const voiceTotal = store.getDashboardVoiceTotal();
-    res.json({ stats, weeklyVolume, neglected, topInitiators, health, tierDistribution, voiceTotal });
+    const topFriends = store.getTopFriends(5);
+    const reciprocity = store.getReciprocityStats();
+    const streaks = store.getLongestStreaks(5);
+    const hourly = store.getHourlyDistribution();
+    const fastResponders = store.getFastestResponders(5);
+    const mostBalanced = store.getMostBalanced();
+    res.json({ stats, weeklyVolume, neglected, topInitiators, health, tierDistribution, voiceTotal,
+      topFriends, reciprocity, streaks, hourly, fastResponders, mostBalanced });
   });
 
   // ── Contacts ──

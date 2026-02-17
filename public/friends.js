@@ -29,6 +29,7 @@ let chats = [];
 let selectedRecipients = new Set();
 let currentSort = { field: "last_seen", dir: "desc" };
 let weeklyChart = null;
+let hourlyChart = null;
 let detailChart = null;
 let sendPollTimer = null;
 let searchDebounceTimer = null;
@@ -77,6 +78,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupContactFilters();
   setupMessagingHandlers();
   setupTierHandlers();
+  setupGroupHandlers();
   setupCalendarHandlers();
 
   // Load initial tab
@@ -195,12 +197,16 @@ async function loadDashboard() {
     const res = await adminFetch("/api/friends/dashboard");
     if (!res.ok) throw new Error("Server returned " + res.status);
     const data = await res.json();
-    renderSummaryCards(data.stats);
+    renderSummaryCards(data.stats, data.voiceTotal);
     renderWeeklyChart(data.weeklyVolume);
+    renderHourlyChart(data.hourly);
+    renderTopFriends(data.topFriends);
+    renderReciprocity(data.reciprocity);
+    renderStreaks(data.streaks);
+    renderFastResponders(data.fastResponders);
     renderNeglectedList(data.neglected);
     renderInitiatorsList(data.topInitiators);
     renderTierPills(data.tierDistribution);
-    renderVoiceStat(data.voiceTotal);
   } catch (err) {
     console.error("Failed to load dashboard:", err);
   }
@@ -218,25 +224,19 @@ function renderTierPills(distribution) {
   ).join("");
 }
 
-function renderVoiceStat(voiceTotal) {
-  const el = $("stat-voice-minutes");
-  if (el && voiceTotal) {
-    el.textContent = voiceTotal.total_minutes || 0;
-  }
-}
-
-function renderSummaryCards(stats) {
+function renderSummaryCards(stats, voiceTotal) {
   const container = $("summary-cards");
   if (!container || !stats) return;
   container.innerHTML = [
     { label: "Total Contacts", value: stats.totalContacts ?? 0 },
-    { label: "Active (30d)", value: stats.active30d ?? 0 },
-    { label: "Groups", value: stats.groupCount ?? 0 },
-    { label: "Messages This Week", value: stats.messagesThisWeek ?? 0 },
+    { label: "Active (30d)", value: stats.activeContacts30d ?? 0 },
+    { label: "Total Messages", value: stats.totalMessages ?? 0 },
+    { label: "This Week", value: stats.messagesThisWeek ?? 0 },
+    { label: "Voice Minutes", value: voiceTotal?.total_minutes ?? 0 },
   ].map((card) =>
-    '<div class="summary-card">' +
-      '<div class="summary-card-value">' + esc(String(card.value)) + '</div>' +
-      '<div class="summary-card-label">' + esc(card.label) + '</div>' +
+    '<div class="stat-card">' +
+      '<div class="stat-value">' + esc(String(card.value)) + '</div>' +
+      '<div class="stat-label">' + esc(card.label) + '</div>' +
     '</div>'
   ).join("");
 }
@@ -326,16 +326,160 @@ function renderInitiatorsList(data) {
     const theirPct = 100 - myPct;
     return '<div class="initiator-row">' +
       '<div class="initiator-name">' + esc(item.name) + '</div>' +
-      '<div class="initiator-bar">' +
-        '<div class="initiator-bar-me" style="width:' + myPct + '%"></div>' +
-        '<div class="initiator-bar-them" style="width:' + theirPct + '%"></div>' +
+      '<div class="initiator-bar-bg">' +
+        '<div class="initiator-bar-fill" style="width:' + myPct + '%"></div>' +
       '</div>' +
-      '<div class="initiator-labels">' +
-        '<span>Me: ' + myInit + '</span>' +
-        '<span>Them: ' + theirInit + '</span>' +
+      '<div class="initiator-value">' + myPct + '%</div>' +
+    '</div>';
+  }).join("");
+}
+
+// ── Top Friends ──
+
+function renderTopFriends(data) {
+  const container = $("top-friends-list");
+  if (!container) return;
+  if (!data || data.length === 0) {
+    container.innerHTML = '<div class="chart-empty">No data yet.</div>';
+    return;
+  }
+  container.innerHTML = data.map((f, i) => {
+    const rankClass = i === 0 ? "gold" : i === 1 ? "silver" : i === 2 ? "bronze" : "";
+    const diff = f.messages_30d - (f.messages_prev30d || 0);
+    const trendClass = diff > 0 ? "up" : diff < 0 ? "down" : "flat";
+    const trendIcon = diff > 0 ? "\u25B2" : diff < 0 ? "\u25BC" : "\u2022";
+    const trendLabel = diff !== 0 ? " " + Math.abs(diff) : "";
+    return '<div class="top-friend-row">' +
+      '<div class="top-friend-rank ' + rankClass + '">' + (i + 1) + '</div>' +
+      '<div class="top-friend-info">' +
+        '<div class="top-friend-name">' + esc(f.name) + '</div>' +
+      '</div>' +
+      '<div>' +
+        '<span class="top-friend-count">' + f.messages_30d + '</span>' +
+        '<span class="top-friend-trend ' + trendClass + '">' + trendIcon + trendLabel + '</span>' +
       '</div>' +
     '</div>';
   }).join("");
+}
+
+// ── Reciprocity (Message Balance) ──
+
+function renderReciprocity(data) {
+  const container = $("reciprocity-list");
+  if (!container) return;
+  if (!data || data.length === 0) {
+    container.innerHTML = '<div class="chart-empty">No data yet.</div>';
+    return;
+  }
+  container.innerHTML = data.slice(0, 10).map(r => {
+    const total = r.sent + r.received || 1;
+    const sentPct = Math.round((r.sent / total) * 100);
+    const recvPct = 100 - sentPct;
+    return '<div class="recip-row">' +
+      '<div class="recip-name">' + esc(r.name) + '</div>' +
+      '<div class="recip-bar">' +
+        '<div class="recip-bar-sent" style="width:' + sentPct + '%" title="Sent: ' + r.sent + '"></div>' +
+        '<div class="recip-bar-received" style="width:' + recvPct + '%" title="Received: ' + r.received + '"></div>' +
+      '</div>' +
+      '<div class="recip-pct">' + r.ratio + '%</div>' +
+    '</div>';
+  }).join("") +
+  '<div style="font-size:10px;color:var(--text-dim);margin-top:8px;display:flex;gap:12px;">' +
+    '<span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--accent);margin-right:3px;"></span>Sent</span>' +
+    '<span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--green);margin-right:3px;"></span>Received</span>' +
+    '<span style="margin-left:auto;">% = balance (100=perfect)</span>' +
+  '</div>';
+}
+
+// ── Streaks ──
+
+function renderStreaks(data) {
+  const container = $("streaks-list");
+  if (!container) return;
+  if (!data || data.length === 0) {
+    container.innerHTML = '<div class="chart-empty">No data yet.</div>';
+    return;
+  }
+  container.innerHTML = data.map(s => {
+    return '<div class="streak-row">' +
+      '<div class="streak-name">' + esc(s.name) + '</div>' +
+      (s.current_streak > 0
+        ? '<span class="streak-badge active">\uD83D\uDD25 ' + s.current_streak + 'd</span>'
+        : '') +
+      '<span class="streak-badge record">\uD83C\uDFC6 ' + s.longest_streak + 'd best</span>' +
+    '</div>';
+  }).join("");
+}
+
+// ── Fastest Responders ──
+
+function renderFastResponders(data) {
+  const container = $("fast-responders-list");
+  if (!container) return;
+  if (!data || data.length === 0) {
+    container.innerHTML = '<div class="chart-empty">No data yet.</div>';
+    return;
+  }
+  container.innerHTML = data.map((f, i) => {
+    return '<div class="fast-row">' +
+      '<div class="fast-rank">' + (i + 1) + '</div>' +
+      '<div class="fast-name">' + esc(f.name) + '</div>' +
+      '<div class="fast-time">' + formatDuration(f.avg_response_sec) + '</div>' +
+    '</div>';
+  }).join("");
+}
+
+// ── Hourly Activity Chart ──
+
+function renderHourlyChart(data) {
+  const canvas = $("hourly-chart");
+  if (!canvas || !data || data.length === 0) return;
+
+  if (hourlyChart) {
+    hourlyChart.destroy();
+    hourlyChart = null;
+  }
+
+  // Fill in missing hours
+  const hourData = Array.from({ length: 24 }, (_, i) => {
+    const found = data.find(d => d.hour === i);
+    return found ? found.count : 0;
+  });
+
+  const labels = Array.from({ length: 24 }, (_, i) => {
+    if (i === 0) return "12a";
+    if (i < 12) return i + "a";
+    if (i === 12) return "12p";
+    return (i - 12) + "p";
+  });
+
+  const ctx = canvas.getContext("2d");
+  hourlyChart = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: labels,
+      datasets: [{
+        label: "Messages",
+        data: hourData,
+        backgroundColor: hourData.map((_, i) =>
+          i >= 6 && i < 12 ? "rgba(253,203,110,0.6)" :
+          i >= 12 && i < 18 ? "rgba(79,195,247,0.6)" :
+          i >= 18 && i < 22 ? "rgba(129,199,132,0.6)" :
+          "rgba(149,117,205,0.4)"
+        ),
+        borderRadius: 3,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: "#888", font: { size: 9 } }, grid: { display: false } },
+        y: { ticks: { color: "#888" }, grid: { color: "#333" } },
+      },
+    },
+  });
 }
 
 // ── Contacts Tab ──
@@ -553,28 +697,28 @@ async function openContactDetail(contactId) {
       const theirResp = stats.their_avg_response_sec ? formatDuration(stats.their_avg_response_sec) : "--";
       detailStats.innerHTML =
         '<div class="detail-stat">' +
-          '<div class="detail-stat-value">' + (stats.total_messages ?? 0) + '</div>' +
-          '<div class="detail-stat-label">Total Messages</div>' +
+          '<div class="value">' + (stats.total_messages ?? 0) + '</div>' +
+          '<div class="label">Total Messages</div>' +
         '</div>' +
         '<div class="detail-stat">' +
-          '<div class="detail-stat-value">' + (stats.sent_messages ?? 0) + '</div>' +
-          '<div class="detail-stat-label">Sent</div>' +
+          '<div class="value">' + (stats.sent_messages ?? 0) + '</div>' +
+          '<div class="label">Sent</div>' +
         '</div>' +
         '<div class="detail-stat">' +
-          '<div class="detail-stat-value">' + (stats.received_messages ?? 0) + '</div>' +
-          '<div class="detail-stat-label">Received</div>' +
+          '<div class="value">' + (stats.received_messages ?? 0) + '</div>' +
+          '<div class="label">Received</div>' +
         '</div>' +
         '<div class="detail-stat">' +
-          '<div class="detail-stat-value">' + (stats.initiation_ratio != null ? Math.round(stats.initiation_ratio) + "%" : "--") + '</div>' +
-          '<div class="detail-stat-label">My Initiation %</div>' +
+          '<div class="value">' + (stats.initiation_ratio != null ? Math.round(stats.initiation_ratio) + "%" : "--") + '</div>' +
+          '<div class="label">My Initiation %</div>' +
         '</div>' +
         '<div class="detail-stat">' +
-          '<div class="detail-stat-value">' + myResp + '</div>' +
-          '<div class="detail-stat-label">My Avg Response</div>' +
+          '<div class="value">' + myResp + '</div>' +
+          '<div class="label">My Avg Response</div>' +
         '</div>' +
         '<div class="detail-stat">' +
-          '<div class="detail-stat-value">' + theirResp + '</div>' +
-          '<div class="detail-stat-label">Their Avg Response</div>' +
+          '<div class="value">' + theirResp + '</div>' +
+          '<div class="label">Their Avg Response</div>' +
         '</div>';
     }
 
@@ -685,6 +829,11 @@ function renderDetailChart(data) {
 
 // ── Groups Tab ──
 
+function setupGroupHandlers() {
+  const createBtn = $("create-group-btn");
+  if (createBtn) createBtn.addEventListener("click", () => createGroupModal());
+}
+
 async function loadGroups() {
   try {
     const [groupsRes, contactsRes] = await Promise.all([
@@ -713,11 +862,6 @@ function renderGroupLanes(groupsList, allContacts) {
   const ungrouped = allContacts.filter((c) => !assignedIds.has(c.id));
 
   let html = '';
-
-  // Add "Create Group" button
-  html += '<div class="group-actions-bar">' +
-    '<button id="create-group-btn" class="btn btn-primary">+ New Group</button>' +
-  '</div>';
 
   // Render each group lane
   groupsList.forEach((g) => {
@@ -758,10 +902,6 @@ function renderGroupLanes(groupsList, allContacts) {
   '</div>';
 
   container.innerHTML = html;
-
-  // Setup event handlers
-  const createBtn = $("create-group-btn");
-  if (createBtn) createBtn.addEventListener("click", () => createGroupModal());
 
   container.querySelectorAll(".group-edit-btn").forEach((btn) => {
     btn.addEventListener("click", (e) => {
@@ -1195,8 +1335,8 @@ function renderCalendar(year, month, days) {
     contactsList.slice(0, 5).forEach(c => {
       html += '<div class="cal-contact">' +
         '<span class="dot" style="background:' + esc(c.tier_color || '#666') + '"></span>' +
-        '<span>' + esc(c.contact_name || '') + '</span>' +
-        '<span class="cnt">' + (c.msg_count || 0) + '</span>' +
+        '<span>' + esc(c.name || '') + '</span>' +
+        '<span class="cnt">' + (c.count || 0) + '</span>' +
       '</div>';
     });
 
@@ -1485,13 +1625,12 @@ function renderChatsList(chatsList) {
     const label = chat.is_group
       ? esc(chat.chat_name) + ' <span class="chat-meta">(' + (chat.participant_count || 0) + ' members)</span>'
       : esc(chat.chat_name) + ' <span class="chat-meta">(DM)</span>';
-    return '<div class="chat-card">' +
-      '<div class="chat-card-info">' + label + '</div>' +
-      '<label class="toggle-switch">' +
+    return '<li>' +
+      '<label>' +
         '<input type="checkbox" class="chat-monitor-toggle" data-chat-id="' + esc(chat.chat_id) + '"' + (chat.monitored ? " checked" : "") + ' />' +
-        '<span class="toggle-slider"></span>' +
+        '<span>' + label + '</span>' +
       '</label>' +
-    '</div>';
+    '</li>';
   }).join("");
 
   container.querySelectorAll(".chat-monitor-toggle").forEach((toggle) => {

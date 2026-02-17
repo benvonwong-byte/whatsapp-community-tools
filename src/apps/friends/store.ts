@@ -950,6 +950,135 @@ export class FriendsStore {
     return Array.from(dayMap.entries()).map(([day, contacts]) => ({ day, contacts }));
   }
 
+  // ── Enhanced Dashboard Analytics ──
+
+  /** Top 5 friends by message volume (30d) with trend */
+  getTopFriends(limit = 5): Array<{ id: string; name: string; messages_30d: number; messages_prev30d: number; tier_color: string | null }> {
+    const now = Math.floor(Date.now() / 1000);
+    const d30 = now - 30 * 86400;
+    const d60 = now - 60 * 86400;
+    return this.db.prepare(`
+      WITH contact_chats AS (
+        SELECT DISTINCT sender_id as contact_id, chat_id
+        FROM friends_messages WHERE is_from_me = 0
+      ),
+      stats AS (
+        SELECT
+          cc.contact_id,
+          SUM(CASE WHEN m.timestamp >= ? THEN 1 ELSE 0 END) as messages_30d,
+          SUM(CASE WHEN m.timestamp >= ? AND m.timestamp < ? THEN 1 ELSE 0 END) as messages_prev30d
+        FROM friends_messages m
+        JOIN contact_chats cc ON cc.chat_id = m.chat_id
+        WHERE m.timestamp >= ?
+        GROUP BY cc.contact_id
+      )
+      SELECT s.contact_id as id, c.name, s.messages_30d, s.messages_prev30d,
+        t.color as tier_color
+      FROM stats s
+      JOIN friends_contacts c ON c.id = s.contact_id
+      LEFT JOIN friends_tiers t ON t.id = c.tier_id
+      ORDER BY s.messages_30d DESC
+      LIMIT ?
+    `).all(d30, d60, d30, d60, limit) as any[];
+  }
+
+  /** Reciprocity stats per contact — sent/received balance */
+  getReciprocityStats(): Array<{ id: string; name: string; sent: number; received: number; ratio: number }> {
+    return this.db.prepare(`
+      WITH contact_chats AS (
+        SELECT DISTINCT sender_id as contact_id, chat_id
+        FROM friends_messages WHERE is_from_me = 0
+      )
+      SELECT
+        cc.contact_id as id,
+        c.name,
+        SUM(CASE WHEN m.is_from_me = 1 THEN 1 ELSE 0 END) as sent,
+        SUM(CASE WHEN m.is_from_me = 0 THEN 1 ELSE 0 END) as received
+      FROM friends_messages m
+      JOIN contact_chats cc ON cc.chat_id = m.chat_id
+      JOIN friends_contacts c ON c.id = cc.contact_id
+      GROUP BY cc.contact_id
+      HAVING (sent + received) > 10
+      ORDER BY (sent + received) DESC
+      LIMIT 20
+    `).all().map((r: any) => ({
+      ...r,
+      ratio: Math.round(Math.min(r.sent, r.received) / Math.max(r.sent, r.received, 1) * 100),
+    })) as any[];
+  }
+
+  /** Streak data: consecutive days with messages per contact */
+  getLongestStreaks(limit = 5): Array<{ id: string; name: string; current_streak: number; longest_streak: number }> {
+    const contacts = this.db.prepare(`SELECT id, name FROM friends_contacts ORDER BY last_seen DESC LIMIT 50`).all() as any[];
+    const results: Array<{ id: string; name: string; current_streak: number; longest_streak: number }> = [];
+
+    for (const c of contacts) {
+      const days = this.db.prepare(`
+        WITH contact_chats AS (
+          SELECT DISTINCT chat_id FROM friends_messages WHERE sender_id = ?
+        )
+        SELECT DISTINCT date(datetime(timestamp, 'unixepoch')) as day
+        FROM friends_messages
+        WHERE chat_id IN (SELECT chat_id FROM contact_chats)
+        ORDER BY day ASC
+      `).all(c.id) as Array<{ day: string }>;
+
+      if (days.length < 2) continue;
+
+      let longest = 1, current = 1;
+      const today = new Date().toISOString().slice(0, 10);
+      for (let i = 1; i < days.length; i++) {
+        const prev = new Date(days[i - 1].day).getTime();
+        const curr = new Date(days[i].day).getTime();
+        if (curr - prev === 86400000) {
+          current++;
+          if (current > longest) longest = current;
+        } else {
+          current = 1;
+        }
+      }
+      // Check if current streak is still active (last day is today or yesterday)
+      const lastDay = days[days.length - 1].day;
+      const isActive = lastDay === today || lastDay === new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+      results.push({ id: c.id, name: c.name, current_streak: isActive ? current : 0, longest_streak: longest });
+    }
+
+    return results.sort((a, b) => b.longest_streak - a.longest_streak).slice(0, limit);
+  }
+
+  /** Message volume by hour of day */
+  getHourlyDistribution(): Array<{ hour: number; count: number }> {
+    return this.db.prepare(`
+      SELECT CAST(strftime('%H', datetime(timestamp, 'unixepoch')) AS INTEGER) as hour,
+        COUNT(*) as count
+      FROM friends_messages
+      GROUP BY hour
+      ORDER BY hour ASC
+    `).all() as any[];
+  }
+
+  /** Fastest responders */
+  getFastestResponders(limit = 5): Array<{ id: string; name: string; avg_response_sec: number }> {
+    const now = Math.floor(Date.now() / 1000);
+    const ninetyDaysAgo = now - 90 * 86400;
+    const contacts = this.db.prepare(`SELECT id, name FROM friends_contacts WHERE last_seen >= ? ORDER BY last_seen DESC`).all(ninetyDaysAgo) as any[];
+    const results: Array<{ id: string; name: string; avg_response_sec: number }> = [];
+    for (const c of contacts) {
+      const resp = this.getResponseTimesForContact(c.id, ninetyDaysAgo, now);
+      if (resp.their_avg_response_sec > 0) {
+        results.push({ id: c.id, name: c.name, avg_response_sec: Math.round(resp.their_avg_response_sec) });
+      }
+    }
+    return results.sort((a, b) => a.avg_response_sec - b.avg_response_sec).slice(0, limit);
+  }
+
+  /** Most balanced friendship (closest reciprocity to 50/50) */
+  getMostBalanced(): { id: string; name: string; sent: number; received: number; ratio: number } | null {
+    const stats = this.getReciprocityStats();
+    if (stats.length === 0) return null;
+    return stats.reduce((best, curr) => curr.ratio > best.ratio ? curr : best);
+  }
+
   // ── Health ──
 
   getHealth() {
