@@ -8,6 +8,7 @@ export interface RelationshipMessage {
   transcript: string;
   timestamp: number;
   type: "text" | "voice";
+  source: "whatsapp" | "in-person" | "import";
   analyzed: number;
   createdAt?: string;
 }
@@ -63,6 +64,7 @@ export class RelationshipStore {
         transcript TEXT DEFAULT '',
         timestamp INTEGER NOT NULL,
         type TEXT NOT NULL DEFAULT 'text',
+        source TEXT NOT NULL DEFAULT 'whatsapp',
         analyzed INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
       );
@@ -85,9 +87,16 @@ export class RelationshipStore {
       );
     `);
 
+    // Migrate existing DBs: add source column if missing
+    try {
+      this.db.exec(`ALTER TABLE relationship_messages ADD COLUMN source TEXT NOT NULL DEFAULT 'whatsapp'`);
+    } catch {
+      // column already exists
+    }
+
     this.stmts = {
       saveMessage: this.db.prepare(
-        `INSERT OR IGNORE INTO relationship_messages (id, speaker, body, transcript, timestamp, type) VALUES (?, ?, ?, ?, ?, ?)`
+        `INSERT OR IGNORE INTO relationship_messages (id, speaker, body, transcript, timestamp, type, source) VALUES (?, ?, ?, ?, ?, ?, ?)`
       ),
       isDuplicate: this.db.prepare(`SELECT 1 FROM relationship_messages WHERE id = ?`),
       getUnanalyzed: this.db.prepare(
@@ -200,8 +209,8 @@ export class RelationshipStore {
     };
   }
 
-  saveMessage(msg: { id: string; speaker: string; body: string; transcript: string; timestamp: number; type: string }) {
-    this.stmts.saveMessage.run(msg.id, msg.speaker, msg.body, msg.transcript, msg.timestamp, msg.type);
+  saveMessage(msg: { id: string; speaker: string; body: string; transcript: string; timestamp: number; type: string; source?: string }) {
+    this.stmts.saveMessage.run(msg.id, msg.speaker, msg.body, msg.transcript, msg.timestamp, msg.type, msg.source || "whatsapp");
   }
 
   isDuplicate(id: string): boolean {

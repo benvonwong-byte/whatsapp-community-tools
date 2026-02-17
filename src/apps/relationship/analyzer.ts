@@ -30,13 +30,20 @@ function formatConversation(messages: RelationshipMessage[]): string {
       minute: "2-digit",
     });
     const speaker = m.speaker === "self" ? "Ben" : "Hope";
+    const sourceTag = m.source === "in-person" ? "[in-person] " : "";
     const content = m.type === "voice" ? `[voice note] ${m.transcript}` : m.body;
-    return `[${time}] ${speaker}: ${content}`;
+    return `[${time}] ${sourceTag}${speaker}: ${content}`;
   }).join("\n");
 }
 
 function buildAnalysisPrompt(conversation: string, messageCount: number, date: string): string {
   return `You are a relationship communication analyst trained in the Gottman Institute's research and Esther Perel's frameworks. Analyze the following conversation between Ben and Hope (a couple).
+
+Messages come from two sources:
+- WhatsApp text/voice messages (default)
+- In-person conversations (marked with [in-person]) — these are transcribed from real-world interactions
+
+Both sources should be analyzed together for a complete picture. In-person conversations often carry more emotional weight and nuance. If the tone or dynamic differs between WhatsApp and in-person interactions, note the discrepancy — it may reveal important patterns.
 
 DATE: ${date}
 MESSAGES: ${messageCount}

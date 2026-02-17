@@ -390,6 +390,60 @@ export function createRelationshipRouter(
     });
   });
 
+  // POST /api/relationship/import-json — import structured JSON messages (for external apps)
+  // Body: { messages: [{ speaker, body, timestamp, type?, source? }], source?: "in-person" }
+  router.post("/import-json", (req: Request, res: Response) => {
+    const { messages, source } = req.body;
+    if (!Array.isArray(messages) || messages.length === 0) {
+      res.status(400).json({ error: "Missing 'messages' array" });
+      return;
+    }
+
+    const msgSource = source || "in-person";
+    let imported = 0;
+    const errors: string[] = [];
+
+    for (let i = 0; i < messages.length; i++) {
+      const m = messages[i];
+      if (!m.speaker || !["self", "hope"].includes(m.speaker)) {
+        errors.push(`msg[${i}]: invalid speaker (must be "self" or "hope")`);
+        continue;
+      }
+      if (!m.body || typeof m.body !== "string") {
+        errors.push(`msg[${i}]: missing body`);
+        continue;
+      }
+      if (!m.timestamp || typeof m.timestamp !== "number") {
+        errors.push(`msg[${i}]: missing/invalid timestamp (unix seconds)`);
+        continue;
+      }
+
+      const hash = simpleHash(m.timestamp + m.speaker + m.body);
+      const id = `${msgSource}_${m.timestamp}_${hash}`;
+
+      if (!store.isDuplicate(id)) {
+        store.saveMessage({
+          id,
+          speaker: m.speaker,
+          body: m.body,
+          transcript: m.transcript || "",
+          timestamp: m.timestamp,
+          type: m.type || "text",
+          source: msgSource,
+        });
+        imported++;
+      }
+    }
+
+    res.json({
+      ok: true,
+      imported,
+      total: messages.length,
+      duplicates: messages.length - imported - errors.length,
+      errors: errors.length > 0 ? errors : undefined,
+    });
+  });
+
   // GET /api/relationship/settings — get update settings
   router.get("/settings", (_req: Request, res: Response) => {
     res.json({
