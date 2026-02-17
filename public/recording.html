@@ -288,6 +288,11 @@
   </div>
 
   <script>
+    // --- API base (Railway backend when served from Firebase) ---
+    const API_BASE = window.location.hostname.includes("firebaseapp.com") || window.location.hostname.includes("web.app")
+      ? "https://whatsapp-events-nyc-production.up.railway.app"
+      : "";
+
     // --- Auth ---
     const params = new URLSearchParams(window.location.search);
     const token = params.get('token') || params.get('admin') || localStorage.getItem('adminToken');
@@ -530,7 +535,7 @@
         const formData = new FormData();
         formData.append('audio', blob, `recording.${mimeType.includes('mp4') ? 'm4a' : 'webm'}`);
 
-        const res = await fetch('/api/recording/transcribe' + authParam(), {
+        const res = await fetch(API_BASE + '/api/recording/transcribe' + authParam(), {
           method: 'POST',
           body: formData,
         });
@@ -662,7 +667,7 @@
           timestamp: Math.floor(now - (firstStartMs / 1000) + (u.start / 1000)),
         }));
 
-        const res = await fetch('/api/recording/save-transcript' + authParam(), {
+        const res = await fetch(API_BASE + '/api/recording/save-transcript' + authParam(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ utterances, source: 'in-person' }),
