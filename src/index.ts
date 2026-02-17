@@ -18,6 +18,7 @@ import { createMetacrisisRouter } from "./apps/metacrisis/routes";
 import { FriendsStore } from "./apps/friends/store";
 import { createFriendsHandler } from "./apps/friends/handler";
 import { createFriendsRouter, SendProgress } from "./apps/friends/routes";
+import { createRecordingRouter } from "./apps/recording/routes";
 
 // ── Event link enrichment ──
 
@@ -381,6 +382,12 @@ async function main() {
   appRouters.push({
     path: "/api/relationship",
     router: createRelationshipRouter(relationshipStore, relationshipAnalyze, relationshipBackfill, relationshipTranscribe, relationshipSendUpdate, relationshipAnalyzeProgress),
+  });
+
+  // Recording app: transcribe in-person conversations and import to relationship store
+  appRouters.push({
+    path: "/api/recording",
+    router: createRecordingRouter(relationshipStore),
   });
 
   // Metacrisis app: capture group messages, summarize, push to announcement channel

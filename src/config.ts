@@ -21,6 +21,7 @@ export const config = {
   airtableTableId: process.env.AIRTABLE_TABLE_ID || "",
   // Relationship app (optional — leave empty to disable)
   groqApiKey: process.env.GROQ_API_KEY || "",
+  assemblyAiApiKey: process.env.ASSEMBLYAI_API_KEY || "",
   relationshipChatName: process.env.RELATIONSHIP_CHAT_NAME || "Hope Endrenyi",
   // Metacrisis app (optional — leave empty to disable)
   metacrisisChatName: process.env.METACRISIS_CHAT_NAME || "Metacrisis - Community Chat",
