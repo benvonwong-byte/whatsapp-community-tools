@@ -482,14 +482,23 @@ export function createFriendsRouter(
       return res.status(401).json({ error: "Invalid sync key" });
     }
 
-    const { messages } = req.body;
-    if (!Array.isArray(messages) || messages.length === 0) {
-      return res.json({ imported: 0, updated: 0 });
-    }
+    const { messages, voiceNotes } = req.body;
+    const result: any = { imported: 0, updated: 0, voiceImported: 0 };
 
     try {
-      const result = store.syncImessageMessages(messages);
-      console.log(`[imessage-sync] Imported ${result.imported}, skipped ${result.updated} duplicates`);
+      if (Array.isArray(messages) && messages.length > 0) {
+        const msgResult = store.syncImessageMessages(messages);
+        result.imported = msgResult.imported;
+        result.updated = msgResult.updated;
+        console.log(`[imessage-sync] Messages: imported ${msgResult.imported}, skipped ${msgResult.updated}`);
+      }
+
+      if (Array.isArray(voiceNotes) && voiceNotes.length > 0) {
+        const vnResult = store.syncImessageVoiceNotes(voiceNotes);
+        result.voiceImported = vnResult.imported;
+        console.log(`[imessage-sync] Voice notes: imported ${vnResult.imported}`);
+      }
+
       res.json(result);
     } catch (err: any) {
       console.error("[imessage-sync] Error:", err?.message || err);

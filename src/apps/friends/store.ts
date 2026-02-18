@@ -515,6 +515,48 @@ export class FriendsStore extends SettingsStore {
     return { imported, updated };
   }
 
+  syncImessageVoiceNotes(notes: Array<{
+    guid: string;
+    phone: string;
+    sender_name: string;
+    timestamp: number;
+    is_from_me: boolean;
+    transcript: string;
+    duration: number;
+  }>): { imported: number } {
+    let imported = 0;
+
+    const insertMsg = this.db.prepare(`
+      INSERT OR IGNORE INTO friends_messages (id, chat_id, sender_id, sender_name, timestamp, is_from_me, message_type, char_count, body, source)
+      VALUES (?, ?, ?, ?, ?, ?, 'ptt', 0, '', 'imessage')
+    `);
+
+    const insertVn = this.db.prepare(`
+      INSERT OR IGNORE INTO friends_voice_notes (id, contact_id, chat_id, transcript, duration_estimate, timestamp, is_from_me)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const txn = this.db.transaction(() => {
+      for (const note of notes) {
+        const contactId = this.upsertImessageContact(note.phone, note.sender_name, note.timestamp);
+        const msgId = "imsg_" + note.guid;
+        const senderId = note.is_from_me ? "self" : contactId;
+
+        const result = insertMsg.run(
+          msgId, contactId, senderId, note.sender_name,
+          note.timestamp, note.is_from_me ? 1 : 0
+        );
+        if (result.changes > 0) {
+          insertVn.run(msgId, contactId, contactId, note.transcript, note.duration, note.timestamp, note.is_from_me ? 1 : 0);
+          imported++;
+        }
+      }
+    });
+    txn();
+
+    return { imported };
+  }
+
   // ── Group methods ──
 
   getGroups(): FriendsGroup[] {

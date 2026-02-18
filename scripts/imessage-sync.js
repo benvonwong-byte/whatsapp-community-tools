@@ -253,6 +253,209 @@ async function sync() {
   log(`Sync complete! ${totalImported} new messages imported.`);
 }
 
+// ── Audio Sync Logic ──
+
+const AUDIO_DONE_PATH = path.join(os.homedir(), ".imessage-sync-audio-done");
+
+function loadAudioDone() {
+  try {
+    return new Set(fs.readFileSync(AUDIO_DONE_PATH, "utf-8").trim().split("\n").filter(Boolean));
+  } catch {
+    return new Set();
+  }
+}
+
+function saveAudioDone(doneSet) {
+  fs.writeFileSync(AUDIO_DONE_PATH, [...doneSet].join("\n"));
+}
+
+function getAudioDuration(filePath) {
+  try {
+    const result = spawnSync("afinfo", [filePath], { encoding: "utf-8", timeout: 5000 });
+    const match = (result.stdout || "").match(/estimated duration:\s*([\d.]+)/i);
+    return match ? parseFloat(match[1]) : 30;
+  } catch {
+    return 30;
+  }
+}
+
+function appleTimestampToUnix(appleDate) {
+  appleDate = parseInt(appleDate) || 0;
+  if (appleDate > 1e15) return Math.floor(appleDate / 1e9) + APPLE_EPOCH_OFFSET;
+  if (appleDate > 1e9) return Math.floor(appleDate / 1e6) + APPLE_EPOCH_OFFSET;
+  return appleDate + APPLE_EPOCH_OFFSET;
+}
+
+async function transcribeWithGroq(filePath, mimeType, groqApiKey) {
+  const audioBuffer = fs.readFileSync(filePath);
+  const blob = new Blob([audioBuffer], { type: mimeType || "audio/amr" });
+
+  const form = new FormData();
+  form.append("file", blob, path.basename(filePath));
+  form.append("model", "whisper-large-v3");
+  form.append("response_format", "text");
+
+  const res = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+    method: "POST",
+    headers: { Authorization: "Bearer " + groqApiKey },
+    body: form,
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`Groq ${res.status}: ${errText}`);
+  }
+
+  return (await res.text()).trim();
+}
+
+async function syncAudio(maxDurationSeconds) {
+  const config = loadConfig();
+  if (!config.groqApiKey) {
+    log("No groqApiKey in config — skipping audio transcription.");
+    log("Add it to ~/.imessage-sync-config.json to enable voice note transcription.");
+    return;
+  }
+
+  log(`Syncing iMessage audio (max ${Math.round(maxDurationSeconds / 60)} min)...`);
+
+  const doneBefore = loadAudioDone();
+
+  // Query all audio messages with file paths, most recent first
+  const rows = queryDb(`
+    SELECT
+      m.guid,
+      m.date as apple_date,
+      m.is_from_me,
+      h.id as handle_id,
+      a.filename,
+      a.mime_type
+    FROM message m
+    JOIN message_attachment_join maj ON maj.message_id = m.ROWID
+    JOIN attachment a ON a.ROWID = maj.attachment_id
+    LEFT JOIN handle h ON m.handle_id = h.ROWID
+    WHERE a.mime_type LIKE 'audio%'
+      AND a.filename IS NOT NULL
+      AND h.id IS NOT NULL
+      AND m.cache_roomnames IS NULL
+    ORDER BY m.date DESC
+  `);
+
+  if (rows.length === 0) {
+    log("No audio messages found.");
+    return;
+  }
+
+  log(`Found ${rows.length} total audio messages. Filtering already done...`);
+
+  // Filter out already-done, resolve paths, get durations
+  const candidates = [];
+  let totalDuration = 0;
+
+  for (const row of rows) {
+    if (doneBefore.has(row.guid)) continue;
+
+    const phone = normalizePhone(row.handle_id);
+    if (!phone || phone.length < 7) continue;
+
+    // Resolve file path (replace ~ with home dir)
+    const filePath = (row.filename || "").replace(/^~/, os.homedir());
+    if (!fs.existsSync(filePath)) continue;
+
+    const duration = getAudioDuration(filePath);
+    if (totalDuration + duration > maxDurationSeconds) {
+      log(`Reached ${Math.round(totalDuration / 60)} min limit, stopping collection.`);
+      break;
+    }
+
+    totalDuration += duration;
+    candidates.push({
+      guid: row.guid,
+      phone,
+      timestamp: appleTimestampToUnix(row.apple_date),
+      is_from_me: row.is_from_me === "1" || row.is_from_me === 1,
+      filePath,
+      mimeType: row.mime_type,
+      duration,
+    });
+  }
+
+  if (candidates.length === 0) {
+    log("No new audio messages to transcribe.");
+    return;
+  }
+
+  log(`Transcribing ${candidates.length} voice notes (${Math.round(totalDuration / 60)} min total)...`);
+
+  const voiceNotes = [];
+  const doneSet = new Set(doneBefore);
+  let transcribed = 0;
+  let failed = 0;
+
+  for (let i = 0; i < candidates.length; i++) {
+    const c = candidates[i];
+    try {
+      const transcript = await transcribeWithGroq(c.filePath, c.mimeType, config.groqApiKey);
+      if (transcript) {
+        voiceNotes.push({
+          guid: c.guid,
+          phone: c.phone,
+          sender_name: "",
+          timestamp: c.timestamp,
+          is_from_me: c.is_from_me,
+          transcript,
+          duration: c.duration,
+        });
+        transcribed++;
+      } else {
+        failed++;
+      }
+    } catch (err) {
+      log(`  ERROR [${i + 1}/${candidates.length}]: ${err.message}`);
+      failed++;
+      // If rate limited, wait and continue
+      if (err.message.includes("429")) {
+        log("  Rate limited — waiting 60s...");
+        await new Promise(r => setTimeout(r, 60000));
+        i--; // retry
+        continue;
+      }
+    }
+
+    doneSet.add(c.guid);
+
+    // Log progress every 10
+    if ((i + 1) % 10 === 0) {
+      log(`  Progress: ${i + 1}/${candidates.length} (${transcribed} ok, ${failed} failed)`);
+    }
+
+    // Send batch every 50 transcripts
+    if (voiceNotes.length >= 50) {
+      try {
+        const result = await postToApi(config.apiUrl, config.syncKey, config.adminToken, { voiceNotes });
+        log(`  Sent batch: ${result.voiceImported} imported`);
+      } catch (err) {
+        log(`  ERROR sending batch: ${err.message}`);
+      }
+      voiceNotes.length = 0;
+      saveAudioDone(doneSet);
+    }
+  }
+
+  // Send remaining
+  if (voiceNotes.length > 0) {
+    try {
+      const result = await postToApi(config.apiUrl, config.syncKey, config.adminToken, { voiceNotes });
+      log(`  Final batch: ${result.voiceImported} imported`);
+    } catch (err) {
+      log(`  ERROR sending final batch: ${err.message}`);
+    }
+  }
+
+  saveAudioDone(doneSet);
+  log(`Audio sync complete! ${transcribed} transcribed, ${failed} failed.`);
+}
+
 // ── Install / Uninstall ──
 
 function ask(question) {
@@ -372,6 +575,10 @@ if (arg === "--install") {
   install().catch(err => { console.error("Install failed:", err); process.exit(1); });
 } else if (arg === "--uninstall") {
   uninstall();
+} else if (arg === "--audio") {
+  // Audio-only sync with optional max duration in seconds (default: 6 hours)
+  const maxSec = parseInt(process.argv[3]) || 21600;
+  syncAudio(maxSec).catch(err => { log("Audio sync failed: " + err.message); process.exit(1); });
 } else {
   sync().catch(err => { log("Sync failed: " + err.message); process.exit(1); });
 }
