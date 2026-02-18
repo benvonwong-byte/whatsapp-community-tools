@@ -50,6 +50,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Button handlers
   setupScanButton();
   setupBackfillButton();
+  setupTagAllHeaderButton();
   setupDetailPanel();
   setupContactFilters();
   setupMessagingHandlers();
@@ -102,7 +103,29 @@ function setupBackfillButton() {
       alert("Backfill failed: " + err.message);
     } finally {
       btn.disabled = false;
-      btn.textContent = "Backfill Messages";
+      btn.textContent = "Backfill";
+    }
+  });
+}
+
+function setupTagAllHeaderButton() {
+  const btn = $("tag-all-header-btn");
+  if (!btn) return;
+  btn.addEventListener("click", async () => {
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = "Tagging...";
+    try {
+      const res = await adminFetch("/api/friends/tags/extract", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Tag extraction failed");
+      btn.textContent = data.contactsProcessed + " tagged!";
+      loadDashboard();
+    } catch (err) {
+      btn.textContent = "Failed!";
+      alert("Tag extraction failed: " + err.message);
+    } finally {
+      setTimeout(() => { btn.textContent = "Tag All"; btn.disabled = false; }, 3000);
     }
   });
 }
