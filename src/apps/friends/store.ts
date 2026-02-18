@@ -321,7 +321,7 @@ export class FriendsStore extends SettingsStore {
 
       getLastTimestamp: this.db.prepare(`SELECT MAX(timestamp) as ts FROM friends_messages`),
       getTodayCount: this.db.prepare(
-        `SELECT COUNT(*) as count FROM friends_messages WHERE date(datetime(timestamp, 'unixepoch')) = date('now')`
+        `SELECT COUNT(*) as count FROM friends_messages WHERE date(datetime(timestamp, 'unixepoch', 'localtime')) = date('now', 'localtime')`
       ),
     };
   }
@@ -466,7 +466,7 @@ export class FriendsStore extends SettingsStore {
     const startTs = Math.floor(Date.now() / 1000) - weeks * 7 * 86400;
     return this.db.prepare(`
       SELECT
-        strftime('%Y-W%W', datetime(m.timestamp, 'unixepoch')) as week,
+        strftime('%Y-W%W', datetime(m.timestamp, 'unixepoch', 'localtime')) as week,
         COUNT(*) as count,
         SUM(CASE WHEN m.is_from_me = 1 THEN 1 ELSE 0 END) as sent,
         SUM(CASE WHEN m.is_from_me = 0 THEN 1 ELSE 0 END) as received
@@ -681,7 +681,7 @@ export class FriendsStore extends SettingsStore {
         WHERE m.sender_id = ?
       )
       SELECT
-        strftime('${fmt}', datetime(timestamp, 'unixepoch')) as period,
+        strftime('${fmt}', datetime(timestamp, 'unixepoch', 'localtime')) as period,
         SUM(CASE WHEN is_from_me = 1 THEN 1 ELSE 0 END) as sent,
         SUM(CASE WHEN is_from_me = 0 THEN 1 ELSE 0 END) as received
       FROM friends_messages
@@ -732,7 +732,7 @@ export class FriendsStore extends SettingsStore {
         WHERE m.sender_id = ?
       )
       SELECT
-        strftime('%Y-W%W', datetime(timestamp, 'unixepoch')) as week,
+        strftime('%Y-W%W', datetime(timestamp, 'unixepoch', 'localtime')) as week,
         COUNT(*) as count
       FROM friends_messages
       WHERE chat_id IN (SELECT chat_id FROM contact_chats)
@@ -951,7 +951,7 @@ export class FriendsStore extends SettingsStore {
     const rows = this.db.prepare(`
       WITH daily AS (
         SELECT
-          CAST(strftime('%d', datetime(m.timestamp, 'unixepoch')) AS INTEGER) as day,
+          CAST(strftime('%d', datetime(m.timestamp, 'unixepoch', 'localtime')) AS INTEGER) as day,
           CASE WHEN m.is_from_me = 0 THEN m.sender_id
                ELSE (SELECT sender_id FROM friends_messages fm2
                      WHERE fm2.chat_id = m.chat_id AND fm2.is_from_me = 0
@@ -960,7 +960,7 @@ export class FriendsStore extends SettingsStore {
           COUNT(*) as msg_count
         FROM friends_messages m
         JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0
-        WHERE date(datetime(m.timestamp, 'unixepoch')) >= ? AND date(datetime(m.timestamp, 'unixepoch')) < ?
+        WHERE date(datetime(m.timestamp, 'unixepoch', 'localtime')) >= ? AND date(datetime(m.timestamp, 'unixepoch', 'localtime')) < ?
           AND m.chat_id NOT LIKE '%@broadcast'
         GROUP BY day, contact_id
       ),
@@ -1055,7 +1055,7 @@ export class FriendsStore extends SettingsStore {
 
     for (const c of contacts) {
       const days = this.db.prepare(`
-        SELECT DISTINCT date(datetime(m.timestamp, 'unixepoch')) as day
+        SELECT DISTINCT date(datetime(m.timestamp, 'unixepoch', 'localtime')) as day
         FROM friends_messages m
         WHERE m.chat_id = ?
         ORDER BY day ASC
@@ -1087,7 +1087,7 @@ export class FriendsStore extends SettingsStore {
   /** Message volume by hour of day (DM only) */
   getHourlyDistribution(): Array<{ hour: number; count: number }> {
     return this.db.prepare(`
-      SELECT CAST(strftime('%H', datetime(m.timestamp, 'unixepoch')) AS INTEGER) as hour,
+      SELECT CAST(strftime('%H', datetime(m.timestamp, 'unixepoch', 'localtime')) AS INTEGER) as hour,
         COUNT(*) as count
       FROM friends_messages m
       JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0
