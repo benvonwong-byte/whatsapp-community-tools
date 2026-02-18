@@ -705,7 +705,7 @@ function setupAdminMode() {
   // Poll verify status on load (in case one is already running)
   pollVerifyStatus();
 
-  // Dedup button: triggers fuzzy duplicate removal
+  // Dedup button: triggers AI semantic duplicate removal
   const dedupBtn = document.getElementById("dedup-btn");
   dedupBtn.classList.remove("hidden");
   dedupBtn.addEventListener("click", async () => {
@@ -1544,8 +1544,12 @@ function setupSearch() {
     input.focus();
   });
 
-  // Escape while focused in search clears it
+  // Enter triggers AI semantic search
   input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && searchQuery) {
+      e.preventDefault();
+      triggerAISearch(searchQuery);
+    }
     if (e.key === "Escape") {
       input.value = "";
       searchQuery = "";
@@ -1837,6 +1841,64 @@ function renderSearchResults() {
   container.innerHTML = html;
   attachCardListeners(container);
   updateFocusedCards();
+}
+
+// ── AI Semantic Search ──
+
+async function triggerAISearch(query) {
+  const container = document.getElementById("search-events");
+  const empty = document.getElementById("search-empty");
+  const summary = document.getElementById("search-summary");
+  const sortControls = document.getElementById("search-sort-controls");
+
+  summary.textContent = `AI searching for "${query}"...`;
+  empty.classList.add("hidden");
+  sortControls.classList.add("hidden");
+  container.innerHTML = '<div class="empty-state">Searching with AI...</div>';
+
+  try {
+    const res = await adminFetch("/api/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query }),
+    });
+    if (!res.ok) throw new Error("Search failed");
+    const data = await res.json();
+    const results = data.results || [];
+
+    if (results.length === 0) {
+      summary.textContent = `No AI results for "${query}"`;
+      container.innerHTML = "";
+      empty.classList.remove("hidden");
+      return;
+    }
+
+    // Build event lookup by hash
+    const eventByHash = {};
+    for (const ev of allEvents) eventByHash[ev.hash] = ev;
+
+    summary.textContent = `${results.length} AI result${results.length !== 1 ? "s" : ""} for "${query}"`;
+    sortControls.classList.remove("hidden");
+
+    let html = results.map(({ hash, score }) => {
+      const event = eventByHash[hash];
+      if (!event) return "";
+      const card = eventCardHTML(event);
+      const d = new Date(event.date + "T00:00:00");
+      const dateLabel = d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+      const inlineInfo = `<span class="search-match-hint">${dateLabel} · AI relevance: ${score}%</span>`;
+      const lastClose = card.lastIndexOf("</div>");
+      return card.slice(0, lastClose) + inlineInfo + card.slice(lastClose);
+    }).join("");
+
+    container.innerHTML = html;
+    attachCardListeners(container);
+    updateFocusedCards();
+  } catch (err) {
+    console.error("AI search failed:", err);
+    summary.textContent = `AI search failed — showing fuzzy results for "${query}"`;
+    renderSearchResults(); // Fallback to fuzzy
+  }
 }
 
 // ── Keyboard Navigation ──

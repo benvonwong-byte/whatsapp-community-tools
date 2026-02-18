@@ -5,7 +5,7 @@ import path from "path";
 import { config } from "./config";
 import { EventStore } from "./store";
 import { categories } from "./categories";
-import { verifyAllStoredEvents, VerifyProgress, deduplicateEvents, DedupProgress } from "./verifier";
+import { verifyAllStoredEvents, VerifyProgress, deduplicateEvents, DedupProgress, searchEventsAI } from "./verifier";
 import { requireAdmin, requireAuth, timingSafeEqual } from "./middleware/auth";
 import { markProgressDone, markProgressError } from "./utils/progress";
 
@@ -371,16 +371,38 @@ export function startServer(opts: ServerOptions): void {
     res.json(dedupProgress);
   });
 
-  app.post("/api/dedup", requireAdmin, (_req, res) => {
+  app.post("/api/dedup", requireAdmin, async (_req, res) => {
     if (dedupProgress.active) {
       res.status(409).json({ error: "Deduplication already in progress" });
       return;
     }
 
-    // Runs synchronously (fast — just string comparisons, no API calls)
-    res.json({ message: "Deduplication started" });
-    deduplicateEvents(store, dedupProgress);
+    // Runs async — uses Gemini AI for semantic duplicate detection
+    res.json({ message: "AI deduplication started" });
+    try {
+      await deduplicateEvents(store, dedupProgress);
+    } catch (err: any) {
+      console.error("[dedup] Error:", err?.message || err);
+      dedupProgress.phase = "done";
+      dedupProgress.active = false;
+    }
     markProgressDone(dedupProgress, 10000);
+  });
+
+  // ── AI Semantic Search ──
+  app.post("/api/search", requireAuth, async (req, res) => {
+    const query = req.body.query;
+    if (!query || typeof query !== "string") {
+      res.status(400).json({ error: "Missing query" });
+      return;
+    }
+    try {
+      const results = await searchEventsAI(store, query.trim());
+      res.json({ results });
+    } catch (err: any) {
+      console.error("[search-ai] Error:", err?.message || err);
+      res.status(500).json({ error: "Search failed" });
+    }
   });
 
   // Airtable bulk sync — push all unsynced events to Airtable

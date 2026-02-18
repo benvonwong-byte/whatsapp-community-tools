@@ -506,8 +506,33 @@ export interface DedupProgress {
   currentEvent?: string;
 }
 
-/** Find and remove duplicate events (similar name + same or adjacent date). */
-export function deduplicateEvents(store: EventStore, progress: DedupProgress): number {
+/** Use Gemini AI to identify duplicate events within a group. Returns arrays of duplicate indices. */
+async function findDuplicatesAI(events: StoredEvent[]): Promise<number[][]> {
+  const names = events.map((e, i) => `${i}: ${e.name}${e.location ? " @ " + e.location : ""}`).join("\n");
+  const prompt = `You are a duplicate event detector. Given this numbered list of events happening on the same or adjacent dates, identify which ones are duplicates (same event listed multiple times with slightly different names or formatting).
+
+Events:
+${names}
+
+Return ONLY a JSON array of arrays, where each inner array contains the indices of events that are duplicates of each other. Only include groups with 2+ events. If no duplicates found, return [].
+
+Example: [[0, 3], [1, 5, 7]] means events 0&3 are duplicates, and events 1,5,7 are duplicates.
+
+JSON:`;
+
+  try {
+    const text = await rateLimitedGemini(prompt);
+    const cleaned = text.replace(/```json\s*/g, "").replace(/```/g, "").trim();
+    const parsed = JSON.parse(cleaned);
+    if (Array.isArray(parsed)) return parsed.filter((g: any) => Array.isArray(g) && g.length >= 2);
+  } catch (err: any) {
+    console.log(`[dedup-ai] Gemini parse error: ${err?.message || err}`);
+  }
+  return [];
+}
+
+/** AI-powered deduplication: uses Gemini to semantically identify duplicate events. */
+export async function deduplicateEvents(store: EventStore, progress: DedupProgress): Promise<number> {
   const events = store.getAllEvents();
   progress.total = events.length;
   progress.checked = 0;
@@ -515,7 +540,7 @@ export function deduplicateEvents(store: EventStore, progress: DedupProgress): n
   progress.phase = "running";
   progress.active = true;
 
-  console.log(`[dedup] Scanning ${events.length} events for duplicates...`);
+  console.log(`[dedup-ai] Scanning ${events.length} events for duplicates using Gemini AI...`);
 
   const deleted = new Set<string>();
 
@@ -526,67 +551,111 @@ export function deduplicateEvents(store: EventStore, progress: DedupProgress): n
     byDate.get(event.date)!.push(event);
   }
 
-  // Compare within same-date groups
-  for (const [, group] of byDate) {
-    if (group.length < 2) continue;
-    for (let i = 0; i < group.length; i++) {
-      if (deleted.has(group[i].hash)) continue;
-      progress.currentEvent = group[i].name;
-      progress.checked++;
-      for (let j = i + 1; j < group.length; j++) {
-        if (deleted.has(group[j].hash)) continue;
-        const sim = nameSimilarity(group[i].name, group[j].name);
-        if (sim >= 0.5) {
-          const qi = eventQuality(group[i]);
-          const qj = eventQuality(group[j]);
-          const [keeper, dup] = qi >= qj ? [group[i], group[j]] : [group[j], group[i]];
-          store.deleteEvent(dup.hash);
-          deleted.add(dup.hash);
-          progress.deleted++;
-          console.log(
-            `[dedup] Deleted "${dup.name}" (${dup.date}) — duplicate of "${keeper.name}" (similarity: ${(sim * 100).toFixed(0)}%)`
-          );
-        }
+  // Process same-date groups with AI
+  for (const [date, group] of byDate) {
+    if (group.length < 2) {
+      progress.checked += group.length;
+      continue;
+    }
+    progress.currentEvent = `Analyzing ${group.length} events on ${date}...`;
+
+    const dupGroups = await findDuplicatesAI(group);
+    for (const indices of dupGroups) {
+      const candidates = indices.map(i => group[i]).filter(e => e && !deleted.has(e.hash));
+      if (candidates.length < 2) continue;
+
+      // Keep the highest quality event, delete the rest
+      candidates.sort((a, b) => eventQuality(b) - eventQuality(a));
+      const keeper = candidates[0];
+      for (let k = 1; k < candidates.length; k++) {
+        const dup = candidates[k];
+        store.deleteEvent(dup.hash);
+        deleted.add(dup.hash);
+        progress.deleted++;
+        console.log(`[dedup-ai] Deleted "${dup.name}" (${dup.date}) — duplicate of "${keeper.name}"`);
       }
     }
+    progress.checked += group.length;
   }
 
-  // Also check adjacent dates (off-by-one day)
+  // Also check adjacent dates
   const sortedDates = [...byDate.keys()].sort();
   for (let d = 0; d < sortedDates.length - 1; d++) {
     const date1 = sortedDates[d];
     const date2 = sortedDates[d + 1];
     const diffMs = new Date(date2).getTime() - new Date(date1).getTime();
-    if (diffMs > 86400000) continue; // more than 1 day apart
+    if (diffMs > 86400000) continue;
 
-    const group1 = byDate.get(date1)!;
-    const group2 = byDate.get(date2)!;
-    for (const e1 of group1) {
-      if (deleted.has(e1.hash)) continue;
-      for (const e2 of group2) {
-        if (deleted.has(e2.hash)) continue;
-        const sim = nameSimilarity(e1.name, e2.name);
-        if (sim >= 0.5) {
-          const q1 = eventQuality(e1);
-          const q2 = eventQuality(e2);
-          const [keeper, dup] = q1 >= q2 ? [e1, e2] : [e2, e1];
-          store.deleteEvent(dup.hash);
-          deleted.add(dup.hash);
-          progress.deleted++;
-          console.log(
-            `[dedup] Deleted "${dup.name}" (${dup.date}) — duplicate of "${keeper.name}" (${keeper.date}, similarity: ${(sim * 100).toFixed(0)}%)`
-          );
-        }
+    const group1 = (byDate.get(date1) || []).filter(e => !deleted.has(e.hash));
+    const group2 = (byDate.get(date2) || []).filter(e => !deleted.has(e.hash));
+    if (group1.length === 0 || group2.length === 0) continue;
+
+    const combined = [...group1, ...group2];
+    if (combined.length < 2) continue;
+
+    progress.currentEvent = `Comparing ${date1} vs ${date2}...`;
+    const dupGroups = await findDuplicatesAI(combined);
+    for (const indices of dupGroups) {
+      const candidates = indices.map(i => combined[i]).filter(e => e && !deleted.has(e.hash));
+      if (candidates.length < 2) continue;
+
+      candidates.sort((a, b) => eventQuality(b) - eventQuality(a));
+      const keeper = candidates[0];
+      for (let k = 1; k < candidates.length; k++) {
+        const dup = candidates[k];
+        store.deleteEvent(dup.hash);
+        deleted.add(dup.hash);
+        progress.deleted++;
+        console.log(`[dedup-ai] Deleted "${dup.name}" (${dup.date}) — duplicate of "${keeper.name}" (${keeper.date})`);
       }
     }
   }
 
-  console.log(`[dedup] Done! Scanned ${events.length} events, removed ${deleted.size} duplicates.`);
+  console.log(`[dedup-ai] Done! Scanned ${events.length} events, removed ${deleted.size} duplicates.`);
   progress.phase = "done";
   progress.active = false;
   progress.currentEvent = undefined;
 
   return deleted.size;
+}
+
+/** AI-powered semantic search: uses Gemini to find events matching a query. */
+export async function searchEventsAI(store: EventStore, query: string): Promise<Array<{ hash: string; score: number }>> {
+  const events = store.getAllEvents();
+  const today = new Date().toISOString().slice(0, 10);
+  // Only search future events
+  const futureEvents = events.filter(e => (e.endDate || e.date) >= today);
+  if (futureEvents.length === 0) return [];
+
+  // Build compact event list for Gemini
+  const eventList = futureEvents.map((e, i) =>
+    `${i}: ${e.name}${e.location ? " @ " + e.location : ""}${e.category ? " [" + e.category + "]" : ""}`
+  ).join("\n");
+
+  const prompt = `You are an event search engine. A user is searching for: "${query}"
+
+Here are the available events:
+${eventList}
+
+Return ONLY a JSON array of objects with "index" (event number) and "score" (0-100, how relevant the event is to the search query). Only include events with score > 20. Sort by score descending. Max 20 results.
+
+Consider semantic meaning — e.g. "healing" matches sound baths, reiki, meditation. "Dance" matches ecstatic dance, movement, groove. "Art" matches gallery, exhibition, painting.
+
+JSON:`;
+
+  try {
+    const text = await rateLimitedGemini(prompt);
+    const cleaned = text.replace(/```json\s*/g, "").replace(/```/g, "").trim();
+    const parsed = JSON.parse(cleaned);
+    if (Array.isArray(parsed)) {
+      return parsed
+        .filter((r: any) => typeof r.index === "number" && typeof r.score === "number" && futureEvents[r.index])
+        .map((r: any) => ({ hash: futureEvents[r.index].hash, score: r.score }));
+    }
+  } catch (err: any) {
+    console.log(`[search-ai] Gemini parse error: ${err?.message || err}`);
+  }
+  return [];
 }
 
 /** Check if an event is likely in the NYC area based on its location string. */
