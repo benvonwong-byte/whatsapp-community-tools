@@ -1172,11 +1172,12 @@ async function openContactDetail(contactId) {
     const nameEdit = $("detail-name-edit");
     if (nameEdit) nameEdit.classList.add("hidden");
 
-    // Phone number (extracted from contact ID)
+    // Phone number (extracted from contact ID — only for @c.us or @s.whatsapp.net, not @lid)
     const phoneEl = $("detail-phone");
     if (phoneEl) {
-      const phone = contactId.includes("@") ? contactId.split("@")[0] : "";
-      if (phone && /^\d+$/.test(phone)) {
+      const isPhoneId = contactId.endsWith("@c.us") || contactId.endsWith("@s.whatsapp.net");
+      const phone = isPhoneId ? contactId.split("@")[0] : "";
+      if (phone && /^\d{7,15}$/.test(phone)) {
         phoneEl.textContent = "+" + phone;
         phoneEl.href = "tel:+" + phone;
         phoneEl.style.display = "";
