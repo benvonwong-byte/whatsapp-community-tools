@@ -113,7 +113,7 @@ function queryDbFallback(sql) {
 /**
  * POST data to the Railway API.
  */
-function postToApi(apiUrl, syncKey, data) {
+function postToApi(apiUrl, syncKey, adminToken, data) {
   return new Promise((resolve, reject) => {
     const url = new URL(apiUrl + "/api/friends/imessage/sync");
     const isHttps = url.protocol === "https:";
@@ -129,6 +129,7 @@ function postToApi(apiUrl, syncKey, data) {
         "Content-Type": "application/json",
         "Content-Length": Buffer.byteLength(body),
         "x-sync-key": syncKey,
+        "Authorization": "Bearer " + adminToken,
       },
     };
 
@@ -237,7 +238,7 @@ async function sync() {
   for (let i = 0; i < messages.length; i += BATCH_SIZE) {
     const batch = messages.slice(i, i + BATCH_SIZE);
     try {
-      const result = await postToApi(config.apiUrl, config.syncKey, { messages: batch });
+      const result = await postToApi(config.apiUrl, config.syncKey, config.adminToken, { messages: batch });
       totalImported += result.imported || 0;
       log(`Batch ${Math.floor(i / BATCH_SIZE) + 1}: imported ${result.imported}, skipped ${result.updated}`);
     } catch (err) {
@@ -277,13 +278,16 @@ async function install() {
   let apiUrl = await ask("Railway API URL (e.g. https://whatsapp-events-nyc-production.up.railway.app): ");
   apiUrl = apiUrl.replace(/\/$/, ""); // strip trailing slash
 
+  // Get admin token
+  let adminToken = await ask("ADMIN_TOKEN from Railway env vars: ");
+
   // Generate or get sync key
   const syncKey = crypto.randomBytes(32).toString("hex");
   console.log("\nGenerated sync key (set this as IMESSAGE_SYNC_KEY env var on Railway):");
   console.log(`\n  ${syncKey}\n`);
 
   // Save config
-  const config = { apiUrl, syncKey };
+  const config = { apiUrl, syncKey, adminToken };
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
   console.log(`Config saved to ${CONFIG_PATH}`);
 
