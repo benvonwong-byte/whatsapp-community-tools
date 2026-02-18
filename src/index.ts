@@ -19,7 +19,7 @@ import { createMetacrisisRouter } from "./apps/metacrisis/routes";
 import { FriendsStore } from "./apps/friends/store";
 import { createFriendsHandler } from "./apps/friends/handler";
 import { createFriendsRouter, SendProgress } from "./apps/friends/routes";
-import { runTagExtraction } from "./apps/friends/tagger";
+import { runTagExtraction, runDirectTagExtraction } from "./apps/friends/tagger";
 import { createRecordingRouter } from "./apps/recording/routes";
 
 // ── Event link enrichment ──
@@ -626,7 +626,14 @@ async function main() {
     markProgressDone(friendsSendProgress);
   };
 
-  const friendsTagExtract = () => runTagExtraction(friendsStore);
+  const friendsTagExtract = async () => {
+    // First try buffer-based extraction (for new real-time messages)
+    let count = await runTagExtraction(friendsStore);
+    // Then directly tag any remaining untagged contacts via WhatsApp
+    const getChats = () => whatsapp.getClient().getChats();
+    count += await runDirectTagExtraction(friendsStore, getChats);
+    return count;
+  };
 
   // Auto-run tag extraction every 30 minutes
   setInterval(async () => {
