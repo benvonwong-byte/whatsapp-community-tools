@@ -149,6 +149,14 @@ export function createFriendsRouter(
     res.json(activity);
   });
 
+  router.get("/contacts/:id/messages", (req: Request, res: Response) => {
+    const contactId = decodeURIComponent(req.params.id as string);
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
+    const offset = parseInt(req.query.offset as string) || 0;
+    const messages = store.getContactMessages(contactId, limit, offset);
+    res.json({ messages, limit, offset });
+  });
+
   router.put("/contacts/:id/notes", (req: Request, res: Response) => {
     store.updateContactNotes(decodeURIComponent(req.params.id as string), req.body.notes || "");
     res.json({ ok: true });

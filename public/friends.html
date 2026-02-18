@@ -657,6 +657,67 @@
     }
     .detail-notes .save-notes-btn:hover { opacity: 0.85; }
 
+    /* Conversation log */
+    .detail-conversation { margin-top: 16px; }
+    .detail-messages-container {
+      max-height: 400px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 8px 0;
+    }
+    .msg-row { display: flex; }
+    .msg-row.sent { justify-content: flex-end; }
+    .msg-row.received { justify-content: flex-start; }
+    .msg-bubble {
+      max-width: 80%;
+      padding: 6px 10px;
+      border-radius: 10px;
+      font-size: 12px;
+      line-height: 1.4;
+      word-wrap: break-word;
+    }
+    .msg-bubble.sent {
+      background: var(--accent);
+      color: #000;
+      border-bottom-right-radius: 2px;
+    }
+    .msg-bubble.received {
+      background: var(--surface2);
+      color: var(--text);
+      border-bottom-left-radius: 2px;
+    }
+    .msg-bubble .msg-time {
+      display: block;
+      font-size: 9px;
+      margin-top: 2px;
+      opacity: 0.6;
+    }
+    .msg-bubble.sent .msg-time { color: #000; }
+    .msg-bubble .msg-type-label {
+      font-style: italic;
+      opacity: 0.7;
+    }
+    .load-more-btn {
+      margin-top: 8px;
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      font-size: 11px;
+      padding: 5px 14px;
+      border-radius: 4px;
+      cursor: pointer;
+      width: 100%;
+    }
+    .load-more-btn:hover { border-color: var(--accent); }
+    .msg-date-divider {
+      text-align: center;
+      font-size: 10px;
+      color: var(--text-dim);
+      margin: 8px 0 4px;
+    }
+
     /* Group Modal */
     .modal-overlay {
       position: fixed;
@@ -1436,6 +1497,12 @@
       <div class="detail-chart-section">
         <div class="section-title">Activity (30 days)</div>
         <canvas id="detail-chart"></canvas>
+      </div>
+
+      <div class="detail-conversation">
+        <div class="section-title">Conversation</div>
+        <div id="detail-messages" class="detail-messages-container"></div>
+        <button id="load-more-messages" class="load-more-btn" style="display:none;">Load More</button>
       </div>
 
       <div class="detail-notes">

@@ -50,7 +50,7 @@ export function createFriendsHandler(store: FriendsStore) {
       store.upsertContact(senderId, senderName, msg.timestamp);
     }
 
-    // 8. Save lightweight metadata (NOT the message body)
+    // 8. Save message metadata + body
     const messageType = (msg as any).type || "text";
     const charCount = msg.body ? msg.body.length : 0;
 
@@ -63,6 +63,7 @@ export function createFriendsHandler(store: FriendsStore) {
       is_from_me: msg.fromMe,
       message_type: messageType,
       char_count: charCount,
+      body: msg.body || "",
     });
 
     // 9. Voice note detection + transcription

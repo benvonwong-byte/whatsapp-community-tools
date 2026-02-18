@@ -67,6 +67,7 @@ export interface FriendsMessageInput {
   is_from_me: boolean;
   message_type: string;
   char_count: number;
+  body?: string;
 }
 
 export interface FriendsGroup {
@@ -256,6 +257,11 @@ export class FriendsStore extends SettingsStore {
       this.db.exec(`ALTER TABLE friends_contacts ADD COLUMN hidden_from_neglected INTEGER DEFAULT 0`);
     } catch { /* column already exists */ }
 
+    // Migration: add body column to friends_messages
+    try {
+      this.db.exec(`ALTER TABLE friends_messages ADD COLUMN body TEXT DEFAULT ''`);
+    } catch { /* column already exists */ }
+
     // Seed default tiers if none exist
     const tierCount = (this.db.prepare(`SELECT COUNT(*) as c FROM friends_tiers`).get() as any).c;
     if (tierCount === 0) {
@@ -295,8 +301,8 @@ export class FriendsStore extends SettingsStore {
       updateContactNotes: this.db.prepare(`UPDATE friends_contacts SET notes = ? WHERE id = ?`),
 
       saveMessage: this.db.prepare(`
-        INSERT OR IGNORE INTO friends_messages (id, chat_id, sender_id, sender_name, timestamp, is_from_me, message_type, char_count)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT OR IGNORE INTO friends_messages (id, chat_id, sender_id, sender_name, timestamp, is_from_me, message_type, char_count, body)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `),
       isDuplicate: this.db.prepare(`SELECT 1 FROM friends_messages WHERE id = ?`),
 
@@ -381,12 +387,22 @@ export class FriendsStore extends SettingsStore {
   saveMessage(msg: FriendsMessageInput) {
     this.stmts.saveMessage.run(
       msg.id, msg.chat_id, msg.sender_id, msg.sender_name,
-      msg.timestamp, msg.is_from_me ? 1 : 0, msg.message_type, msg.char_count
+      msg.timestamp, msg.is_from_me ? 1 : 0, msg.message_type, msg.char_count, msg.body || ""
     );
   }
 
   isDuplicate(id: string): boolean {
     return !!this.stmts.isDuplicate.get(id);
+  }
+
+  getContactMessages(contactId: string, limit = 50, offset = 0): any[] {
+    return this.db.prepare(`
+      SELECT id, sender_name, body, timestamp, is_from_me, message_type
+      FROM friends_messages
+      WHERE chat_id = ?
+      ORDER BY timestamp DESC
+      LIMIT ? OFFSET ?
+    `).all(contactId, limit, offset) as any[];
   }
 
   // ── Group methods ──

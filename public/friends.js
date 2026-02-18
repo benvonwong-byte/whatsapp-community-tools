@@ -1150,10 +1150,11 @@ async function openContactDetail(contactId) {
   if (nameEl) nameEl.textContent = "Loading...";
 
   try {
-    // Fetch contact detail and activity in parallel
-    const [detailRes, activityRes] = await Promise.all([
+    // Fetch contact detail, activity, and messages in parallel
+    const [detailRes, activityRes, messagesRes] = await Promise.all([
       adminFetch("/api/friends/contacts/" + encodeURIComponent(contactId)),
       adminFetch("/api/friends/contacts/" + encodeURIComponent(contactId) + "/activity?granularity=week"),
+      adminFetch("/api/friends/contacts/" + encodeURIComponent(contactId) + "/messages?limit=50&offset=0"),
     ]);
 
     if (!detailRes.ok) throw new Error("Failed to load contact");
@@ -1256,9 +1257,112 @@ async function openContactDetail(contactId) {
       const activityData = await activityRes.json();
       renderDetailChart(activityData);
     }
+
+    // Conversation log
+    if (messagesRes.ok) {
+      const msgData = await messagesRes.json();
+      renderConversationLog(contactId, msgData.messages || [], false);
+    }
   } catch (err) {
     console.error("Failed to load contact detail:", err);
     if (nameEl) nameEl.textContent = "Error loading contact";
+  }
+}
+
+// ── Conversation Log ──
+
+let msgOffset = 0;
+let msgContactId = null;
+
+function renderConversationLog(contactId, messages, append) {
+  const container = $("detail-messages");
+  const loadMoreBtn = $("load-more-messages");
+  if (!container) return;
+
+  msgContactId = contactId;
+
+  if (!append) {
+    msgOffset = 0;
+    container.innerHTML = "";
+  }
+
+  if (messages.length === 0 && !append) {
+    container.innerHTML = '<div class="chart-empty">No messages stored yet. New messages will appear here after a server restart.</div>';
+    if (loadMoreBtn) loadMoreBtn.style.display = "none";
+    return;
+  }
+
+  // Messages come in DESC order (newest first) — reverse for chronological display
+  const chronological = [...messages].reverse();
+
+  let lastDate = "";
+  const html = chronological.map(m => {
+    const dir = m.is_from_me ? "sent" : "received";
+    const dt = new Date(m.timestamp * 1000);
+    const dateStr = dt.toLocaleDateString();
+    const timeStr = dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+    let dateDivider = "";
+    if (dateStr !== lastDate) {
+      lastDate = dateStr;
+      dateDivider = '<div class="msg-date-divider">' + esc(dateStr) + '</div>';
+    }
+
+    let bodyHtml = "";
+    if (m.body && m.body.trim()) {
+      bodyHtml = esc(m.body);
+    } else if (m.message_type === "ptt") {
+      bodyHtml = '<span class="msg-type-label">Voice note</span>';
+    } else if (m.message_type === "image") {
+      bodyHtml = '<span class="msg-type-label">Image</span>';
+    } else if (m.message_type === "video") {
+      bodyHtml = '<span class="msg-type-label">Video</span>';
+    } else if (m.message_type === "sticker") {
+      bodyHtml = '<span class="msg-type-label">Sticker</span>';
+    } else if (m.message_type === "document") {
+      bodyHtml = '<span class="msg-type-label">Document</span>';
+    } else {
+      bodyHtml = '<span class="msg-type-label">' + esc(m.message_type || "message") + '</span>';
+    }
+
+    return dateDivider +
+      '<div class="msg-row ' + dir + '">' +
+        '<div class="msg-bubble ' + dir + '">' +
+          bodyHtml +
+          '<span class="msg-time">' + esc(timeStr) + '</span>' +
+        '</div>' +
+      '</div>';
+  }).join("");
+
+  if (append) {
+    // Prepend older messages at the top
+    container.insertAdjacentHTML("afterbegin", html);
+  } else {
+    container.innerHTML = html;
+    // Scroll to bottom for initial load
+    container.scrollTop = container.scrollHeight;
+  }
+
+  msgOffset += messages.length;
+
+  // Show/hide load more
+  if (loadMoreBtn) {
+    loadMoreBtn.style.display = messages.length >= 50 ? "" : "none";
+    loadMoreBtn.onclick = async () => {
+      try {
+        const res = await adminFetch("/api/friends/contacts/" + encodeURIComponent(msgContactId) + "/messages?limit=50&offset=" + msgOffset);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.messages && data.messages.length > 0) {
+          renderConversationLog(msgContactId, data.messages, true);
+        }
+        if (!data.messages || data.messages.length < 50) {
+          loadMoreBtn.style.display = "none";
+        }
+      } catch (err) {
+        console.error("Failed to load more messages:", err);
+      }
+    };
   }
 }
 
