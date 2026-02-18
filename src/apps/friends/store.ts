@@ -468,6 +468,8 @@ export class FriendsStore extends SettingsStore {
       if (name && !existing.name) {
         this.db.prepare(`UPDATE friends_contacts SET name = ? WHERE id = ?`).run(name, existing.id);
       }
+      // Ensure a friends_chats entry exists for this contact (needed for dashboard queries)
+      this.stmts.upsertChat.run(existing.id, name || existing.name || phone, 0, 2);
       return existing.id;
     }
     // Create new iMessage-only contact
@@ -476,6 +478,8 @@ export class FriendsStore extends SettingsStore {
       INSERT OR IGNORE INTO friends_contacts (id, name, first_seen, last_seen, phone_normalized)
       VALUES (?, ?, ?, ?, ?)
     `).run(contactId, name, timestamp, timestamp, phone);
+    // Register as a DM chat so dashboard queries include it
+    this.stmts.upsertChat.run(contactId, name || phone, 0, 2);
     return contactId;
   }
 

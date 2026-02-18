@@ -309,6 +309,14 @@ async function transcribeWithGroq(filePath, mimeType, groqApiKey) {
   return (await res.text()).trim();
 }
 
+// Groq free tier limits with 20% safety buffer
+const GROQ_MAX_RPM = 16;             // 20 RPM limit → 16 with buffer
+const GROQ_DELAY_MS = Math.ceil(60000 / GROQ_MAX_RPM); // ~3750ms between requests
+const GROQ_MAX_AUDIO_SEC_PER_HOUR = 5760;  // 7200/hr limit → 5760 with buffer
+const GROQ_MAX_AUDIO_SEC_PER_DAY = 23040;  // 28800/day limit → 23040 with buffer
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
 async function syncAudio(maxDurationSeconds) {
   const config = loadConfig();
   if (!config.groqApiKey) {
@@ -317,7 +325,9 @@ async function syncAudio(maxDurationSeconds) {
     return;
   }
 
-  log(`Syncing iMessage audio (max ${Math.round(maxDurationSeconds / 60)} min)...`);
+  // Cap to daily limit
+  maxDurationSeconds = Math.min(maxDurationSeconds, GROQ_MAX_AUDIO_SEC_PER_DAY);
+  log(`Syncing iMessage audio (max ${Math.round(maxDurationSeconds / 60)} min, throttled to ${GROQ_MAX_RPM} req/min)...`);
 
   const doneBefore = loadAudioDone();
 
@@ -386,16 +396,34 @@ async function syncAudio(maxDurationSeconds) {
   }
 
   log(`Transcribing ${candidates.length} voice notes (${Math.round(totalDuration / 60)} min total)...`);
+  log(`  Rate limits: ${GROQ_MAX_RPM} req/min, ${Math.round(GROQ_MAX_AUDIO_SEC_PER_HOUR / 60)} min audio/hr, ${Math.round(GROQ_MAX_AUDIO_SEC_PER_DAY / 60)} min audio/day`);
 
   const voiceNotes = [];
   const doneSet = new Set(doneBefore);
   let transcribed = 0;
   let failed = 0;
+  let audioSecsThisHour = 0;
+  let hourStart = Date.now();
 
   for (let i = 0; i < candidates.length; i++) {
     const c = candidates[i];
+
+    // Check hourly audio limit — if approaching, pause until the hour resets
+    if (audioSecsThisHour + c.duration > GROQ_MAX_AUDIO_SEC_PER_HOUR) {
+      const elapsed = Date.now() - hourStart;
+      const waitMs = Math.max(0, 3600000 - elapsed) + 5000; // wait until hour + 5s buffer
+      log(`  Hourly audio limit reached (${Math.round(audioSecsThisHour / 60)} min). Waiting ${Math.round(waitMs / 60000)} min for reset...`);
+      await sleep(waitMs);
+      audioSecsThisHour = 0;
+      hourStart = Date.now();
+    }
+
+    // Throttle: wait between requests to stay under RPM limit
+    await sleep(GROQ_DELAY_MS);
+
     try {
       const transcript = await transcribeWithGroq(c.filePath, c.mimeType, config.groqApiKey);
+      audioSecsThisHour += c.duration;
       if (transcript) {
         voiceNotes.push({
           guid: c.guid,
@@ -413,11 +441,14 @@ async function syncAudio(maxDurationSeconds) {
     } catch (err) {
       log(`  ERROR [${i + 1}/${candidates.length}]: ${err.message}`);
       failed++;
-      // If rate limited, wait and continue
+      // If rate limited despite our throttling, wait longer
       if (err.message.includes("429")) {
-        log("  Rate limited — waiting 60s...");
-        await new Promise(r => setTimeout(r, 60000));
-        i--; // retry
+        // Parse wait time from error if available
+        const waitMatch = err.message.match(/try again in (\d+)m(\d+)?s?/);
+        const waitSec = waitMatch ? (parseInt(waitMatch[1]) * 60 + (parseInt(waitMatch[2]) || 0) + 10) : 120;
+        log(`  Rate limited — waiting ${waitSec}s...`);
+        await sleep(waitSec * 1000);
+        i--; // retry this one
         continue;
       }
     }
@@ -426,10 +457,10 @@ async function syncAudio(maxDurationSeconds) {
 
     // Log progress every 10
     if ((i + 1) % 10 === 0) {
-      log(`  Progress: ${i + 1}/${candidates.length} (${transcribed} ok, ${failed} failed)`);
+      log(`  Progress: ${i + 1}/${candidates.length} (${transcribed} ok, ${failed} failed, ${Math.round(audioSecsThisHour / 60)} min this hour)`);
     }
 
-    // Send batch every 50 transcripts
+    // Send batch every 50 transcripts and save progress
     if (voiceNotes.length >= 50) {
       try {
         const result = await postToApi(config.apiUrl, config.syncKey, config.adminToken, { voiceNotes });
