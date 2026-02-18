@@ -20,7 +20,8 @@ export function createFriendsRouter(
     media: { base64: string; mimetype: string; filename: string } | null
   ) => Promise<void>,
   sendProgress: SendProgress,
-  tagExtractTrigger?: () => Promise<number>
+  tagExtractTrigger?: () => Promise<number>,
+  fetchHistoryTrigger?: (contactId: string) => Promise<number>
 ): Router {
   const router = Router();
 
@@ -169,6 +170,19 @@ export function createFriendsRouter(
     const offset = parseInt(req.query.offset as string) || 0;
     const messages = store.getContactMessages(contactId, limit, offset);
     res.json({ messages, limit, offset });
+  });
+
+  router.post("/contacts/:id/fetch-history", async (req: Request, res: Response) => {
+    if (!fetchHistoryTrigger) return res.status(501).json({ error: "Not available" });
+    const contactId = decodeURIComponent(req.params.id as string);
+    try {
+      const count = await fetchHistoryTrigger(contactId);
+      const messages = store.getContactMessages(contactId, 50, 0);
+      res.json({ updated: count, messages });
+    } catch (err: any) {
+      console.error("[fetch-history] Error:", err?.message || err);
+      res.status(500).json({ error: "Failed to fetch history" });
+    }
   });
 
   router.put("/contacts/:id/notes", (req: Request, res: Response) => {

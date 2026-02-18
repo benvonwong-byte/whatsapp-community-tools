@@ -1288,10 +1288,37 @@ async function openContactDetail(contactId) {
       renderDetailChart(activityData);
     }
 
-    // Conversation log
+    // Conversation log — show cached messages first, then fetch fresh from WhatsApp
     if (messagesRes.ok) {
       const msgData = await messagesRes.json();
-      renderConversationLog(contactId, msgData.messages || [], false);
+      var cachedMessages = msgData.messages || [];
+      renderConversationLog(contactId, cachedMessages, false);
+
+      // Check if many messages lack body text — fetch fresh history from WhatsApp
+      var emptyCount = cachedMessages.filter(function(m) {
+        return (!m.body || !m.body.trim()) && m.message_type === "chat";
+      }).length;
+
+      if (emptyCount > 0 || cachedMessages.length === 0) {
+        // Show loading indicator
+        var container = $("detail-messages");
+        if (container && cachedMessages.length === 0) {
+          container.innerHTML = '<div class="chart-empty">Fetching chat history from WhatsApp...</div>';
+        }
+        // Fetch fresh history in background
+        adminFetch("/api/friends/contacts/" + encodeURIComponent(contactId) + "/fetch-history", {
+          method: "POST"
+        }).then(function(fetchRes) {
+          if (!fetchRes.ok) return;
+          return fetchRes.json();
+        }).then(function(data) {
+          if (data && data.messages && data.messages.length > 0) {
+            renderConversationLog(contactId, data.messages, false);
+          }
+        }).catch(function(err) {
+          console.log("Background history fetch failed:", err);
+        });
+      }
     }
   } catch (err) {
     console.error("Failed to load contact detail:", err);

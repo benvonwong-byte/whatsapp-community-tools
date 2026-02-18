@@ -391,6 +391,10 @@ export class FriendsStore extends SettingsStore {
     );
   }
 
+  updateMessageBody(id: string, body: string) {
+    this.db.prepare(`UPDATE friends_messages SET body = ? WHERE id = ? AND (body IS NULL OR body = '')`).run(body, id);
+  }
+
   isDuplicate(id: string): boolean {
     return !!this.stmts.isDuplicate.get(id);
   }

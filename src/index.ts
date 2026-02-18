@@ -564,6 +564,7 @@ async function main() {
             is_from_me: msg.fromMe,
             message_type: msgType,
             char_count: msg.body?.length || 0,
+            body: msg.body || "",
           });
 
           saved++;
@@ -645,9 +646,51 @@ async function main() {
     }
   }, 30 * 60 * 1000);
 
+  const friendsFetchHistory = async (contactId: string): Promise<number> => {
+    const allChats = await whatsapp.getClient().getChats();
+    const chat = allChats.find((c: any) => c.id._serialized === contactId);
+    if (!chat) return 0;
+
+    const messages = await chat.fetchMessages({ limit: 500 });
+    let updated = 0;
+    for (const msg of messages) {
+      if (!msg.body) continue;
+      const exists = friendsStore.isDuplicate(msg.id._serialized);
+      if (exists) {
+        // Update body for existing messages that have empty bodies
+        friendsStore.updateMessageBody(msg.id._serialized, msg.body);
+        updated++;
+      } else {
+        // Save new messages we didn't have
+        const senderId = msg.fromMe ? "self" : ((msg as any).author || chat.id._serialized);
+        let senderName = "";
+        if (!msg.fromMe) {
+          try {
+            const contact = await msg.getContact();
+            senderName = contact?.pushname || contact?.name || "";
+          } catch { senderName = ""; }
+          friendsStore.upsertContact(senderId, senderName, msg.timestamp);
+        }
+        friendsStore.saveMessage({
+          id: msg.id._serialized,
+          chat_id: contactId,
+          sender_id: senderId,
+          sender_name: senderName,
+          timestamp: msg.timestamp,
+          is_from_me: msg.fromMe,
+          message_type: (msg as any).type || "text",
+          char_count: msg.body?.length || 0,
+          body: msg.body || "",
+        });
+        updated++;
+      }
+    }
+    return updated;
+  };
+
   appRouters.push({
     path: "/api/friends",
-    router: createFriendsRouter(friendsStore, friendsScan, friendsBackfill, friendsSendMessage, friendsSendProgress, friendsTagExtract),
+    router: createFriendsRouter(friendsStore, friendsScan, friendsBackfill, friendsSendMessage, friendsSendProgress, friendsTagExtract, friendsFetchHistory),
   });
 
   startServer({
