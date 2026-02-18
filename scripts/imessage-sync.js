@@ -68,6 +68,36 @@ function normalizePhone(phone) {
 }
 
 /**
+ * Build a phone→name map from macOS Contacts database.
+ */
+function loadContactNames() {
+  const phoneToName = {};
+  const abDir = path.join(os.homedir(), "Library/Application Support/AddressBook/Sources");
+  try {
+    const sources = fs.readdirSync(abDir);
+    for (const src of sources) {
+      const dbPath = path.join(abDir, src, "AddressBook-v22.abcddb");
+      if (!fs.existsSync(dbPath)) continue;
+      try {
+        const result = spawnSync("sqlite3", ["-json", "-readonly", dbPath,
+          "SELECT c.ZFIRSTNAME, c.ZLASTNAME, p.ZFULLNUMBER FROM ZABCDRECORD c JOIN ZABCDPHONENUMBER p ON p.ZOWNER = c.Z_PK WHERE c.ZFIRSTNAME IS NOT NULL"
+        ], { encoding: "utf-8", maxBuffer: 10 * 1024 * 1024 });
+        if (result.stdout && result.stdout.trim()) {
+          const rows = JSON.parse(result.stdout.trim());
+          for (const r of rows) {
+            const name = [r.ZFIRSTNAME, r.ZLASTNAME].filter(Boolean).join(" ").trim();
+            const phone = normalizePhone(r.ZFULLNUMBER || "");
+            if (name && phone.length >= 7) phoneToName[phone] = name;
+          }
+        }
+      } catch { /* skip this source */ }
+    }
+  } catch { /* no contacts access */ }
+  log(`Loaded ${Object.keys(phoneToName).length} contact names from macOS Contacts.`);
+  return phoneToName;
+}
+
+/**
  * Query chat.db using macOS built-in sqlite3 CLI.
  * Returns parsed JSON rows.
  */
@@ -151,6 +181,39 @@ function postToApi(apiUrl, syncKey, adminToken, data) {
   });
 }
 
+/**
+ * Extract plain text from NSAttributedString typedstream (attributedBody hex).
+ * The text lives after the NSString type marker (\x01\x2B) + length byte(s).
+ */
+function extractTextFromHex(hexStr) {
+  if (!hexStr) return "";
+  const buf = Buffer.from(hexStr, "hex");
+  // Find the \x01\x2B marker (NSString '+' type code)
+  const marker = Buffer.from([0x01, 0x2B]);
+  const idx = buf.indexOf(marker);
+  if (idx < 0) return "";
+
+  let start = idx + 2;
+  let length = buf[start];
+
+  // Multi-byte length encoding (NSArchiver format)
+  if (length === 0x81) {
+    length = buf[start + 1];
+    start += 2;
+  } else if (length === 0x82) {
+    length = (buf[start + 1] << 8) | buf[start + 2];
+    start += 3;
+  } else if (length === 0x83) {
+    length = (buf[start + 1] << 16) | (buf[start + 2] << 8) | buf[start + 3];
+    start += 4;
+  } else {
+    start += 1;
+  }
+
+  if (start + length > buf.length) return "";
+  return buf.subarray(start, start + length).toString("utf-8").replace(/\uFFFC/g, "").trim();
+}
+
 // ── Sync Logic ──
 
 async function sync() {
@@ -162,16 +225,19 @@ async function sync() {
 
   const config = loadConfig();
   const lastRowId = loadCursor();
+  const contactNames = loadContactNames();
 
   log(`Syncing iMessages (cursor: ROWID > ${lastRowId})...`);
 
   // Query new messages since last sync
   // Only 1:1 chats (not group), only actual messages (not reactions/tapbacks)
-  const rows = queryDb(`
+  // Read both text and hex(attributedBody) — modern macOS stores content in attributedBody
+  let rows = queryDb(`
     SELECT
       m.ROWID as rowid,
       m.guid,
       m.text,
+      hex(m.attributedBody) as attributed_hex,
       m.date as apple_date,
       m.is_from_me,
       m.service,
@@ -180,77 +246,114 @@ async function sync() {
     LEFT JOIN handle h ON m.handle_id = h.ROWID
     WHERE m.ROWID > ${lastRowId}
       AND m.associated_message_type = 0
-      AND m.text IS NOT NULL
-      AND m.text != ''
+      AND (m.text IS NOT NULL AND m.text != '' OR m.attributedBody IS NOT NULL)
       AND h.id IS NOT NULL
       AND m.cache_roomnames IS NULL
     ORDER BY m.ROWID ASC
-    LIMIT 2000
+    LIMIT 5000
   `);
 
-  if (rows.length === 0) {
-    log("No new messages to sync.");
-    return;
-  }
+  let grandTotal = 0;
+  let currentCursor = lastRowId;
 
-  log(`Found ${rows.length} new messages.`);
-
-  // Convert to sync format
-  const messages = [];
-  let maxRowId = lastRowId;
-
-  for (const row of rows) {
-    const rowid = parseInt(row.rowid);
-    if (rowid > maxRowId) maxRowId = rowid;
-
-    // Convert Apple timestamp to Unix timestamp
-    const appleDate = parseInt(row.apple_date) || 0;
-    // chat.db dates can be in nanoseconds (newer macOS) or seconds (older)
-    const unixTimestamp = appleDate > 1e15
-      ? Math.floor(appleDate / 1e9) + APPLE_EPOCH_OFFSET
-      : appleDate > 1e9
-        ? Math.floor(appleDate / 1e6) + APPLE_EPOCH_OFFSET
-        : appleDate + APPLE_EPOCH_OFFSET;
-
-    const phone = normalizePhone(row.handle_id);
-    if (!phone || phone.length < 7) continue; // Skip non-phone handles (emails etc.)
-
-    messages.push({
-      guid: row.guid,
-      phone: phone,
-      sender_name: "", // iMessage doesn't store names in chat.db
-      text: row.text,
-      timestamp: unixTimestamp,
-      is_from_me: row.is_from_me === "1" || row.is_from_me === 1,
-    });
-  }
-
-  if (messages.length === 0) {
-    log("No phone-based messages to sync (email-only handles skipped).");
-    saveCursor(maxRowId);
-    return;
-  }
-
-  // Send in batches of 500
-  const BATCH_SIZE = 500;
-  let totalImported = 0;
-
-  for (let i = 0; i < messages.length; i += BATCH_SIZE) {
-    const batch = messages.slice(i, i + BATCH_SIZE);
-    try {
-      const result = await postToApi(config.apiUrl, config.syncKey, config.adminToken, { messages: batch });
-      totalImported += result.imported || 0;
-      log(`Batch ${Math.floor(i / BATCH_SIZE) + 1}: imported ${result.imported}, skipped ${result.updated}`);
-    } catch (err) {
-      log(`ERROR posting batch: ${err.message}`);
-      // Save cursor at last successful point
-      if (i > 0) saveCursor(parseInt(messages[i - 1].guid) || maxRowId);
-      return;
+  // Loop until no more messages (handles 176K+ messages in chunks of 5000)
+  while (true) {
+    if (rows.length === 0) {
+      if (grandTotal === 0) log("No new messages to sync.");
+      break;
     }
+
+    log(`Found ${rows.length} new messages (cursor: ${currentCursor}).`);
+
+    // Convert to sync format
+    const messages = [];
+    let maxRowId = currentCursor;
+
+    for (const row of rows) {
+      const rowid = parseInt(row.rowid);
+      if (rowid > maxRowId) maxRowId = rowid;
+
+      // Convert Apple timestamp to Unix timestamp
+      const appleDate = parseInt(row.apple_date) || 0;
+      // chat.db dates can be in nanoseconds (newer macOS) or seconds (older)
+      const unixTimestamp = appleDate > 1e15
+        ? Math.floor(appleDate / 1e9) + APPLE_EPOCH_OFFSET
+        : appleDate > 1e9
+          ? Math.floor(appleDate / 1e6) + APPLE_EPOCH_OFFSET
+          : appleDate + APPLE_EPOCH_OFFSET;
+
+      const phone = normalizePhone(row.handle_id);
+      if (!phone || phone.length < 7) continue; // Skip non-phone handles (emails etc.)
+
+      // Extract text: prefer text column, fall back to attributedBody extraction
+      const bodyText = (row.text && row.text.trim()) || extractTextFromHex(row.attributed_hex);
+      if (!bodyText) continue; // Skip empty messages (attachments without text, etc.)
+
+      messages.push({
+        guid: row.guid,
+        phone: phone,
+        sender_name: contactNames[phone] || "",
+        text: bodyText,
+        timestamp: unixTimestamp,
+        is_from_me: row.is_from_me === "1" || row.is_from_me === 1,
+      });
+    }
+
+    if (messages.length === 0) {
+      log("No phone-based messages in this batch (email-only handles skipped).");
+      saveCursor(maxRowId);
+      currentCursor = maxRowId;
+      // Still try next batch since there may be phone messages later
+      if (rows.length < 5000) break;
+      rows = queryDb(`
+        SELECT m.ROWID as rowid, m.guid, m.text, hex(m.attributedBody) as attributed_hex,
+               m.date as apple_date, m.is_from_me, m.service, h.id as handle_id
+        FROM message m LEFT JOIN handle h ON m.handle_id = h.ROWID
+        WHERE m.ROWID > ${currentCursor} AND m.associated_message_type = 0
+          AND (m.text IS NOT NULL AND m.text != '' OR m.attributedBody IS NOT NULL)
+          AND h.id IS NOT NULL AND m.cache_roomnames IS NULL
+        ORDER BY m.ROWID ASC LIMIT 5000
+      `);
+      continue;
+    }
+
+    // Send in batches of 500
+    const BATCH_SIZE = 500;
+    let batchImported = 0;
+
+    for (let i = 0; i < messages.length; i += BATCH_SIZE) {
+      const batch = messages.slice(i, i + BATCH_SIZE);
+      try {
+        const result = await postToApi(config.apiUrl, config.syncKey, config.adminToken, { messages: batch });
+        batchImported += result.imported || 0;
+        log(`  Batch ${Math.floor(i / BATCH_SIZE) + 1}: imported ${result.imported}, skipped ${result.updated}`);
+      } catch (err) {
+        log(`ERROR posting batch: ${err.message}`);
+        saveCursor(maxRowId);
+        return;
+      }
+    }
+
+    grandTotal += batchImported;
+    saveCursor(maxRowId);
+    currentCursor = maxRowId;
+
+    // If we got fewer than the limit, we're done
+    if (rows.length < 5000) break;
+
+    // Fetch next chunk
+    rows = queryDb(`
+      SELECT m.ROWID as rowid, m.guid, m.text, hex(m.attributedBody) as attributed_hex,
+             m.date as apple_date, m.is_from_me, m.service, h.id as handle_id
+      FROM message m LEFT JOIN handle h ON m.handle_id = h.ROWID
+      WHERE m.ROWID > ${currentCursor} AND m.associated_message_type = 0
+        AND (m.text IS NOT NULL AND m.text != '' OR m.attributedBody IS NOT NULL)
+        AND h.id IS NOT NULL AND m.cache_roomnames IS NULL
+      ORDER BY m.ROWID ASC LIMIT 5000
+    `);
   }
 
-  saveCursor(maxRowId);
-  log(`Sync complete! ${totalImported} new messages imported.`);
+  log(`Sync complete! ${grandTotal} new messages imported total.`);
 }
 
 // ── Audio Sync Logic ──
@@ -324,6 +427,8 @@ async function syncAudio(maxDurationSeconds) {
     log("Add it to ~/.imessage-sync-config.json to enable voice note transcription.");
     return;
   }
+
+  const contactNames = loadContactNames();
 
   // Cap to daily limit
   maxDurationSeconds = Math.min(maxDurationSeconds, GROQ_MAX_AUDIO_SEC_PER_DAY);
@@ -428,7 +533,7 @@ async function syncAudio(maxDurationSeconds) {
         voiceNotes.push({
           guid: c.guid,
           phone: c.phone,
-          sender_name: "",
+          sender_name: contactNames[c.phone] || "",
           timestamp: c.timestamp,
           is_from_me: c.is_from_me,
           transcript,
