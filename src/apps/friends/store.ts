@@ -397,10 +397,12 @@ export class FriendsStore extends SettingsStore {
 
   getContactMessages(contactId: string, limit = 50, offset = 0): any[] {
     return this.db.prepare(`
-      SELECT id, sender_name, body, timestamp, is_from_me, message_type
-      FROM friends_messages
-      WHERE chat_id = ?
-      ORDER BY timestamp DESC
+      SELECT m.id, m.sender_name, m.body, m.timestamp, m.is_from_me, m.message_type,
+             vn.transcript AS voice_transcript
+      FROM friends_messages m
+      LEFT JOIN friends_voice_notes vn ON vn.id = m.id
+      WHERE m.chat_id = ?
+      ORDER BY m.timestamp DESC
       LIMIT ? OFFSET ?
     `).all(contactId, limit, offset) as any[];
   }

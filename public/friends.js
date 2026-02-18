@@ -1339,10 +1339,15 @@ function renderConversationLog(contactId, messages, append) {
     }
 
     let bodyHtml = "";
-    if (m.body && m.body.trim()) {
+    if (m.message_type === "ptt") {
+      // Voice note — show transcript if available
+      if (m.voice_transcript && m.voice_transcript.trim() && m.voice_transcript !== "[transcription failed]") {
+        bodyHtml = '<span class="msg-voice-transcript">' + esc(m.voice_transcript) + '</span>';
+      } else {
+        bodyHtml = '<span class="msg-type-label">Voice note</span>';
+      }
+    } else if (m.body && m.body.trim()) {
       bodyHtml = esc(m.body);
-    } else if (m.message_type === "ptt") {
-      bodyHtml = '<span class="msg-type-label">Voice note</span>';
     } else if (m.message_type === "image") {
       bodyHtml = '<span class="msg-type-label">Image</span>';
     } else if (m.message_type === "video") {
@@ -2051,8 +2056,14 @@ function setupTierDragAndDrop() {
   var zones = tabTiers.querySelectorAll(".tier-drop-zone");
 
   chips.forEach(function(chip) {
+    var startX = 0, startY = 0, didDrag = false;
+    chip.addEventListener("mousedown", function(e) {
+      startX = e.clientX;
+      startY = e.clientY;
+      didDrag = false;
+    });
     chip.addEventListener("dragstart", function(e) {
-      chipDragOccurred = true;
+      didDrag = true;
       e.dataTransfer.setData("text/plain", JSON.stringify({
         contactId: chip.dataset.contactId,
         sourceTier: chip.dataset.sourceTier,
@@ -2061,10 +2072,15 @@ function setupTierDragAndDrop() {
     });
     chip.addEventListener("dragend", function() {
       chip.classList.remove("dragging");
-      setTimeout(function() { chipDragOccurred = false; }, 100);
     });
     chip.addEventListener("click", function(e) {
-      if (chipDragOccurred) return;
+      // Only open detail if no real drag occurred (< 5px movement)
+      var dx = Math.abs(e.clientX - startX);
+      var dy = Math.abs(e.clientY - startY);
+      if (didDrag || dx > 5 || dy > 5) {
+        didDrag = false;
+        return;
+      }
       e.stopPropagation();
       var contactId = chip.dataset.contactId;
       if (contactId) openContactDetail(contactId);
