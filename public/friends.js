@@ -712,11 +712,9 @@ function renderTopFriends(data) {
     }
     return '<div class="top-friend-row" data-contact-id="' + esc(String(f.id)) + '" style="cursor:pointer;">' +
       '<div class="top-friend-rank ' + rankClass + '">' + (i + 1) + '</div>' +
-      '<div class="top-friend-info">' +
-        '<div class="top-friend-name">' + esc(f.name) + '</div>' +
-        tagsHtml +
-      '</div>' +
-      '<div>' +
+      '<div class="top-friend-name">' + esc(f.name) + '</div>' +
+      tagsHtml +
+      '<div class="top-friend-score">' +
         '<span class="top-friend-count">' + (f.messages || 0) + '</span>' +
         '<span class="top-friend-trend ' + trendClass + '">' + trendIcon + trendLabel + '</span>' +
       '</div>' +
@@ -1135,6 +1133,9 @@ function setupSortableHeaders() {
       loadContacts();
     });
   });
+  // Apply initial sort indicator
+  const initialHeader = document.querySelector('[data-sort="' + currentSort.field + '"]');
+  if (initialHeader) initialHeader.classList.add(currentSort.dir === "asc" ? "sort-asc" : "sort-desc");
 }
 
 async function openContactDetail(contactId) {
@@ -1776,13 +1777,41 @@ async function loadTiers() {
   }
 }
 
+// Tier pagination & search state
+var tierPages = {};
+var tierSearch = "";
+var tierAllContacts = [];
+var tierCurrentList = [];
+var TIER_PAGE_SIZE = 50;
+
+function renderContactChip(c, sourceTier) {
+  return '<div class="contact-chip" draggable="true" data-contact-id="' + esc(String(c.id)) + '" data-source-tier="' + esc(String(sourceTier)) + '">' +
+    '<div class="chip-name">' + esc(c.name) + '</div>' +
+    '<div class="chip-meta">' + (c.messages_30d || 0) + ' msgs / 30d</div>' +
+  '</div>';
+}
+
+function renderPagination(tierId, page, totalItems) {
+  var totalPages = Math.ceil(totalItems / TIER_PAGE_SIZE);
+  if (totalPages <= 1) return '';
+  return '<div class="tier-pagination">' +
+    '<button data-tier-page="' + esc(String(tierId)) + '" data-dir="prev"' + (page <= 0 ? ' disabled' : '') + '>&laquo; Prev</button>' +
+    '<span>' + (page + 1) + ' / ' + totalPages + '</span>' +
+    '<button data-tier-page="' + esc(String(tierId)) + '" data-dir="next"' + (page >= totalPages - 1 ? ' disabled' : '') + '>Next &raquo;</button>' +
+  '</div>';
+}
+
 function renderTierLanes(tiersList, allContacts) {
-  const container = $("tier-lanes");
+  var container = $("tier-lanes");
   if (!container) return;
 
-  const byTier = {};
-  const unassigned = [];
-  allContacts.forEach(c => {
+  // Store for later use by search/pagination
+  tierAllContacts = allContacts;
+  tierCurrentList = tiersList;
+
+  var byTier = {};
+  var unassigned = [];
+  allContacts.forEach(function(c) {
     if (c.tier_id) {
       if (!byTier[c.tier_id]) byTier[c.tier_id] = [];
       byTier[c.tier_id].push(c);
@@ -1791,10 +1820,46 @@ function renderTierLanes(tiersList, allContacts) {
     }
   });
 
-  let html = '';
+  // Render unassigned section (horizontal, above tiers)
+  var unassignedChips = $("tier-unassigned-chips");
+  var unassignedCount = $("tier-unassigned-count");
+  if (unassignedChips) {
+    unassignedChips.innerHTML = unassigned.length === 0
+      ? '<span style="color:var(--text-dim);font-size:11px;padding:4px;">No unassigned contacts</span>'
+      : unassigned.map(function(c) { return renderContactChip(c, "unassigned"); }).join("");
+  }
+  if (unassignedCount) unassignedCount.textContent = unassigned.length;
 
-  tiersList.forEach(t => {
-    const members = byTier[t.id] || [];
+  // Render search results if searching
+  var searchSection = $("tier-search-results");
+  var searchChips = $("tier-search-chips");
+  if (searchSection && searchChips) {
+    if (tierSearch.trim()) {
+      var query = tierSearch.toLowerCase();
+      var matches = allContacts.filter(function(c) {
+        return c.name && c.name.toLowerCase().indexOf(query) !== -1;
+      });
+      searchSection.style.display = "block";
+      searchChips.innerHTML = matches.length === 0
+        ? '<span style="color:var(--text-dim);font-size:11px;padding:4px;">No matches</span>'
+        : matches.map(function(c) {
+            return renderContactChip(c, c.tier_id ? String(c.tier_id) : "unassigned");
+          }).join("");
+    } else {
+      searchSection.style.display = "none";
+      searchChips.innerHTML = "";
+    }
+  }
+
+  // Render tier columns with pagination
+  var html = '';
+  tiersList.forEach(function(t) {
+    var members = byTier[t.id] || [];
+    var page = tierPages[t.id] || 0;
+    var totalPages = Math.ceil(members.length / TIER_PAGE_SIZE);
+    if (page >= totalPages && totalPages > 0) { page = totalPages - 1; tierPages[t.id] = page; }
+    var pageMembers = members.slice(page * TIER_PAGE_SIZE, (page + 1) * TIER_PAGE_SIZE);
+
     html += '<div class="group-lane" data-tier-id="' + esc(String(t.id)) + '">' +
       '<div class="group-lane-header">' +
         '<span class="color-dot" style="background:' + esc(t.color || '#4fc3f7') + '"></span>' +
@@ -1804,47 +1869,40 @@ function renderTierLanes(tiersList, allContacts) {
         '<button class="lane-btn delete" data-action="delete-tier" data-tier-id="' + esc(String(t.id)) + '" title="Delete">&#128465;</button>' +
       '</div>' +
       '<div class="group-lane-body tier-drop-zone" data-tier-id="' + esc(String(t.id)) + '">' +
-        members.map(c =>
-          '<div class="contact-chip" draggable="true" data-contact-id="' + esc(String(c.id)) + '" data-source-tier="' + esc(String(t.id)) + '">' +
-            '<div class="chip-name">' + esc(c.name) + '</div>' +
-            '<div class="chip-meta">' + (c.messages_30d || 0) + ' msgs / 30d</div>' +
-          '</div>'
-        ).join("") +
+        pageMembers.map(function(c) { return renderContactChip(c, String(t.id)); }).join("") +
       '</div>' +
+      renderPagination(t.id, page, members.length) +
     '</div>';
   });
 
-  html += '<div class="group-lane ungrouped-lane" data-tier-id="unassigned">' +
-    '<div class="group-lane-header">' +
-      '<span class="color-dot" style="background:#666"></span>' +
-      '<span class="lane-title">Unassigned</span>' +
-      '<span class="lane-count">' + unassigned.length + '</span>' +
-    '</div>' +
-    '<div class="group-lane-body tier-drop-zone" data-tier-id="unassigned">' +
-      unassigned.map(c =>
-        '<div class="contact-chip" draggable="true" data-contact-id="' + esc(String(c.id)) + '" data-source-tier="unassigned">' +
-          '<div class="chip-name">' + esc(c.name) + '</div>' +
-          '<div class="chip-meta">' + (c.messages_30d || 0) + ' msgs / 30d</div>' +
-        '</div>'
-      ).join("") +
-    '</div>' +
-  '</div>';
-
   container.innerHTML = html;
 
-  container.querySelectorAll('[data-action="edit-tier"]').forEach(btn => {
-    btn.addEventListener("click", e => {
+  // Wire up edit/delete buttons
+  container.querySelectorAll('[data-action="edit-tier"]').forEach(function(btn) {
+    btn.addEventListener("click", function(e) {
       e.stopPropagation();
-      const tid = parseInt(btn.dataset.tierId);
-      const tier = tiersList.find(t => t.id === tid);
+      var tid = parseInt(btn.dataset.tierId);
+      var tier = tiersList.find(function(t) { return t.id === tid; });
       if (tier) openTierModal(tier);
     });
   });
 
-  container.querySelectorAll('[data-action="delete-tier"]').forEach(btn => {
-    btn.addEventListener("click", e => {
+  container.querySelectorAll('[data-action="delete-tier"]').forEach(function(btn) {
+    btn.addEventListener("click", function(e) {
       e.stopPropagation();
       deleteTier(btn.dataset.tierId);
+    });
+  });
+
+  // Wire up pagination buttons
+  container.querySelectorAll('[data-tier-page]').forEach(function(btn) {
+    btn.addEventListener("click", function() {
+      var tierId = btn.dataset.tierPage;
+      var dir = btn.dataset.dir;
+      if (!tierPages[tierId]) tierPages[tierId] = 0;
+      if (dir === "prev") tierPages[tierId]--;
+      else tierPages[tierId]++;
+      renderTierLanes(tierCurrentList, tierAllContacts);
     });
   });
 
@@ -1852,36 +1910,43 @@ function renderTierLanes(tiersList, allContacts) {
 }
 
 function setupTierDragAndDrop() {
-  const chips = document.querySelectorAll("#tier-lanes .contact-chip[draggable]");
-  const zones = document.querySelectorAll(".tier-drop-zone");
+  // Select chips from ALL tier-related sections (lanes, unassigned, search results)
+  var tabTiers = document.getElementById("tab-tiers");
+  if (!tabTiers) return;
+  var chips = tabTiers.querySelectorAll(".contact-chip[draggable]");
+  var zones = tabTiers.querySelectorAll(".tier-drop-zone");
 
-  chips.forEach(chip => {
-    chip.addEventListener("dragstart", e => {
+  chips.forEach(function(chip) {
+    chip.addEventListener("dragstart", function(e) {
       e.dataTransfer.setData("text/plain", JSON.stringify({
         contactId: chip.dataset.contactId,
         sourceTier: chip.dataset.sourceTier,
       }));
       chip.classList.add("dragging");
     });
-    chip.addEventListener("dragend", () => chip.classList.remove("dragging"));
+    chip.addEventListener("dragend", function() { chip.classList.remove("dragging"); });
   });
 
-  zones.forEach(zone => {
-    zone.addEventListener("dragover", e => {
+  zones.forEach(function(zone) {
+    zone.addEventListener("dragover", function(e) {
       e.preventDefault();
-      zone.closest(".group-lane").classList.add("drag-over");
+      // Highlight the drop target (could be .group-lane or .tier-unassigned-section)
+      var highlight = zone.closest(".group-lane") || zone.closest(".tier-unassigned-section");
+      if (highlight) highlight.classList.add("drag-over");
     });
-    zone.addEventListener("dragleave", () => {
-      zone.closest(".group-lane").classList.remove("drag-over");
+    zone.addEventListener("dragleave", function() {
+      var highlight = zone.closest(".group-lane") || zone.closest(".tier-unassigned-section");
+      if (highlight) highlight.classList.remove("drag-over");
     });
-    zone.addEventListener("drop", async e => {
+    zone.addEventListener("drop", async function(e) {
       e.preventDefault();
-      zone.closest(".group-lane").classList.remove("drag-over");
+      var highlight = zone.closest(".group-lane") || zone.closest(".tier-unassigned-section");
+      if (highlight) highlight.classList.remove("drag-over");
       try {
-        const payload = JSON.parse(e.dataTransfer.getData("text/plain"));
-        const targetTier = zone.dataset.tierId;
+        var payload = JSON.parse(e.dataTransfer.getData("text/plain"));
+        var targetTier = zone.dataset.tierId;
         if (targetTier === payload.sourceTier) return;
-        const tierId = targetTier === "unassigned" ? null : parseInt(targetTier);
+        var tierId = targetTier === "unassigned" ? null : parseInt(targetTier);
         await adminFetch("/api/friends/contacts/" + encodeURIComponent(payload.contactId) + "/tier", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -1896,17 +1961,32 @@ function setupTierDragAndDrop() {
 }
 
 function setupTierHandlers() {
-  const createBtn = $("create-tier-btn");
-  if (createBtn) createBtn.addEventListener("click", () => openTierModal());
+  var createBtn = $("create-tier-btn");
+  if (createBtn) createBtn.addEventListener("click", function() { openTierModal(); });
 
-  const saveBtn = $("tier-modal-save");
+  var saveBtn = $("tier-modal-save");
   if (saveBtn) saveBtn.addEventListener("click", saveTier);
 
-  const cancelBtn = $("tier-modal-cancel");
+  var cancelBtn = $("tier-modal-cancel");
   if (cancelBtn) cancelBtn.addEventListener("click", closeTierModal);
 
-  const modal = $("tier-modal");
-  if (modal) modal.addEventListener("click", e => { if (e.target === modal) closeTierModal(); });
+  var modal = $("tier-modal");
+  if (modal) modal.addEventListener("click", function(e) { if (e.target === modal) closeTierModal(); });
+
+  // Tier search with debounce
+  var searchInput = $("tier-search-input");
+  var searchTimeout = null;
+  if (searchInput) {
+    searchInput.addEventListener("input", function() {
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(function() {
+        tierSearch = searchInput.value;
+        if (tierCurrentList.length > 0 || tierAllContacts.length > 0) {
+          renderTierLanes(tierCurrentList, tierAllContacts);
+        }
+      }, 250);
+    });
+  }
 }
 
 function openTierModal(existingTier) {
@@ -2056,7 +2136,7 @@ function createCalDay(dayNum, contacts, isToday, otherMonth) {
     const list = document.createElement("div");
     list.className = "day-contacts";
 
-    const maxVisible = 4;
+    const maxVisible = 5;
     contacts.slice(0, maxVisible).forEach(c => {
       const item = document.createElement("div");
       item.className = "day-contact-item";
