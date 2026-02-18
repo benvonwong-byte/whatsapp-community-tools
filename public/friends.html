@@ -841,6 +841,33 @@
     .msg-bubble.sent .msg-voice-transcript {
       color: #7B1FA2;
     }
+    .msg-source {
+      font-size: 8px;
+      font-weight: 600;
+      padding: 1px 3px;
+      border-radius: 3px;
+      margin-right: 4px;
+      vertical-align: middle;
+    }
+    .msg-source.whatsapp {
+      background: rgba(37, 211, 102, 0.2);
+      color: #25D366;
+    }
+    .msg-source.imessage {
+      background: rgba(52, 120, 246, 0.2);
+      color: #3478F6;
+    }
+    .msg-bubble.sent .msg-source.imessage {
+      color: #1a3f7a;
+      background: rgba(52, 120, 246, 0.15);
+    }
+    .msg-bubble.sent .msg-source.whatsapp {
+      color: #0d5c2a;
+      background: rgba(37, 211, 102, 0.15);
+    }
+    .msg-bubble.imessage.received {
+      background: #1a2a44;
+    }
     .load-more-btn {
       margin-top: 8px;
       background: var(--surface2);

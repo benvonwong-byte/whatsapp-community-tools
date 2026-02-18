@@ -168,7 +168,8 @@ export function createFriendsRouter(
     const contactId = decodeURIComponent(req.params.id as string);
     const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
     const offset = parseInt(req.query.offset as string) || 0;
-    const messages = store.getContactMessages(contactId, limit, offset);
+    // Use cross-source query to show WhatsApp + iMessage messages together
+    const messages = store.getContactMessagesAllSources(contactId, limit, offset);
     res.json({ messages, limit, offset });
   });
 
@@ -470,6 +471,30 @@ export function createFriendsRouter(
     else if (tierParam && !isNaN(parseInt(tierParam))) tierId = parseInt(tierParam);
     const data = store.getCalendarData(year, month, tierId);
     res.json({ year, month, days: data });
+  });
+
+  // ── iMessage Sync ──
+
+  router.post("/imessage/sync", (req: Request, res: Response) => {
+    const syncKey = req.headers["x-sync-key"] as string;
+    const expectedKey = process.env.IMESSAGE_SYNC_KEY;
+    if (!expectedKey || syncKey !== expectedKey) {
+      return res.status(401).json({ error: "Invalid sync key" });
+    }
+
+    const { messages } = req.body;
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return res.json({ imported: 0, updated: 0 });
+    }
+
+    try {
+      const result = store.syncImessageMessages(messages);
+      console.log(`[imessage-sync] Imported ${result.imported}, skipped ${result.updated} duplicates`);
+      res.json(result);
+    } catch (err: any) {
+      console.error("[imessage-sync] Error:", err?.message || err);
+      res.status(500).json({ error: "Sync failed" });
+    }
   });
 
   // ── Health ──

@@ -68,6 +68,7 @@ export interface FriendsMessageInput {
   message_type: string;
   char_count: number;
   body?: string;
+  source?: string; // 'whatsapp' | 'imessage'
 }
 
 export interface FriendsGroup {
@@ -262,6 +263,25 @@ export class FriendsStore extends SettingsStore {
       this.db.exec(`ALTER TABLE friends_messages ADD COLUMN body TEXT DEFAULT ''`);
     } catch { /* column already exists */ }
 
+    // Migration: add source column to friends_messages
+    try {
+      this.db.exec(`ALTER TABLE friends_messages ADD COLUMN source TEXT DEFAULT 'whatsapp'`);
+    } catch { /* column already exists */ }
+
+    // Migration: add phone_normalized to friends_contacts
+    try {
+      this.db.exec(`ALTER TABLE friends_contacts ADD COLUMN phone_normalized TEXT DEFAULT ''`);
+    } catch { /* column already exists */ }
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_friends_contacts_phone ON friends_contacts(phone_normalized)`);
+
+    // Backfill phone_normalized from WhatsApp IDs
+    this.db.exec(`
+      UPDATE friends_contacts
+      SET phone_normalized = REPLACE(REPLACE(id, '@c.us', ''), '@s.whatsapp.net', '')
+      WHERE phone_normalized = ''
+        AND (id LIKE '%@c.us' OR id LIKE '%@s.whatsapp.net')
+    `);
+
     // Seed default tiers if none exist
     const tierCount = (this.db.prepare(`SELECT COUNT(*) as c FROM friends_tiers`).get() as any).c;
     if (tierCount === 0) {
@@ -301,8 +321,8 @@ export class FriendsStore extends SettingsStore {
       updateContactNotes: this.db.prepare(`UPDATE friends_contacts SET notes = ? WHERE id = ?`),
 
       saveMessage: this.db.prepare(`
-        INSERT OR IGNORE INTO friends_messages (id, chat_id, sender_id, sender_name, timestamp, is_from_me, message_type, char_count, body)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT OR IGNORE INTO friends_messages (id, chat_id, sender_id, sender_name, timestamp, is_from_me, message_type, char_count, body, source)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `),
       isDuplicate: this.db.prepare(`SELECT 1 FROM friends_messages WHERE id = ?`),
 
@@ -387,7 +407,8 @@ export class FriendsStore extends SettingsStore {
   saveMessage(msg: FriendsMessageInput) {
     this.stmts.saveMessage.run(
       msg.id, msg.chat_id, msg.sender_id, msg.sender_name,
-      msg.timestamp, msg.is_from_me ? 1 : 0, msg.message_type, msg.char_count, msg.body || ""
+      msg.timestamp, msg.is_from_me ? 1 : 0, msg.message_type, msg.char_count, msg.body || "",
+      msg.source || "whatsapp"
     );
   }
 
@@ -402,13 +423,96 @@ export class FriendsStore extends SettingsStore {
   getContactMessages(contactId: string, limit = 50, offset = 0): any[] {
     return this.db.prepare(`
       SELECT m.id, m.sender_name, m.body, m.timestamp, m.is_from_me, m.message_type,
-             vn.transcript AS voice_transcript
+             m.source, vn.transcript AS voice_transcript
       FROM friends_messages m
       LEFT JOIN friends_voice_notes vn ON vn.id = m.id
       WHERE m.chat_id = ?
       ORDER BY m.timestamp DESC
       LIMIT ? OFFSET ?
     `).all(contactId, limit, offset) as any[];
+  }
+
+  // Get messages for a contact across all linked chat_ids (WhatsApp + iMessage)
+  getContactMessagesAllSources(contactId: string, limit = 50, offset = 0): any[] {
+    // Find all chat_ids that belong to this contact (same phone number)
+    const contact = this.db.prepare(`SELECT phone_normalized FROM friends_contacts WHERE id = ?`).get(contactId) as any;
+    if (!contact || !contact.phone_normalized) {
+      // No phone number — just return messages for this exact chat_id
+      return this.getContactMessages(contactId, limit, offset);
+    }
+    // Find all contact IDs with the same phone number
+    return this.db.prepare(`
+      SELECT m.id, m.sender_name, m.body, m.timestamp, m.is_from_me, m.message_type,
+             m.source, vn.transcript AS voice_transcript
+      FROM friends_messages m
+      LEFT JOIN friends_voice_notes vn ON vn.id = m.id
+      WHERE m.chat_id IN (SELECT id FROM friends_contacts WHERE phone_normalized = ?)
+      ORDER BY m.timestamp DESC
+      LIMIT ? OFFSET ?
+    `).all(contact.phone_normalized, limit, offset) as any[];
+  }
+
+  // ── iMessage sync methods ──
+
+  findContactByPhone(phoneNormalized: string): any {
+    return this.db.prepare(
+      `SELECT * FROM friends_contacts WHERE phone_normalized = ? LIMIT 1`
+    ).get(phoneNormalized);
+  }
+
+  upsertImessageContact(phone: string, name: string, timestamp: number): string {
+    const existing = this.findContactByPhone(phone);
+    if (existing) {
+      // Update last_seen if newer
+      this.stmts.updateLastSeen.run(timestamp, existing.id);
+      if (name && !existing.name) {
+        this.db.prepare(`UPDATE friends_contacts SET name = ? WHERE id = ?`).run(name, existing.id);
+      }
+      return existing.id;
+    }
+    // Create new iMessage-only contact
+    const contactId = phone + "@imessage";
+    this.db.prepare(`
+      INSERT OR IGNORE INTO friends_contacts (id, name, first_seen, last_seen, phone_normalized)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(contactId, name, timestamp, timestamp, phone);
+    return contactId;
+  }
+
+  syncImessageMessages(messages: Array<{
+    guid: string;
+    phone: string;
+    sender_name: string;
+    text: string;
+    timestamp: number;
+    is_from_me: boolean;
+  }>): { imported: number; updated: number } {
+    let imported = 0, updated = 0;
+
+    const insertMsg = this.db.prepare(`
+      INSERT OR IGNORE INTO friends_messages (id, chat_id, sender_id, sender_name, timestamp, is_from_me, message_type, char_count, body, source)
+      VALUES (?, ?, ?, ?, ?, ?, 'chat', ?, ?, 'imessage')
+    `);
+
+    const txn = this.db.transaction(() => {
+      for (const msg of messages) {
+        const contactId = this.upsertImessageContact(msg.phone, msg.sender_name, msg.timestamp);
+        const msgId = "imsg_" + msg.guid;
+        const senderId = msg.is_from_me ? "self" : contactId;
+
+        const result = insertMsg.run(
+          msgId, contactId, senderId, msg.sender_name,
+          msg.timestamp, msg.is_from_me ? 1 : 0,
+          msg.text?.length || 0, msg.text || ""
+        );
+
+        if (result.changes > 0) imported++;
+        else updated++;
+      }
+    });
+    txn();
+
+    return { imported, updated };
   }
 
   // ── Group methods ──

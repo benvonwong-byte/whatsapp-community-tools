@@ -1387,11 +1387,18 @@ function renderConversationLog(contactId, messages, append) {
       bodyHtml = '<span class="msg-type-label">' + esc(m.message_type || "message") + '</span>';
     }
 
+    var sourceBadge = "";
+    if (m.source === "imessage") {
+      sourceBadge = '<span class="msg-source imessage">iM</span>';
+    } else if (m.source === "whatsapp") {
+      sourceBadge = '<span class="msg-source whatsapp">WA</span>';
+    }
+
     return dateDivider +
       '<div class="msg-row ' + dir + '">' +
-        '<div class="msg-bubble ' + dir + '">' +
+        '<div class="msg-bubble ' + dir + (m.source === "imessage" ? " imessage" : "") + '">' +
           bodyHtml +
-          '<span class="msg-time">' + esc(timeStr) + '</span>' +
+          '<span class="msg-time">' + sourceBadge + esc(timeStr) + '</span>' +
         '</div>' +
       '</div>';
   }).join("");
