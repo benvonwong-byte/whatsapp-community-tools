@@ -519,11 +519,33 @@ async function main() {
 
         const messages = await chat.fetchMessages({ limit: 500 });
         let saved = 0;
+        // Track which contacts in this chat already have tags (skip buffer for them)
+        const contactsWithTags = new Set<string>();
         for (const msg of messages) {
-          if (friendsStore.isDuplicate(msg.id._serialized)) continue;
+          const isDupe = friendsStore.isDuplicate(msg.id._serialized);
           if (!msg.body && !msg.hasMedia) continue;
 
           const senderId = msg.fromMe ? "self" : ((msg as any).author || chat.id._serialized);
+          const msgType = (msg as any).type || "text";
+
+          // Always buffer for tag extraction if contact has no tags yet
+          if (!isDupe || !contactsWithTags.has(senderId)) {
+            if (senderId !== "self" && msg.body && msg.body.trim().length > 3 && msgType === "chat") {
+              // Check once per contact if they already have tags
+              if (!contactsWithTags.has(senderId)) {
+                const existingTags = friendsStore.getContactTags(senderId);
+                if (existingTags.length > 0) {
+                  contactsWithTags.add(senderId);
+                }
+              }
+              if (!contactsWithTags.has(senderId)) {
+                friendsStore.addToTagBuffer(senderId, msg.body, msg.timestamp);
+              }
+            }
+          }
+
+          if (isDupe) continue;
+
           let senderName = "";
           if (!msg.fromMe) {
             try {
@@ -540,15 +562,9 @@ async function main() {
             sender_name: senderName,
             timestamp: msg.timestamp,
             is_from_me: msg.fromMe,
-            message_type: (msg as any).type || "text",
+            message_type: msgType,
             char_count: msg.body?.length || 0,
           });
-
-          // Buffer message bodies for tag extraction (non-self text messages only)
-          const msgType = (msg as any).type || "text";
-          if (senderId !== "self" && msg.body && msg.body.trim().length > 3 && msgType === "chat") {
-            friendsStore.addToTagBuffer(senderId, msg.body, msg.timestamp);
-          }
 
           saved++;
         }
