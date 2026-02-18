@@ -1,4 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { config } from "./config";
 import { categories, getCategorySummary } from "./categories";
 import { BufferedMessage } from "./whatsapp";
@@ -17,8 +17,6 @@ export interface ExtractedEvent {
   sourceChatName: string;
   sourceText: string; // raw message text that triggered this event
 }
-
-const client = new Anthropic({ apiKey: config.anthropicApiKey });
 
 function buildPrompt(messages: BufferedMessage[]): string {
   const today = new Date().toISOString().split("T")[0];
@@ -74,6 +72,15 @@ Valid category IDs: ${categories.map((c) => c.id).join(", ")}
 JSON array:`;
 }
 
+let geminiModel: any = null;
+function getModel() {
+  if (!geminiModel) {
+    const genAI = new GoogleGenerativeAI(config.geminiApiKey);
+    geminiModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+  }
+  return geminiModel;
+}
+
 export async function extractEvents(
   messages: BufferedMessage[]
 ): Promise<ExtractedEvent[]> {
@@ -82,14 +89,9 @@ export async function extractEvents(
   const prompt = buildPrompt(messages);
 
   try {
-    const response = await client.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 4096,
-      messages: [{ role: "user", content: prompt }],
-    });
-
-    const text =
-      response.content[0].type === "text" ? response.content[0].text : "";
+    const model = getModel();
+    const result = await model.generateContent(prompt);
+    const text = result.response.text();
 
     // Extract JSON from the response (handle markdown code blocks)
     let jsonStr = text.trim();
@@ -132,7 +134,7 @@ export async function extractEvents(
 
     return events;
   } catch (err) {
-    console.error("[extractor] Error calling Claude API:", err);
+    console.error("[extractor] Error calling Gemini API:", err);
     throw err; // Re-throw so callers know extraction failed (vs. legitimately 0 events)
   }
 }

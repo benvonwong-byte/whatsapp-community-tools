@@ -242,11 +242,94 @@ async function loadDashboard() {
     renderNeglectedList(data.neglected);
     renderInitiatorsList(data.topInitiators);
     renderTierPills(data.tierDistribution);
+    loadDashboardTags();
+    setupTagAllButton();
     // Calendar is now part of dashboard
     loadCalendar();
   } catch (err) {
     console.error("Failed to load dashboard:", err);
   }
+}
+
+// ── Dashboard Tag Cloud ──
+
+let dashTagFilter = null; // currently selected tag name or null
+
+async function loadDashboardTags() {
+  try {
+    const res = await adminFetch("/api/friends/tags");
+    if (!res.ok) return;
+    const tags = await res.json();
+    renderDashboardTagCloud(tags);
+  } catch (err) {
+    console.error("Failed to load tags:", err);
+  }
+}
+
+function renderDashboardTagCloud(tags) {
+  const container = $("dash-tag-cloud");
+  if (!container) return;
+  if (!tags || tags.length === 0) {
+    container.innerHTML = '<span class="chart-empty">No tags yet. Use "AI Tag All" to auto-tag contacts from conversations.</span>';
+    return;
+  }
+
+  container.innerHTML = tags.slice(0, 40).map(t => {
+    const p = parseTagCategory(t.name);
+    const active = dashTagFilter === t.name ? ' active' : '';
+    return '<span class="dash-tag' + active + '" data-tag="' + esc(t.name) + '" ' +
+      'style="background:' + p.color + '18;color:' + p.color + ';border-color:' + (dashTagFilter === t.name ? p.color : 'transparent') + ';">' +
+      esc(p.label) +
+      ' <span class="tag-count">' + t.contact_count + '</span>' +
+    '</span>';
+  }).join("");
+
+  container.querySelectorAll(".dash-tag").forEach(chip => {
+    chip.addEventListener("click", () => {
+      const tag = chip.dataset.tag;
+      if (dashTagFilter === tag) {
+        dashTagFilter = null; // deselect
+      } else {
+        dashTagFilter = tag;
+      }
+      renderDashboardTagCloud(tags);
+      // Switch to contacts tab with tag filter applied
+      if (dashTagFilter) {
+        activeTagFilters.clear();
+        activeTagFilters.add(dashTagFilter);
+        document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+        document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
+        const contactsTab = document.querySelector('[data-tab="contacts"]');
+        if (contactsTab) contactsTab.classList.add("active");
+        const contactsContent = $("tab-contacts");
+        if (contactsContent) contactsContent.classList.add("active");
+        loadContacts();
+      }
+    });
+  });
+}
+
+function setupTagAllButton() {
+  const btn = $("tag-all-btn");
+  if (!btn || btn._bound) return;
+  btn._bound = true;
+  btn.addEventListener("click", async () => {
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = "Extracting tags...";
+    try {
+      const res = await adminFetch("/api/friends/tags/extract", { method: "POST" });
+      if (!res.ok) throw new Error("Extraction failed");
+      const data = await res.json();
+      btn.textContent = "Tagged " + (data.contactsProcessed || 0) + " contacts!";
+      loadDashboardTags(); // refresh tag cloud
+      setTimeout(() => { btn.textContent = "AI Tag All"; btn.disabled = false; }, 3000);
+    } catch (err) {
+      console.error("Tag extraction failed:", err);
+      btn.textContent = "Failed";
+      setTimeout(() => { btn.textContent = "AI Tag All"; btn.disabled = false; }, 3000);
+    }
+  });
 }
 
 function renderTierPills(distribution) {
@@ -929,6 +1012,19 @@ async function openContactDetail(contactId) {
     }
     const nameEdit = $("detail-name-edit");
     if (nameEdit) nameEdit.classList.add("hidden");
+
+    // Phone number (extracted from contact ID)
+    const phoneEl = $("detail-phone");
+    if (phoneEl) {
+      const phone = contactId.includes("@") ? contactId.split("@")[0] : "";
+      if (phone && /^\d+$/.test(phone)) {
+        phoneEl.textContent = "+" + phone;
+        phoneEl.href = "tel:+" + phone;
+        phoneEl.style.display = "";
+      } else {
+        phoneEl.style.display = "none";
+      }
+    }
 
     setupNameEditing(contactId, displayName);
 
@@ -1642,20 +1738,18 @@ async function loadCalendar() {
     renderCalendar(data.year, data.month, data.days);
   } catch (err) {
     console.error("Failed to load calendar:", err);
-    const grid = $("calendar-grid");
+    const grid = $("calendar-days");
     if (grid) grid.innerHTML = '<div class="chart-empty" style="grid-column:1/-1;">Failed to load calendar data.</div>';
   }
 }
 
 function renderCalendar(year, month, days) {
-  const grid = $("calendar-grid");
-  if (!grid) return;
-
-  const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  let html = dayNames.map(d => '<div class="cal-header">' + d + '</div>').join("");
+  const container = $("calendar-days");
+  if (!container) return;
 
   const firstDay = new Date(year, month - 1, 1).getDay();
   const daysInMonth = new Date(year, month, 0).getDate();
+  const daysInPrev = new Date(year, month - 1, 0).getDate();
   const today = new Date();
   const isCurrentMonth = today.getFullYear() === year && today.getMonth() + 1 === month;
   const todayDate = today.getDate();
@@ -1665,41 +1759,65 @@ function renderCalendar(year, month, days) {
     days.forEach(d => { dayMap[d.day] = d.contacts || []; });
   }
 
-  for (let i = 0; i < firstDay; i++) {
-    html += '<div class="cal-day empty"></div>';
+  container.innerHTML = "";
+
+  // Previous month padding (greyed out)
+  for (let i = firstDay - 1; i >= 0; i--) {
+    container.appendChild(createCalDay(daysInPrev - i, [], false, true));
   }
 
+  // Current month days
   for (let d = 1; d <= daysInMonth; d++) {
     const isToday = isCurrentMonth && d === todayDate;
-    const contactsList = dayMap[d] || [];
-    html += '<div class="cal-day' + (isToday ? ' today' : '') + '">' +
-      '<div class="cal-day-num">' + d + '</div>';
-
-    contactsList.slice(0, 5).forEach(c => {
-      html += '<div class="cal-contact" data-contact-id="' + esc(c.id || '') + '" style="cursor:pointer;">' +
-        '<span class="dot" style="background:' + esc(c.tier_color || '#666') + '"></span>' +
-        '<span>' + esc(c.name || '') + '</span>' +
-        '<span class="cnt">' + (c.count || 0) + '</span>' +
-      '</div>';
-    });
-
-    if (contactsList.length > 5) {
-      html += '<div class="cal-contact" style="color:var(--text-dim);">+' + (contactsList.length - 5) + ' more</div>';
-    }
-
-    html += '</div>';
+    container.appendChild(createCalDay(d, dayMap[d] || [], isToday, false));
   }
 
-  grid.innerHTML = html;
+  // Next month padding to complete the grid
+  const totalCells = container.children.length;
+  const remaining = (7 - (totalCells % 7)) % 7;
+  for (let d = 1; d <= remaining; d++) {
+    container.appendChild(createCalDay(d, [], false, true));
+  }
+}
 
-  // Make calendar contact names clickable
-  grid.querySelectorAll(".cal-contact[data-contact-id]").forEach(el => {
-    el.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const id = el.dataset.contactId;
-      if (id) openContactDetail(id);
+function createCalDay(dayNum, contacts, isToday, otherMonth) {
+  const el = document.createElement("div");
+  el.className = "cal-day" + (isToday ? " today" : "") + (otherMonth ? " other-month" : "");
+
+  const num = document.createElement("div");
+  num.className = "day-number";
+  num.textContent = dayNum;
+  el.appendChild(num);
+
+  if (contacts.length > 0 && !otherMonth) {
+    const list = document.createElement("div");
+    list.className = "day-contacts";
+
+    const maxVisible = 4;
+    contacts.slice(0, maxVisible).forEach(c => {
+      const item = document.createElement("div");
+      item.className = "day-contact-item";
+      item.style.borderLeftColor = c.tier_color || "#666";
+      item.textContent = (c.name || "Unknown") + " " + (c.count || 0);
+      item.title = (c.name || "Unknown") + " — " + (c.count || 0) + " messages";
+      item.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (c.id) openContactDetail(c.id);
+      });
+      list.appendChild(item);
     });
-  });
+
+    if (contacts.length > maxVisible) {
+      const more = document.createElement("div");
+      more.className = "day-contact-more";
+      more.textContent = "+" + (contacts.length - maxVisible) + " more";
+      list.appendChild(more);
+    }
+
+    el.appendChild(list);
+  }
+
+  return el;
 }
 
 // ── Messaging Tab ──

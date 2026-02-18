@@ -711,14 +711,16 @@ export class FriendsStore extends SettingsStore {
         AND timestamp >= ? AND timestamp <= ?
     `).get(contactId, startTs, endTs) as any;
 
+    const totalInit = (init.my_initiations + init.their_initiations) || 1;
+    const initiationRatio = Math.round((init.my_initiations / totalInit) * 100);
+
     return {
-      totalMessages: msgStats?.total || 0,
-      sentMessages: msgStats?.sent || 0,
-      receivedMessages: msgStats?.received || 0,
-      myInitiations: init.my_initiations,
-      theirInitiations: init.their_initiations,
-      myAvgResponseSec: Math.round(resp.my_avg_response_sec),
-      theirAvgResponseSec: Math.round(resp.their_avg_response_sec),
+      total_messages: msgStats?.total || 0,
+      sent_messages: msgStats?.sent || 0,
+      received_messages: msgStats?.received || 0,
+      initiation_ratio: initiationRatio,
+      my_avg_response_sec: Math.round(resp.my_avg_response_sec),
+      their_avg_response_sec: Math.round(resp.their_avg_response_sec),
     };
   }
 

@@ -341,8 +341,8 @@ export function startServer(opts: ServerOptions): void {
       return;
     }
 
-    if (!config.anthropicApiKey) {
-      res.status(503).json({ error: "No ANTHROPIC_API_KEY configured" });
+    if (!config.geminiApiKey) {
+      res.status(503).json({ error: "No GEMINI_API_KEY configured" });
       return;
     }
 

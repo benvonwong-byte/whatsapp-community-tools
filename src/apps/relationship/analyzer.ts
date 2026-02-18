@@ -1,8 +1,15 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { config } from "../../config";
 import { RelationshipStore, RelationshipMessage } from "./store";
 
-const client = new Anthropic({ apiKey: config.anthropicApiKey });
+let geminiModel: any = null;
+function getModel() {
+  if (!geminiModel) {
+    const genAI = new GoogleGenerativeAI(config.geminiApiKey);
+    geminiModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+  }
+  return geminiModel;
+}
 
 // ── Progress tracking ──
 
@@ -109,7 +116,7 @@ ANALYSIS FRAMEWORKS:
     - Communication style notes (e.g., "Ben uses more questions", "Hope uses more affirmations")
     - Any notable language patterns or shifts during the conversation
 
-Respond with ONLY a JSON object (no markdown):
+Respond with ONLY a JSON object (no markdown code fences):
 {
   "metrics": {
     "criticism": <0-10>,
@@ -174,14 +181,18 @@ Respond with ONLY a JSON object (no markdown):
 JSON:`;
 }
 
-/** Parse Claude's JSON response (with prefill "{" trick) */
-function parseClaudeJson(rawText: string, progress?: AnalyzeProgress): any {
-  let jsonStr = "{" + rawText.trim();
-  if (jsonStr.includes("```")) {
-    jsonStr = jsonStr.replace(/```(?:json)?\n?/g, "").replace(/\n?```/g, "");
+/** Parse Gemini's JSON response */
+function parseGeminiJson(rawText: string, progress?: AnalyzeProgress): any {
+  let jsonStr = rawText.trim();
+  if (jsonStr.startsWith("```")) {
+    jsonStr = jsonStr.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
   }
+  // Find the outermost JSON object
+  const firstBrace = jsonStr.indexOf("{");
   const lastBrace = jsonStr.lastIndexOf("}");
-  if (lastBrace !== -1) jsonStr = jsonStr.slice(0, lastBrace + 1);
+  if (firstBrace !== -1 && lastBrace !== -1) {
+    jsonStr = jsonStr.slice(firstBrace, lastBrace + 1);
+  }
 
   try {
     return JSON.parse(jsonStr);
@@ -206,19 +217,12 @@ async function analyzeDay(
   const conversation = formatConversation(messages);
   const truncated = conversation.slice(0, 12000);
 
-  logProgress(progress, `  Sending ${messages.length} messages for ${date} to Claude...`);
+  logProgress(progress, `  Sending ${messages.length} messages for ${date} to Gemini...`);
 
-  const response = await client.messages.create({
-    model: "claude-haiku-4-5-20251001",
-    max_tokens: 4096,
-    messages: [
-      { role: "user", content: buildAnalysisPrompt(truncated, messages.length, date) },
-      { role: "assistant", content: "{" },
-    ],
-  });
-
-  const text = response.content[0].type === "text" ? response.content[0].text : "";
-  const parsed = parseClaudeJson(text, progress);
+  const model = getModel();
+  const result = await model.generateContent(buildAnalysisPrompt(truncated, messages.length, date));
+  const text = result.response.text();
+  const parsed = parseGeminiJson(text, progress);
 
   logProgress(progress, `  ${date}: score ${parsed.metrics.overallHealthScore}/100`);
 

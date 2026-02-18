@@ -543,6 +543,13 @@ async function main() {
             message_type: (msg as any).type || "text",
             char_count: msg.body?.length || 0,
           });
+
+          // Buffer message bodies for tag extraction (non-self text messages only)
+          const msgType = (msg as any).type || "text";
+          if (senderId !== "self" && msg.body && msg.body.trim().length > 3 && msgType === "chat") {
+            friendsStore.addToTagBuffer(senderId, msg.body, msg.timestamp);
+          }
+
           saved++;
         }
         if (saved > 0) {
@@ -605,6 +612,16 @@ async function main() {
 
   const friendsTagExtract = () => runTagExtraction(friendsStore);
 
+  // Auto-run tag extraction every 30 minutes
+  setInterval(async () => {
+    try {
+      const count = await runTagExtraction(friendsStore);
+      if (count > 0) console.log(`[auto-tagger] Extracted tags for ${count} contact(s).`);
+    } catch (err: any) {
+      console.error("[auto-tagger] Failed:", err?.message || err);
+    }
+  }, 30 * 60 * 1000);
+
   appRouters.push({
     path: "/api/friends",
     router: createFriendsRouter(friendsStore, friendsScan, friendsBackfill, friendsSendMessage, friendsSendProgress, friendsTagExtract),
@@ -621,10 +638,10 @@ async function main() {
     appRouters,
   });
 
-  // WhatsApp + Claude are optional — skip if no API key
-  if (!config.anthropicApiKey) {
+  // WhatsApp + Gemini are optional — skip if no API key
+  if (!config.geminiApiKey) {
     console.log(
-      "\nNo ANTHROPIC_API_KEY set. Running in web-only mode." +
+      "\nNo GEMINI_API_KEY set. Running in web-only mode." +
       "\nAdd your key to .env and restart to enable WhatsApp scanning." +
       "\nYou can seed sample events at: POST http://localhost:" + config.port + "/api/seed\n"
     );

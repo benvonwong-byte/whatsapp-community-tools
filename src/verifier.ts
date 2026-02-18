@@ -1,32 +1,41 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenerativeAI, GenerateContentResult } from "@google/generative-ai";
 import { config } from "./config";
 import { ExtractedEvent } from "./extractor";
 import { EventStore, StoredEvent } from "./store";
 
-const client = new Anthropic({ apiKey: config.anthropicApiKey });
+let geminiModel: any = null;
+function getModel() {
+  if (!geminiModel) {
+    const genAI = new GoogleGenerativeAI(config.geminiApiKey);
+    geminiModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+  }
+  return geminiModel;
+}
 
-// ── Rate-limited Claude wrapper ──
-// Enforces max ~4 req/min with retry on 429 errors.
-let lastClaudeCall = 0;
-const MIN_CLAUDE_INTERVAL = 15_000; // 15s between calls → 4/min (safe under 5/min limit)
+// ── Rate-limited Gemini wrapper ──
+// Enforces a minimum interval between calls to stay within rate limits.
+let lastGeminiCall = 0;
+const MIN_GEMINI_INTERVAL = 2_000; // 2s between calls (Gemini has higher limits than Claude)
 
-async function rateLimitedClaude(
-  opts: { model: string; max_tokens: number; messages: { role: "user"; content: string }[] },
+async function rateLimitedGemini(
+  prompt: string,
   retries = 3
-): Promise<Anthropic.Messages.Message> {
+): Promise<string> {
   for (let attempt = 0; attempt <= retries; attempt++) {
     // Enforce minimum interval between calls
     const now = Date.now();
-    const wait = MIN_CLAUDE_INTERVAL - (now - lastClaudeCall);
+    const wait = MIN_GEMINI_INTERVAL - (now - lastGeminiCall);
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-    lastClaudeCall = Date.now();
+    lastGeminiCall = Date.now();
 
     try {
-      return await client.messages.create(opts as any);
+      const model = getModel();
+      const result: GenerateContentResult = await model.generateContent(prompt);
+      return result.response.text();
     } catch (err: any) {
-      const status = err?.status || err?.error?.status;
+      const status = err?.status || err?.httpStatusCode;
       if (status === 429 && attempt < retries) {
-        const backoff = Math.min(30_000, 15_000 * (attempt + 1));
+        const backoff = Math.min(30_000, 10_000 * (attempt + 1));
         console.log(`[verifier] Rate limited (429), retrying in ${(backoff / 1000).toFixed(0)}s... (attempt ${attempt + 1}/${retries})`);
         await new Promise((r) => setTimeout(r, backoff));
         continue;
@@ -110,7 +119,7 @@ export async function fetchPageText(url: string): Promise<string | null> {
     clearTimeout(timeout);
     const text = htmlToText(html);
 
-    // Truncate to ~6000 chars to keep Claude call small
+    // Truncate to ~6000 chars to keep API call small
     return text.slice(0, 6000);
   } catch (err: any) {
     if (err?.name === "AbortError") {
@@ -131,7 +140,7 @@ interface VerifiedFields {
   name: string | null; // only set if page has a clearly better name
 }
 
-/** Ask Claude to verify/correct event date from page content. */
+/** Ask Gemini to verify/correct event date from page content. */
 async function verifyFromPage(
   event: ExtractedEvent,
   pageText: string
@@ -180,14 +189,7 @@ Set "changed" to true ONLY if you found different information on the page. If th
 JSON:`;
 
   try {
-    const response = await rateLimitedClaude({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 512,
-      messages: [{ role: "user", content: prompt }],
-    });
-
-    const text =
-      response.content[0].type === "text" ? response.content[0].text : "";
+    const text = await rateLimitedGemini(prompt);
 
     let jsonStr = text.trim();
     if (jsonStr.startsWith("```")) {
@@ -207,7 +209,7 @@ JSON:`;
       name: parsed.name || null,
     };
   } catch (err: any) {
-    console.log(`[verifier] Claude verification failed for "${event.name}": ${err?.message || err}`);
+    console.log(`[verifier] Gemini verification failed for "${event.name}": ${err?.message || err}`);
     return null;
   }
 }
@@ -324,13 +326,7 @@ Respond with ONLY a JSON object (no markdown):
 JSON:`;
 
   try {
-    const response = await rateLimitedClaude({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 256,
-      messages: [{ role: "user", content: prompt }],
-    });
-
-    const text = response.content[0].type === "text" ? response.content[0].text : "";
+    const text = await rateLimitedGemini(prompt);
     let jsonStr = text.trim();
     if (jsonStr.startsWith("```")) {
       jsonStr = jsonStr.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
@@ -371,7 +367,7 @@ async function verifyStoredEventUrl(
     return { action: "delete" };
   }
 
-  // URL returned content — ask Claude to verify
+  // URL returned content — ask Gemini to verify
   const today = new Date().toISOString().split("T")[0];
   const prompt = `You are verifying an event by checking its event page.
 
@@ -415,13 +411,7 @@ RULES:
 JSON:`;
 
   try {
-    const response = await rateLimitedClaude({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 512,
-      messages: [{ role: "user", content: prompt }],
-    });
-
-    const text = response.content[0].type === "text" ? response.content[0].text : "";
+    const text = await rateLimitedGemini(prompt);
     let jsonStr = text.trim();
     if (jsonStr.startsWith("```")) {
       jsonStr = jsonStr.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
@@ -607,7 +597,7 @@ function isLikelyOnline(event: StoredEvent): boolean {
   return /\b(zoom|online|virtual|remote|webinar|livestream|live stream)\b/.test(loc);
 }
 
-/** For events with no URL and insufficient source text, ask Claude about location. */
+/** For events with no URL and insufficient source text, ask Gemini about location. */
 async function checkLocationNYC(event: StoredEvent): Promise<boolean> {
   if (isLikelyOnline(event)) return true;
 
@@ -621,13 +611,8 @@ Description: ${(event.description || "").slice(0, 500)}
 Answer with ONLY "yes" or "no".`;
 
   try {
-    const response = await rateLimitedClaude({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 10,
-      messages: [{ role: "user", content: prompt }],
-    });
-    const text = (response.content[0].type === "text" ? response.content[0].text : "").trim().toLowerCase();
-    return text.startsWith("yes");
+    const text = await rateLimitedGemini(prompt);
+    return text.trim().toLowerCase().startsWith("yes");
   } catch {
     return true; // On error, keep the event
   }
@@ -652,8 +637,8 @@ export async function verifyAllStoredEvents(
 
   console.log(`[verify-all] Starting verification of ${events.length} events...`);
 
-  // Worker pool — concurrency kept low since Claude API is rate-limited (5 req/min)
-  const concurrency = 2;
+  // Worker pool — concurrency can be higher with Gemini's rate limits
+  const concurrency = 3;
   let cursor = 0;
 
   async function processEvent(event: StoredEvent) {

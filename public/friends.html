@@ -96,7 +96,7 @@
     .tab-content.active { display: block; }
 
     /* Main container */
-    .container { max-width: 1100px; margin: 0 auto; padding: 16px 20px; }
+    .container { max-width: 1100px; margin: 0 auto; padding: 16px 20px; overflow: hidden; }
 
     /* Login gate */
     .login-gate { text-align: center; padding: 80px 20px; color: var(--text-dim); font-size: 15px; line-height: 1.6; }
@@ -104,7 +104,7 @@
     .login-gate a:hover { text-decoration: underline; }
 
     /* Section panels */
-    .section { background: var(--surface); border-radius: 10px; padding: 16px; margin-bottom: 14px; }
+    .section { background: var(--surface); border-radius: 10px; padding: 16px; margin-bottom: 14px; max-width: 100%; overflow: hidden; }
     .section-title { font-size: 12px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 14px; }
 
     /* Stats grid */
@@ -572,6 +572,14 @@
       margin-bottom: 4px;
     }
     .detail-name:hover { color: var(--accent); }
+    .detail-phone {
+      display: block;
+      font-size: 12px;
+      color: var(--text-dim);
+      text-decoration: none;
+      margin-bottom: 4px;
+    }
+    .detail-phone:hover { color: var(--accent); }
     .detail-name-edit { margin-bottom: 8px; }
     .detail-name-edit.hidden { display: none;
     }
@@ -777,6 +785,34 @@
     }
     .tag-mode-toggle:hover { color: var(--accent); border-color: var(--accent); }
 
+    /* Dashboard tag cloud */
+    .dash-tag-cloud {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+    .dash-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 5px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: all 0.15s;
+      user-select: none;
+    }
+    .dash-tag:hover { filter: brightness(1.2); transform: translateY(-1px); }
+    .dash-tag.active { border-color: #fff; box-shadow: 0 0 8px rgba(255,255,255,0.15); }
+    .dash-tag .tag-count {
+      font-size: 10px;
+      opacity: 0.7;
+      font-weight: 400;
+    }
+
     /* Detail panel tags */
     .detail-tags { padding: 0 0 8px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
     .detail-tag {
@@ -848,50 +884,64 @@
     .voice-stat-item .val { font-size: 16px; font-weight: 700; }
     .voice-stat-item .lbl { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
 
-    /* Calendar grid */
-    .calendar-grid {
+    /* Calendar — matches Events dashboard pattern */
+    .cal-week-header {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      text-align: center;
+      font-size: 12px;
+      color: var(--text-dim);
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .calendar-days {
       display: grid;
       grid-template-columns: repeat(7, 1fr);
       gap: 2px;
     }
-    .cal-header {
-      text-align: center;
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--text-dim);
-      padding: 6px 2px;
-    }
     .cal-day {
-      background: var(--surface);
-      border-radius: 6px;
+      min-height: 90px;
       padding: 6px;
-      min-height: 70px;
+      border-radius: 6px;
+      cursor: pointer;
       position: relative;
+      overflow: hidden;
+      transition: background 0.15s;
     }
-    .cal-day.empty { background: transparent; }
-    .cal-day.today { border: 1px solid var(--accent); }
-    .cal-day-num {
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--text-dim);
+    .cal-day:hover { background: var(--surface2); }
+    .cal-day.today { background: var(--surface2); outline: 1px solid var(--accent); }
+    .cal-day.other-month { opacity: 0.25; }
+    .cal-day .day-number {
+      font-size: 13px;
+      font-weight: 500;
       margin-bottom: 4px;
+      color: var(--text-dim);
     }
-    .cal-contact {
+    .cal-day.today .day-number { color: var(--accent); font-weight: 700; }
+    .day-contacts {
       display: flex;
-      align-items: center;
-      gap: 3px;
+      flex-direction: column;
+      gap: 1px;
+      overflow: hidden;
+    }
+    .day-contact-item {
       font-size: 10px;
-      line-height: 1.5;
+      line-height: 1.3;
+      padding: 1px 4px;
+      border-radius: 3px;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      cursor: pointer;
+      border-left: 3px solid var(--accent);
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text);
     }
-    .cal-contact .dot {
-      width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
-    }
-    .cal-contact .cnt {
-      color: var(--text-dim);
+    .day-contact-item:hover { background: rgba(255, 255, 255, 0.1); }
+    .day-contact-more {
       font-size: 9px;
+      color: var(--text-dim);
+      padding: 1px 4px;
     }
 
     /* Dashboard 2-col grid */
@@ -1003,9 +1053,10 @@
       .contact-detail { width: 100%; max-width: 100vw; }
       .filter-bar { gap: 6px; }
       .detail-stats { grid-template-columns: 1fr 1fr; }
-      .calendar-grid { gap: 1px; }
-      .cal-day { min-height: 50px; padding: 4px; }
-      .cal-contact span:not(.dot):not(.cnt) { display: none; }
+      .calendar-days { gap: 1px; }
+      .cal-day { min-height: 60px; padding: 4px; }
+      .cal-day .day-number { font-size: 11px; }
+      .day-contact-item { font-size: 9px; }
     }
   </style>
 </head>
@@ -1050,6 +1101,17 @@
         <div id="tier-pills" class="tier-pills"></div>
       </div>
 
+      <!-- Tag Cloud -->
+      <div class="section" id="tag-cloud-section">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+          <div class="section-title" style="margin-bottom:0;">Tags</div>
+          <button id="tag-all-btn" class="header-btn secondary" style="font-size:11px;padding:5px 14px;">AI Tag All</button>
+        </div>
+        <div id="dash-tag-cloud" class="dash-tag-cloud">
+          <span class="chart-empty">No tags yet. Use "AI Tag All" to auto-tag contacts from conversations.</span>
+        </div>
+      </div>
+
       <!-- Top Friends leaderboard -->
       <div class="section" id="tf-section" tabindex="0" style="outline:none;">
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
@@ -1079,7 +1141,10 @@
           <div class="section-title" style="margin-bottom:0;" id="cal-month-title">--</div>
           <button id="cal-next" class="header-btn secondary" style="font-size:11px;padding:5px 12px;">&rarr;</button>
         </div>
-        <div id="calendar-grid" class="calendar-grid"></div>
+        <div class="cal-week-header">
+          <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+        </div>
+        <div id="calendar-days" class="calendar-days"></div>
       </div>
 
       <!-- Two-column grid for charts -->
@@ -1305,6 +1370,7 @@
     </div>
     <div class="detail-body">
       <div id="detail-name" class="detail-name" style="cursor:pointer;" title="Click to edit display name">--</div>
+      <a id="detail-phone" class="detail-phone" style="display:none;" href="#"></a>
       <div id="detail-name-edit" class="detail-name-edit hidden">
         <input type="text" id="detail-name-input" placeholder="Display name..." style="background:var(--surface2);border:1px solid var(--accent);border-radius:4px;padding:4px 8px;font-size:16px;font-weight:600;color:var(--text);width:100%;outline:none;">
         <div style="display:flex;gap:4px;margin-top:4px;">

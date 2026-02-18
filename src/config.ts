@@ -5,7 +5,7 @@ import path from "path";
 dotenv.config();
 
 export const config = {
-  anthropicApiKey: process.env.ANTHROPIC_API_KEY || "",
+  geminiApiKey: process.env.GEMINI_API_KEY || "",
   adminToken: process.env.ADMIN_TOKEN || crypto.randomBytes(32).toString("hex"),
   adminEmail: process.env.ADMIN_EMAIL || "",
   adminPassword: process.env.ADMIN_PASSWORD || "",
@@ -34,7 +34,7 @@ export const config = {
 };
 
 export function validateConfig() {
-  if (!config.anthropicApiKey) {
-    throw new Error("ANTHROPIC_API_KEY is required. Set it in your .env file.");
+  if (!config.geminiApiKey) {
+    throw new Error("GEMINI_API_KEY is required. Set it in your .env file.");
   }
 }

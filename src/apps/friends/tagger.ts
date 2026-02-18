@@ -1,4 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { FriendsStore } from "./store";
 import { config } from "../../config";
 
@@ -21,12 +21,12 @@ Messages:
 
 /**
  * Run tag extraction for contacts that have enough buffered messages.
- * Uses Claude Haiku for cost efficiency.
+ * Uses Gemini 2.5 Flash for cost efficiency.
  * Returns the number of contacts processed.
  */
 export async function runTagExtraction(store: FriendsStore): Promise<number> {
-  if (!config.anthropicApiKey) {
-    console.log("[tagger] No ANTHROPIC_API_KEY, skipping tag extraction.");
+  if (!config.geminiApiKey) {
+    console.log("[tagger] No GEMINI_API_KEY, skipping tag extraction.");
     return 0;
   }
 
@@ -34,7 +34,8 @@ export async function runTagExtraction(store: FriendsStore): Promise<number> {
   if (readyContacts.length === 0) return 0;
 
   console.log(`[tagger] ${readyContacts.length} contact(s) ready for tag extraction.`);
-  const client = new Anthropic({ apiKey: config.anthropicApiKey });
+  const genAI = new GoogleGenerativeAI(config.geminiApiKey);
+  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
   let processed = 0;
   for (const { contact_id, message_count } of readyContacts) {
@@ -45,13 +46,8 @@ export async function runTagExtraction(store: FriendsStore): Promise<number> {
         .join("\n")
         .slice(0, 8000); // Cap to avoid token limits
 
-      const response = await client.messages.create({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 256,
-        messages: [{ role: "user", content: TAG_PROMPT + messageText }],
-      });
-
-      const text = response.content[0].type === "text" ? response.content[0].text : "";
+      const result = await model.generateContent(TAG_PROMPT + messageText);
+      const text = result.response.text();
       const latestTs = messages[messages.length - 1]?.timestamp || Math.floor(Date.now() / 1000);
 
       // Try parsing as categorized JSON object first

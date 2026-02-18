@@ -1,9 +1,16 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { config } from "../../config";
 import { MetacrisisStore, MetacrisisMessage, MetacrisisEvent } from "./store";
 import { fetchPageText } from "../../verifier";
 
-const client = new Anthropic({ apiKey: config.anthropicApiKey });
+let geminiModel: any = null;
+function getModel() {
+  if (!geminiModel) {
+    const genAI = new GoogleGenerativeAI(config.geminiApiKey);
+    geminiModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+  }
+  return geminiModel;
+}
 
 // ── Helpers ──
 
@@ -36,7 +43,7 @@ function getTodayDate(): string {
   return new Date().toISOString().split("T")[0];
 }
 
-function parseClaudeJson(text: string): any {
+function parseGeminiJson(text: string): any {
   let jsonStr = text.trim();
   if (jsonStr.startsWith("```")) {
     jsonStr = jsonStr
@@ -103,14 +110,10 @@ export async function runDailyDigest(store: MetacrisisStore): Promise<void> {
   console.log(`[metacrisis-daily] Digesting ${messages.length} messages for ${yesterday}...`);
 
   try {
-    const response = await client.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 2048,
-      messages: [{ role: "user", content: buildDailyDigestPrompt(truncated, messages.length, yesterday) }],
-    });
-
-    const text = response.content[0].type === "text" ? response.content[0].text : "";
-    const parsed = parseClaudeJson(text);
+    const model = getModel();
+    const result = await model.generateContent(buildDailyDigestPrompt(truncated, messages.length, yesterday));
+    const text = result.response.text();
+    const parsed = parseGeminiJson(text);
 
     const topics = parsed.keyTopics || [];
     const topicNames = topics.map((t: any) => t.topic || t);
@@ -202,16 +205,12 @@ export async function runWeeklySummary(store: MetacrisisStore): Promise<void> {
   console.log(`[metacrisis-weekly] Summarizing ${messages.length} messages for week ${dateRange}...`);
 
   try {
-    const response = await client.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 3000,
-      messages: [{ role: "user", content: buildWeeklySummaryPrompt(truncated, messages.length, dateRange, eventsBlock) }],
-    });
+    const model = getModel();
+    const result = await model.generateContent(buildWeeklySummaryPrompt(truncated, messages.length, dateRange, eventsBlock));
+    const text = result.response.text();
+    const parsed = parseGeminiJson(text);
 
-    const text = response.content[0].type === "text" ? response.content[0].text : "";
-    const parsed = parseClaudeJson(text);
-
-    // Build formatted WhatsApp message if Claude didn't provide one
+    // Build formatted WhatsApp message if Gemini didn't provide one
     const whatsAppMsg = parsed.formattedWhatsApp || buildDefaultWhatsAppMessage(parsed, dateRange);
 
     store.saveSummary(
@@ -266,12 +265,8 @@ async function extractEventDetails(url: string, pageText: string): Promise<{
   endTime: string | null; location: string; description: string;
 }> {
   try {
-    const response = await client.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 512,
-      messages: [{
-        role: "user",
-        content: `Extract event details from this page content.
+    const model = getModel();
+    const result = await model.generateContent(`Extract event details from this page content.
 URL: ${url}
 PAGE CONTENT:
 ${pageText.slice(0, 4000)}
@@ -279,12 +274,10 @@ ${pageText.slice(0, 4000)}
 Respond with ONLY a JSON object:
 {"name":"Event Name","date":"YYYY-MM-DD","startTime":"HH:MM","endTime":"HH:MM","location":"Venue, City","description":"Brief 1-sentence description"}
 
-Use null for any field you cannot determine. JSON:`,
-      }],
-    });
+Use null for any field you cannot determine. JSON:`);
 
-    const text = response.content[0].type === "text" ? response.content[0].text : "";
-    return parseClaudeJson(text);
+    const text = result.response.text();
+    return parseGeminiJson(text);
   } catch (err: any) {
     console.error(`[metacrisis-events] Failed to extract details from ${url}:`, err?.message || err);
     return { name: "", date: null, startTime: null, endTime: null, location: "", description: "" };
