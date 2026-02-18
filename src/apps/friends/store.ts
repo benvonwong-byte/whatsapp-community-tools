@@ -991,7 +991,7 @@ export class FriendsStore extends SettingsStore {
   // ── Enhanced Dashboard Analytics ──
 
   /** Top friends by message volume within a time window — DM chats only */
-  getTopFriends(limit = 5, windowDays = 30, offsetDays = 0): Array<{ id: string; name: string; messages: number; messages_prev: number; tier_color: string | null }> {
+  getTopFriends(limit = 5, windowDays = 30, offsetDays = 0): Array<{ id: string; name: string; messages: number; messages_prev: number; tier_color: string | null; tag_names: string | null }> {
     const now = Math.floor(Date.now() / 1000);
     const windowEnd = now - offsetDays * 86400;
     const windowStart = windowEnd - windowDays * 86400;
@@ -1001,7 +1001,10 @@ export class FriendsStore extends SettingsStore {
         c.id, COALESCE(c.display_name, c.name) as name,
         SUM(CASE WHEN m.timestamp >= ? AND m.timestamp < ? THEN 1 ELSE 0 END) as messages,
         SUM(CASE WHEN m.timestamp >= ? AND m.timestamp < ? THEN 1 ELSE 0 END) as messages_prev,
-        t.color as tier_color
+        t.color as tier_color,
+        (SELECT GROUP_CONCAT(tg.name, ', ')
+         FROM friends_contact_tags ct JOIN friends_tags tg ON tg.id = ct.tag_id
+         WHERE ct.contact_id = c.id) as tag_names
       FROM friends_contacts c
       JOIN friends_chats ch ON ch.chat_id = c.id AND ch.is_group = 0
       JOIN friends_messages m ON m.chat_id = c.id

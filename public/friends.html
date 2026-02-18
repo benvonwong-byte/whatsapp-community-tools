@@ -984,9 +984,15 @@
     .top-friend-rank.gold { color: #ffd700; }
     .top-friend-rank.silver { color: #c0c0c0; }
     .top-friend-rank.bronze { color: #cd7f32; }
-    .top-friend-info { flex: 1; }
+    .top-friend-info { flex: 1; min-width: 0; }
     .top-friend-name { font-size: 14px; font-weight: 600; }
     .top-friend-meta { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+    .top-friend-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+    .top-friend-tag {
+      font-size: 10px; padding: 1px 6px; border-radius: 8px;
+      cursor: pointer; white-space: nowrap; transition: opacity 0.15s;
+    }
+    .top-friend-tag:hover { opacity: 0.7; }
     .top-friend-count {
       font-size: 18px; font-weight: 700; color: var(--accent);
     }

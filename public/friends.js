@@ -596,10 +596,20 @@ function renderTopFriends(data) {
     const trendClass = diff > 0 ? "up" : diff < 0 ? "down" : "flat";
     const trendIcon = diff > 0 ? "\u25B2" : diff < 0 ? "\u25BC" : "\u2022";
     const trendLabel = diff !== 0 ? " " + Math.abs(diff) : "";
+    // Build tag chips HTML
+    let tagsHtml = '';
+    if (f.tag_names) {
+      const tags = f.tag_names.split(', ').slice(0, 3);
+      tagsHtml = '<div class="top-friend-tags">' + tags.map(t => {
+        const p = parseTagCategory(t);
+        return '<span class="top-friend-tag" data-tag="' + esc(t) + '" style="background:' + p.color + '18;color:' + p.color + ';">' + esc(p.label) + '</span>';
+      }).join('') + '</div>';
+    }
     return '<div class="top-friend-row" data-contact-id="' + esc(String(f.id)) + '" style="cursor:pointer;">' +
       '<div class="top-friend-rank ' + rankClass + '">' + (i + 1) + '</div>' +
       '<div class="top-friend-info">' +
         '<div class="top-friend-name">' + esc(f.name) + '</div>' +
+        tagsHtml +
       '</div>' +
       '<div>' +
         '<span class="top-friend-count">' + (f.messages || 0) + '</span>' +
@@ -609,9 +619,29 @@ function renderTopFriends(data) {
   }).join("");
 
   container.querySelectorAll(".top-friend-row").forEach(row => {
-    row.addEventListener("click", () => {
+    row.addEventListener("click", (e) => {
+      // Don't open contact detail if clicking a tag chip
+      if (e.target.closest(".top-friend-tag")) return;
       const id = row.dataset.contactId;
       if (id) openContactDetail(id);
+    });
+  });
+
+  // Tag chip clicks: filter contacts by that tag
+  container.querySelectorAll(".top-friend-tag").forEach(chip => {
+    chip.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const tag = chip.dataset.tag;
+      if (!tag) return;
+      activeTagFilters.clear();
+      activeTagFilters.add(tag);
+      document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+      document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
+      const contactsTab = document.querySelector('[data-tab="contacts"]');
+      if (contactsTab) contactsTab.classList.add("active");
+      const contactsContent = $("tab-contacts");
+      if (contactsContent) contactsContent.classList.add("active");
+      loadContacts();
     });
   });
 }
