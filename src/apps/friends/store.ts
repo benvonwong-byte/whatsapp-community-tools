@@ -478,15 +478,34 @@ export class FriendsStore extends SettingsStore {
     `).all(startTs) as any[];
   }
 
-  getNeglectedContacts(daysSilent: number): FriendsContact[] {
+  getNeglectedContacts(daysSilent: number): any[] {
     const cutoff = Math.floor(Date.now() / 1000) - daysSilent * 86400;
     return this.db.prepare(`
-      SELECT *, COALESCE(display_name, name) as name FROM friends_contacts
-      WHERE last_seen < ? AND last_seen > 0 AND id NOT LIKE '%@broadcast'
-        AND COALESCE(hidden_from_neglected, 0) = 0
-      ORDER BY last_seen ASC
-      LIMIT 20
-    `).all(cutoff) as FriendsContact[];
+      SELECT
+        c.id, COALESCE(c.display_name, c.name) as name,
+        c.last_seen,
+        c.tier_id, t.name as tier_name, t.color as tier_color,
+        COALESCE(msg_stats.total_messages, 0) as total_messages,
+        (SELECT GROUP_CONCAT(tg.name, ', ')
+         FROM friends_contact_tags ct JOIN friends_tags tg ON tg.id = ct.tag_id
+         WHERE ct.contact_id = c.id) as tag_names,
+        (SELECT GROUP_CONCAT(g.name, ', ')
+         FROM friends_contact_groups cg JOIN friends_groups g ON g.id = cg.group_id
+         WHERE cg.contact_id = c.id) as group_names
+      FROM friends_contacts c
+      LEFT JOIN friends_tiers t ON t.id = c.tier_id
+      LEFT JOIN (
+        SELECT m.chat_id, COUNT(*) as total_messages
+        FROM friends_messages m
+        JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0
+        GROUP BY m.chat_id
+      ) msg_stats ON msg_stats.chat_id = c.id
+      WHERE c.last_seen < ? AND c.last_seen > 0
+        AND c.id NOT LIKE '%@broadcast'
+        AND COALESCE(c.hidden_from_neglected, 0) = 0
+      ORDER BY c.last_seen ASC
+      LIMIT 100
+    `).all(cutoff) as any[];
   }
 
   dismissNeglectedContact(contactId: string): void {

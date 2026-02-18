@@ -14,6 +14,9 @@ let activeTagFilters = new Set();
 let tagFilterMode = "OR";
 let calYear = new Date().getFullYear();
 let calMonth = new Date().getMonth() + 1;
+let negWindowDays = 30;
+let neglectedData = [];
+let negNavBound = false;
 
 // ── Init ──
 
@@ -262,7 +265,10 @@ async function loadDashboard() {
     renderReciprocity(data.reciprocity);
     renderStreaks(data.streaks);
     renderFastResponders(data.fastResponders);
-    renderNeglectedList(data.neglected);
+    neglectedData = data.neglected || [];
+    setupNeglectedNav();
+    populateNeglectedFilters(neglectedData);
+    filterAndRenderNeglected();
     renderInitiatorsList(data.topInitiators);
     renderTierPills(data.tierDistribution);
     loadDashboardTags();
@@ -437,22 +443,123 @@ function renderWeeklyChart(data) {
   });
 }
 
-function renderNeglectedList(contactsList) {
+// ── Neglected Friends (browsable + sortable) ──
+
+function setupNeglectedNav() {
+  if (negNavBound) return;
+  negNavBound = true;
+  document.querySelectorAll(".neg-window-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      negWindowDays = parseInt(btn.dataset.days);
+      document.querySelectorAll(".neg-window-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      loadNeglected();
+    });
+  });
+}
+
+async function loadNeglected() {
+  try {
+    const res = await adminFetch("/api/friends/neglected?days=" + negWindowDays);
+    if (!res.ok) throw new Error("Failed");
+    const data = await res.json();
+    neglectedData = data.contacts || [];
+    populateNeglectedFilters(neglectedData);
+    filterAndRenderNeglected();
+  } catch (err) {
+    console.error("Failed to load neglected:", err);
+  }
+}
+
+function populateNeglectedFilters(data) {
+  const groupSel = $("neg-group-filter");
+  const tagSel = $("neg-tag-filter");
+  if (groupSel) {
+    const groups = new Set();
+    data.forEach(c => (c.group_names || "").split(", ").filter(Boolean).forEach(g => groups.add(g)));
+    groupSel.innerHTML = '<option value="">All Groups</option>' +
+      [...groups].sort().map(g => '<option value="' + esc(g) + '">' + esc(g) + '</option>').join("");
+  }
+  if (tagSel) {
+    const tags = new Set();
+    data.forEach(c => (c.tag_names || "").split(", ").filter(Boolean).forEach(t => tags.add(t)));
+    tagSel.innerHTML = '<option value="">All Tags</option>' +
+      [...tags].sort().map(t => {
+        const p = parseTagCategory(t);
+        return '<option value="' + esc(t) + '">' + esc(p.label) + '</option>';
+      }).join("");
+  }
+  if (groupSel && !groupSel.dataset.bound) {
+    groupSel.addEventListener("change", filterAndRenderNeglected);
+    groupSel.dataset.bound = "1";
+  }
+  if (tagSel && !tagSel.dataset.bound) {
+    tagSel.addEventListener("change", filterAndRenderNeglected);
+    tagSel.dataset.bound = "1";
+  }
+  const sortSel = $("neg-sort");
+  if (sortSel && !sortSel.dataset.bound) {
+    sortSel.addEventListener("change", filterAndRenderNeglected);
+    sortSel.dataset.bound = "1";
+  }
+}
+
+function filterAndRenderNeglected() {
   const container = $("neglected-list");
   if (!container) return;
-  if (!contactsList || contactsList.length === 0) {
-    container.innerHTML = '<div class="empty-state">No neglected contacts</div>';
+
+  let filtered = [...neglectedData];
+  const groupFilter = $("neg-group-filter")?.value;
+  const tagFilter = $("neg-tag-filter")?.value;
+  const sortMode = $("neg-sort")?.value || "days-silent";
+
+  if (groupFilter) filtered = filtered.filter(c => (c.group_names || "").split(", ").includes(groupFilter));
+  if (tagFilter) filtered = filtered.filter(c => (c.tag_names || "").split(", ").includes(tagFilter));
+
+  if (sortMode === "days-silent") filtered.sort((a, b) => a.last_seen - b.last_seen);
+  else if (sortMode === "days-silent-asc") filtered.sort((a, b) => b.last_seen - a.last_seen);
+  else if (sortMode === "name") filtered.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  else if (sortMode === "total-messages") filtered.sort((a, b) => (b.total_messages || 0) - (a.total_messages || 0));
+  else if (sortMode === "tier") filtered.sort((a, b) => {
+    if (!a.tier_name && !b.tier_name) return 0;
+    if (!a.tier_name) return 1;
+    if (!b.tier_name) return -1;
+    return a.tier_name.localeCompare(b.tier_name);
+  });
+
+  const countEl = $("neg-count");
+  if (countEl) {
+    const total = neglectedData.length;
+    const shown = Math.min(filtered.length, 30);
+    countEl.textContent = filtered.length === total
+      ? "Showing " + shown + " of " + total
+      : "Showing " + shown + " of " + filtered.length + " (filtered from " + total + ")";
+  }
+
+  if (filtered.length === 0) {
+    container.innerHTML = '<div class="chart-empty">No neglected friends matching filters.</div>';
     return;
   }
-  container.innerHTML = contactsList.map((c) => {
+
+  container.innerHTML = filtered.slice(0, 30).map(c => {
     const daysAgo = c.last_seen ? Math.floor((Date.now() / 1000 - c.last_seen) / 86400) : null;
-    const label = daysAgo !== null ? daysAgo + " days ago" : "never";
+    const label = daysAgo !== null ? daysAgo + "d ago" : "never";
+    const tierDot = c.tier_color
+      ? '<span class="neglected-tier-dot" style="background:' + esc(c.tier_color) + '"></span>' + esc(c.tier_name || "")
+      : "";
     return '<div class="neglected-card" data-contact-id="' + esc(c.id) + '" style="cursor:pointer;">' +
-      '<span class="neglected-name">' + esc(c.name) + '</span>' +
-      '<span class="neglected-time">' + esc(label) + '</span>' +
+      '<div class="neglected-card-info">' +
+        '<span class="neglected-name">' + esc(c.name) + '</span>' +
+        '<div class="neglected-meta">' +
+          '<span class="neglected-time">' + esc(label) + '</span>' +
+          (tierDot ? '<span>' + tierDot + '</span>' : '') +
+          (c.total_messages ? '<span>' + c.total_messages + ' msgs</span>' : '') +
+        '</div>' +
+      '</div>' +
       '<button class="neglected-dismiss" title="Dismiss from neglected list" data-dismiss-id="' + esc(c.id) + '">&times;</button>' +
     '</div>';
   }).join("");
+
   container.querySelectorAll("[data-contact-id]").forEach(el => {
     el.addEventListener("click", (e) => {
       if (e.target.classList.contains("neglected-dismiss")) return;
@@ -466,10 +573,8 @@ function renderNeglectedList(contactsList) {
       if (!id) return;
       try {
         await adminFetch("/api/friends/contacts/" + encodeURIComponent(id) + "/dismiss-neglected", { method: "POST" });
-        btn.closest(".neglected-card")?.remove();
-        if (container.querySelectorAll(".neglected-card").length === 0) {
-          container.innerHTML = '<div class="empty-state">No neglected contacts</div>';
-        }
+        neglectedData = neglectedData.filter(c => c.id !== id);
+        filterAndRenderNeglected();
       } catch (err) {
         console.error("Dismiss failed:", err);
       }

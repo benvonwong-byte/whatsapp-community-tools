@@ -44,6 +44,14 @@ export function createFriendsRouter(
       topFriends, reciprocity, streaks, hourly, fastResponders, mostBalanced });
   });
 
+  // ── Neglected Friends (time-browsable) ──
+
+  router.get("/neglected", (req: Request, res: Response) => {
+    const days = parseInt(req.query.days as string) || 30;
+    const contacts = store.getNeglectedContacts(days);
+    res.json({ contacts, days });
+  });
+
   // ── Top Friends (time-browsable) ──
 
   router.get("/top-friends", (req: Request, res: Response) => {

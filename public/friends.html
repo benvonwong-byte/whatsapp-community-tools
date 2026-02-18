@@ -151,6 +151,22 @@
     }
     .neglected-dismiss:hover { border-color: var(--red); color: var(--red); background: rgba(214, 48, 49, 0.1); }
 
+    /* Neglected friends navigation */
+    .neg-window-btns { display: flex; gap: 2px; }
+    .neg-window-btn {
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 4px;
+      padding: 4px 10px; font-size: 11px; color: var(--muted); cursor: pointer;
+    }
+    .neg-window-btn:hover { border-color: var(--red); color: var(--text); }
+    .neg-window-btn.active { background: var(--red); color: #fff; border-color: var(--red); }
+    .neglected-card-info { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+    .neglected-name { font-size: 13px; font-weight: 600; color: var(--text); }
+    .neglected-meta { font-size: 10px; color: var(--text-dim); margin-top: 2px; display: flex; gap: 8px; flex-wrap: wrap; }
+    .neglected-tier-dot {
+      display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+      margin-right: 3px; vertical-align: middle;
+    }
+
     /* Initiators list */
     .initiator-row {
       display: flex;
@@ -1225,8 +1241,33 @@
       </div>
 
       <!-- Neglected friends -->
-      <div class="section">
-        <div class="section-title">Neglected Friends (30+ days)</div>
+      <div class="section" id="neglected-section">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
+          <div class="section-title" style="margin:0;">Neglected Friends</div>
+          <div class="neg-window-btns" id="neg-window-btns">
+            <button class="neg-window-btn" data-days="7">7d</button>
+            <button class="neg-window-btn" data-days="14">14d</button>
+            <button class="neg-window-btn active" data-days="30">30d</button>
+            <button class="neg-window-btn" data-days="60">60d</button>
+            <button class="neg-window-btn" data-days="90">90d</button>
+          </div>
+        </div>
+        <div id="neg-filters" style="display:flex;gap:4px;margin-bottom:6px;flex-wrap:wrap;">
+          <select id="neg-sort" style="font-size:10px;padding:2px 4px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;">
+            <option value="days-silent">Days Silent (Most)</option>
+            <option value="days-silent-asc">Days Silent (Least)</option>
+            <option value="name">Name A-Z</option>
+            <option value="total-messages">Total Messages</option>
+            <option value="tier">Tier</option>
+          </select>
+          <select id="neg-group-filter" style="font-size:10px;padding:2px 4px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;">
+            <option value="">All Groups</option>
+          </select>
+          <select id="neg-tag-filter" style="font-size:10px;padding:2px 4px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;">
+            <option value="">All Tags</option>
+          </select>
+        </div>
+        <div id="neg-count" style="font-size:10px;color:var(--text-dim);margin-bottom:6px;"></div>
         <div id="neglected-list">
           <div class="chart-empty">No neglected friends found.</div>
         </div>
