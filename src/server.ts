@@ -1,18 +1,13 @@
-import express, { Request, Response, NextFunction } from "express";
+import express from "express";
 import rateLimit from "express-rate-limit";
-import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import { config } from "./config";
 import { EventStore } from "./store";
 import { categories } from "./categories";
 import { verifyAllStoredEvents, VerifyProgress, deduplicateEvents, DedupProgress } from "./verifier";
-
-function timingSafeEqual(a: string, b: string): boolean {
-  const ha = crypto.createHash("sha256").update(a).digest();
-  const hb = crypto.createHash("sha256").update(b).digest();
-  return crypto.timingSafeEqual(ha, hb);
-}
+import { requireAdmin, requireAuth, timingSafeEqual } from "./middleware/auth";
+import { markProgressDone, markProgressError } from "./utils/progress";
 
 export interface BackfillProgress {
   active: boolean;
@@ -52,37 +47,6 @@ const origError = console.error;
 console.log = (...args: any[]) => { captureLog("log", args); origLog(...args); };
 console.warn = (...args: any[]) => { captureLog("warn", args); origWarn(...args); };
 console.error = (...args: any[]) => { captureLog("error", args); origError(...args); };
-
-// Admin auth middleware: checks ?token= query param or Authorization: Bearer header
-function requireAdmin(req: Request, res: Response, next: NextFunction): void {
-  const token = (req.query.token as string) || req.headers.authorization?.replace("Bearer ", "");
-  if (!token || !timingSafeEqual(token, config.adminToken)) {
-    res.status(401).json({ error: "Unauthorized. Provide ?token=<ADMIN_TOKEN> or Authorization header." });
-    return;
-  }
-  (res as any).locals.role = "admin";
-  next();
-}
-
-// Auth middleware: accepts both admin and guest tokens
-function requireAuth(req: Request, res: Response, next: NextFunction): void {
-  const token = (req.query.token as string) || req.headers.authorization?.replace("Bearer ", "");
-  if (!token) {
-    res.status(401).json({ error: "Unauthorized." });
-    return;
-  }
-  if (timingSafeEqual(token, config.adminToken)) {
-    (res as any).locals.role = "admin";
-    next();
-    return;
-  }
-  if (timingSafeEqual(token, config.guestToken)) {
-    (res as any).locals.role = "guest";
-    next();
-    return;
-  }
-  res.status(401).json({ error: "Unauthorized." });
-}
 
 export interface ServerOptions {
   store: EventStore;
@@ -387,19 +351,11 @@ export function startServer(opts: ServerOptions): void {
 
     try {
       await verifyAllStoredEvents(store, verifyProgress);
+      markProgressDone(verifyProgress);
     } catch (err: any) {
       console.error("[verify-all] Fatal error:", err);
-      verifyProgress.phase = "error";
-      verifyProgress.active = false;
-      verifyProgress.errorMessage = err?.message || String(err);
+      markProgressError(verifyProgress, err, 15000);
     }
-
-    // Reset to idle after 15s
-    setTimeout(() => {
-      if (verifyProgress.phase === "done" || verifyProgress.phase === "error") {
-        verifyProgress.phase = "idle";
-      }
-    }, 15000);
   });
 
   // ── Deduplication ──
@@ -424,13 +380,7 @@ export function startServer(opts: ServerOptions): void {
     // Runs synchronously (fast — just string comparisons, no API calls)
     res.json({ message: "Deduplication started" });
     deduplicateEvents(store, dedupProgress);
-
-    // Reset to idle after 10s
-    setTimeout(() => {
-      if (dedupProgress.phase === "done") {
-        dedupProgress.phase = "idle";
-      }
-    }, 10000);
+    markProgressDone(dedupProgress, 10000);
   });
 
   // Airtable bulk sync — push all unsynced events to Airtable

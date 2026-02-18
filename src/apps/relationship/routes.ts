@@ -1,17 +1,9 @@
-import { Router, Request, Response, NextFunction } from "express";
+import { Router, Request, Response } from "express";
 import { RelationshipStore, RelationshipAnalysis } from "./store";
 import { AnalyzeProgress } from "./analyzer";
 import { buildUpdateMessage } from "./updater";
 import { config } from "../../config";
-
-/** Block guest users from mutating endpoints — admin only */
-function requireAdminRole(req: Request, res: Response, next: NextFunction): void {
-  if ((res as any).locals.role !== "admin") {
-    res.status(403).json({ error: "Admin access required for this action." });
-    return;
-  }
-  next();
-}
+import { requireAdminRole } from "../../middleware/auth";
 
 /** Parse a stored analysis into a frontend-friendly shape */
 function parseAnalysisForFrontend(a: RelationshipAnalysis) {

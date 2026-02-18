@@ -1,5 +1,6 @@
 import Database from "better-sqlite3";
 import { config } from "../../config";
+import { SettingsStore } from "../../utils/base-store";
 
 export interface MetacrisisMessage {
   id: string;
@@ -54,8 +55,7 @@ export interface MetacrisisTopic {
   total_mentions: number;
 }
 
-export class MetacrisisStore {
-  private db: Database.Database;
+export class MetacrisisStore extends SettingsStore {
   private stmts!: {
     saveMessage: Database.Statement;
     isDuplicate: Database.Statement;
@@ -70,8 +70,6 @@ export class MetacrisisStore {
     getSummary: Database.Statement;
     getSummaryByType: Database.Statement;
     markPushed: Database.Statement;
-    getSetting: Database.Statement;
-    setSetting: Database.Statement;
     getAllSettings: Database.Statement;
     getStats: Database.Statement;
     getLastTimestamp: Database.Statement;
@@ -89,13 +87,7 @@ export class MetacrisisStore {
     getTopicsByPeriod: Database.Statement;
   };
 
-  constructor() {
-    this.db = new Database(config.dbPath);
-    this.db.pragma("journal_mode = WAL");
-    this.init();
-  }
-
-  private init() {
+  protected initTables() {
     // Core tables
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS metacrisis_messages (
@@ -123,11 +115,9 @@ export class MetacrisisStore {
       CREATE INDEX IF NOT EXISTS idx_meta_links_category ON metacrisis_links(category);
       CREATE INDEX IF NOT EXISTS idx_meta_links_timestamp ON metacrisis_links(timestamp);
 
-      CREATE TABLE IF NOT EXISTS metacrisis_settings (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-      );
     `);
+
+    this.initSettings("metacrisis_settings");
 
     // Migrate summaries table: add type, recommendations_json, who_said_what_json columns
     // Check if the old table exists without type column
@@ -263,12 +253,6 @@ export class MetacrisisStore {
       ),
       markPushed: this.db.prepare(
         `UPDATE metacrisis_summaries SET pushed = 1 WHERE date = ? AND type = ?`
-      ),
-      getSetting: this.db.prepare(
-        `SELECT value FROM metacrisis_settings WHERE key = ?`
-      ),
-      setSetting: this.db.prepare(
-        `INSERT OR REPLACE INTO metacrisis_settings (key, value) VALUES (?, ?)`
       ),
       getAllSettings: this.db.prepare(
         `SELECT * FROM metacrisis_settings`
@@ -473,17 +457,6 @@ export class MetacrisisStore {
     return this.stmts.getTopicsByPeriod.all(startDate, endDate) as MetacrisisTopic[];
   }
 
-  // ── Settings ──
-
-  getSetting(key: string): string | undefined {
-    const row = this.stmts.getSetting.get(key) as { value: string } | undefined;
-    return row?.value;
-  }
-
-  setSetting(key: string, value: string) {
-    this.stmts.setSetting.run(key, value);
-  }
-
   getAllSettings(): Record<string, string> {
     const rows = this.stmts.getAllSettings.all() as { key: string; value: string }[];
     const settings: Record<string, string> = {};
@@ -516,7 +489,4 @@ export class MetacrisisStore {
     }[];
   }
 
-  close() {
-    this.db.close();
-  }
 }

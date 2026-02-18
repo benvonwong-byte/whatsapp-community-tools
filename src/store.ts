@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import crypto from "crypto";
 import { config } from "./config";
+import { BaseStore } from "./utils/base-store";
 import {
   airtableCreate,
   airtableUpdate,
@@ -35,9 +36,7 @@ export interface GroupStats {
   topCategories: string[];
 }
 
-export class EventStore {
-  private db: Database.Database;
-
+export class EventStore extends BaseStore {
   // Pre-prepared statements for hot paths
   private stmts!: {
     isMessageProcessed: Database.Statement;
@@ -52,13 +51,11 @@ export class EventStore {
   };
 
   constructor() {
-    this.db = new Database(config.dbPath);
-    this.db.pragma("journal_mode = WAL");
-    this.init();
+    super();
     this.prepareStatements();
   }
 
-  private init() {
+  protected initTables() {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS processed_messages (
         message_id TEXT PRIMARY KEY,
@@ -470,7 +467,4 @@ export class EventStore {
     return row.c;
   }
 
-  close() {
-    this.db.close();
-  }
 }

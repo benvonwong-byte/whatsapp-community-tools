@@ -1,26 +1,3 @@
-// Auth: check URL params (?token= or ?admin=) then localStorage
-const _params = new URLSearchParams(window.location.search);
-const adminToken = _params.get("token") || _params.get("admin") || localStorage.getItem("adminToken");
-const isAdmin = !!adminToken;
-if (adminToken && !localStorage.getItem("adminToken")) {
-  localStorage.setItem("adminToken", adminToken);
-}
-
-// API base: use Railway URL when hosted on Firebase, relative path otherwise
-const API_BASE =
-  window.location.hostname.includes("firebaseapp.com") ||
-  window.location.hostname.includes("web.app")
-    ? "https://whatsapp-events-nyc-production.up.railway.app"
-    : "";
-
-function adminFetch(path, opts = {}) {
-  const headers = opts.headers ? { ...opts.headers } : {};
-  headers["Authorization"] = `Bearer ${adminToken}`;
-  return fetch(`${API_BASE}${path}`, { ...opts, headers });
-}
-
-const $ = (id) => document.getElementById(id);
-
 // ── State ──
 
 let contacts = [];

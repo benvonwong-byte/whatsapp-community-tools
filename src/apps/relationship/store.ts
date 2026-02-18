@@ -1,5 +1,6 @@
 import Database from "better-sqlite3";
 import { config } from "../../config";
+import { SettingsStore } from "../../utils/base-store";
 
 export interface RelationshipMessage {
   id: string;
@@ -23,8 +24,7 @@ export interface RelationshipAnalysis {
   createdAt: string;
 }
 
-export class RelationshipStore {
-  private db: Database.Database;
+export class RelationshipStore extends SettingsStore {
   private stmts!: {
     saveMessage: Database.Statement;
     isDuplicate: Database.Statement;
@@ -49,13 +49,7 @@ export class RelationshipStore {
     updateTranscript: Database.Statement;
   };
 
-  constructor() {
-    this.db = new Database(config.dbPath);
-    this.db.pragma("journal_mode = WAL");
-    this.init();
-  }
-
-  private init() {
+  protected initTables() {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS relationship_messages (
         id TEXT PRIMARY KEY,
@@ -71,11 +65,6 @@ export class RelationshipStore {
       CREATE INDEX IF NOT EXISTS idx_rel_msgs_timestamp ON relationship_messages(timestamp);
       CREATE INDEX IF NOT EXISTS idx_rel_msgs_analyzed ON relationship_messages(analyzed);
 
-      CREATE TABLE IF NOT EXISTS relationship_settings (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-      );
-
       CREATE TABLE IF NOT EXISTS relationship_analyses (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         date TEXT NOT NULL UNIQUE,
@@ -86,6 +75,8 @@ export class RelationshipStore {
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
       );
     `);
+
+    this.initSettings("relationship_settings");
 
     // Migrate existing DBs: add source column if missing
     try {
@@ -317,15 +308,6 @@ export class RelationshipStore {
     this.stmts.updateTranscript.run(transcript, id);
   }
 
-  getSetting(key: string): string | null {
-    const row = this.db.prepare(`SELECT value FROM relationship_settings WHERE key = ?`).get(key) as { value: string } | undefined;
-    return row?.value ?? null;
-  }
-
-  setSetting(key: string, value: string) {
-    this.db.prepare(`INSERT OR REPLACE INTO relationship_settings (key, value) VALUES (?, ?)`).run(key, value);
-  }
-
   getHealth() {
     const lastTs = (this.stmts.getLastTimestamp.get() as any)?.ts || null;
     const todayCount = (this.stmts.getTodayCount.get() as any)?.count || 0;
@@ -383,7 +365,4 @@ export class RelationshipStore {
     };
   }
 
-  close() {
-    this.db.close();
-  }
 }

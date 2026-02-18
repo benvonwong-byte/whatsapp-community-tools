@@ -1,33 +1,5 @@
-// Auth: check URL params (?token= or ?admin=) then localStorage
-const _params = new URLSearchParams(window.location.search);
-let adminToken = _params.get("token") || _params.get("admin") || localStorage.getItem("adminToken");
+// Role tracking (adminToken and isAdmin provided by shared.js)
 let userRole = localStorage.getItem("userRole") || (adminToken ? "admin" : null);
-
-// Strip token from URL immediately
-if (_params.has("token") || _params.has("admin")) {
-  if (adminToken) {
-    localStorage.setItem("adminToken", adminToken);
-    if (!userRole) { userRole = "admin"; localStorage.setItem("userRole", "admin"); }
-  }
-  const cleanUrl = window.location.pathname + window.location.hash;
-  history.replaceState(null, "", cleanUrl);
-} else if (adminToken && !localStorage.getItem("adminToken")) {
-  localStorage.setItem("adminToken", adminToken);
-}
-const isAdmin = !!adminToken;
-
-// API base: use Railway URL when hosted on Firebase, relative path otherwise
-const API_BASE =
-  window.location.hostname.includes("firebaseapp.com") ||
-  window.location.hostname.includes("web.app")
-    ? "https://whatsapp-events-nyc-production.up.railway.app"
-    : "";
-
-function adminFetch(path, opts = {}) {
-  const headers = opts.headers ? { ...opts.headers } : {};
-  headers["Authorization"] = `Bearer ${adminToken}`;
-  return fetch(`${API_BASE}${path}`, { ...opts, headers });
-}
 
 // ── State ──
 let dashboardData = null;
@@ -799,11 +771,7 @@ function timeAgo(ts) {
   return `${Math.floor(sec / 86400)}d ago`;
 }
 
-function escapeHtml(str) {
-  const d = document.createElement("div");
-  d.textContent = str;
-  return d.innerHTML;
-}
+
 
 // ── Import .txt ──
 
@@ -839,8 +807,6 @@ function setupImportButton() {
 }
 
 // ── Rendering ──
-
-function $(id) { return document.getElementById(id); }
 
 /** Aggregate metrics across all daily analyses in the range */
 function computeRangeAnalysis(dailyAnalyses) {
@@ -2135,26 +2101,3 @@ function scoreColor(score) {
   return "red";
 }
 
-function formatRelativeTime(str) {
-  if (!str) return "";
-  const normalized = str.includes("T") ? str : str.replace(" ", "T");
-  const date = new Date(normalized + (normalized.includes("Z") || normalized.includes("+") ? "" : "Z"));
-  if (isNaN(date.getTime())) return str;
-  const diffMs = Date.now() - date.getTime();
-  const diffSec = Math.floor(diffMs / 1000);
-  const diffMin = Math.floor(diffSec / 60);
-  const diffHr = Math.floor(diffMin / 60);
-  const diffDay = Math.floor(diffHr / 24);
-  if (diffSec < 60) return "just now";
-  if (diffMin < 60) return `${diffMin}m ago`;
-  if (diffHr < 24) return `${diffHr}h ago`;
-  if (diffDay < 7) return `${diffDay}d ago`;
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
-
-const _escEl = document.createElement("div");
-function escapeHtml(str) { if (!str) return ""; _escEl.textContent = str; return _escEl.innerHTML; }
-function escapeAttr(str) {
-  if (!str) return "";
-  return str.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}

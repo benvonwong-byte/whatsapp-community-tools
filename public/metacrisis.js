@@ -1,25 +1,3 @@
-// Auth: check URL params (?token= or ?admin=) then localStorage
-const _params = new URLSearchParams(window.location.search);
-const adminToken = _params.get("token") || _params.get("admin") || localStorage.getItem("adminToken");
-const isAdmin = !!adminToken;
-if (adminToken && !localStorage.getItem("adminToken")) {
-  localStorage.setItem("adminToken", adminToken);
-}
-
-// API base: use Railway URL when hosted on Firebase, relative path otherwise
-const API_BASE =
-  window.location.hostname.includes("firebaseapp.com") ||
-  window.location.hostname.includes("web.app")
-    ? "https://whatsapp-events-nyc-production.up.railway.app"
-    : "";
-
-// Admin fetch helper — adds auth token
-function adminFetch(path, opts = {}) {
-  const headers = opts.headers ? { ...opts.headers } : {};
-  headers["Authorization"] = `Bearer ${adminToken}`;
-  return fetch(`${API_BASE}${path}`, { ...opts, headers });
-}
-
 // State
 let stats = null;
 let summaries = [];
@@ -599,29 +577,6 @@ function renderSettings() {
 
 // ── Utilities ──
 
-function formatRelativeTime(str) {
-  if (!str) return "";
-  const normalized = str.includes("T") ? str : str.replace(" ", "T");
-  const date = new Date(
-    normalized +
-      (normalized.includes("Z") || normalized.includes("+") ? "" : "Z")
-  );
-  if (isNaN(date.getTime())) return str;
-  const now = new Date();
-  const diffMs = now - date;
-  const diffSec = Math.floor(diffMs / 1000);
-  const diffMin = Math.floor(diffSec / 60);
-  const diffHr = Math.floor(diffMin / 60);
-  const diffDay = Math.floor(diffHr / 24);
-
-  if (diffSec < 0) return "just now";
-  if (diffSec < 60) return "just now";
-  if (diffMin < 60) return `${diffMin} min ago`;
-  if (diffHr < 24) return `${diffHr}h ago`;
-  if (diffDay < 7) return `${diffDay}d ago`;
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
-
 function truncateUrl(url, maxLen) {
   if (!url) return "";
   try {
@@ -644,23 +599,6 @@ function parseTopics(json) {
   } catch {
     return [];
   }
-}
-
-const _escEl = document.createElement("div");
-function escapeHtml(str) {
-  if (!str) return "";
-  _escEl.textContent = str;
-  return _escEl.innerHTML;
-}
-
-function escapeAttr(str) {
-  if (!str) return "";
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
 }
 
 function safeJsonParse(json) {

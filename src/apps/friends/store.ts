@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import { config } from "../../config";
 import { computeQualityScore } from "./metrics";
+import { SettingsStore } from "../../utils/base-store";
 
 // ── Interfaces ──
 
@@ -113,8 +114,7 @@ export interface ActivityPoint {
 
 // ── Store ──
 
-export class FriendsStore {
-  private db: Database.Database;
+export class FriendsStore extends SettingsStore {
   private stmts!: {
     upsertChat: Database.Statement;
     getChats: Database.Statement;
@@ -143,13 +143,7 @@ export class FriendsStore {
     getTodayCount: Database.Statement;
   };
 
-  constructor() {
-    this.db = new Database(config.dbPath);
-    this.db.pragma("journal_mode = WAL");
-    this.init();
-  }
-
-  private init() {
+  protected initTables() {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS friends_chats (
         chat_id TEXT PRIMARY KEY,
@@ -198,11 +192,6 @@ export class FriendsStore {
         PRIMARY KEY (contact_id, group_id),
         FOREIGN KEY (contact_id) REFERENCES friends_contacts(id),
         FOREIGN KEY (group_id) REFERENCES friends_groups(id) ON DELETE CASCADE
-      );
-
-      CREATE TABLE IF NOT EXISTS friends_settings (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
       );
 
       CREATE TABLE IF NOT EXISTS friends_tiers (
@@ -278,6 +267,8 @@ export class FriendsStore {
       seedTiers.run("Dormant", "#636e72", 4, 0);
       console.log("[friends] Seeded 5 default tiers.");
     }
+
+    this.initSettings("friends_settings");
 
     this.stmts = {
       upsertChat: this.db.prepare(`
@@ -753,17 +744,6 @@ export class FriendsStore {
     return Math.sqrt(variance);
   }
 
-  // ── Settings ──
-
-  getSetting(key: string): string | null {
-    const row = this.db.prepare(`SELECT value FROM friends_settings WHERE key = ?`).get(key) as { value: string } | undefined;
-    return row?.value ?? null;
-  }
-
-  setSetting(key: string, value: string) {
-    this.db.prepare(`INSERT OR REPLACE INTO friends_settings (key, value) VALUES (?, ?)`).run(key, value);
-  }
-
   // ── Tier methods ──
 
   getTiers(): FriendsTier[] {
@@ -1142,7 +1122,4 @@ export class FriendsStore {
     return { lastMessageTimestamp: lastTs, todayMessageCount: todayCount };
   }
 
-  close() {
-    this.db.close();
-  }
 }

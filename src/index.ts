@@ -8,6 +8,7 @@ import { startServer, BackfillProgress } from "./server";
 import { EventStore } from "./store";
 import { RelationshipStore } from "./apps/relationship/store";
 import { createRelationshipHandler, transcribeVoiceNote } from "./apps/relationship/handler";
+import { markProgressDone, markProgressError } from "./utils/progress";
 import { runDailyAnalysis, AnalyzeProgress } from "./apps/relationship/analyzer";
 import { createRelationshipRouter } from "./apps/relationship/routes";
 import { buildUpdateMessage, shouldSendUpdate } from "./apps/relationship/updater";
@@ -195,21 +196,14 @@ async function main() {
         backfillProgress.totalGroups = total;
       });
     } catch (err: any) {
-      const errMsg = err?.message || String(err);
-      console.error(`[backfill] Fetch failed: ${errMsg}`);
-      backfillProgress.phase = "error";
-      backfillProgress.active = false;
-      backfillProgress.errorMessage = errMsg;
-      setTimeout(() => { if (backfillProgress.phase === "error") backfillProgress.phase = "idle"; }, 60000);
+      console.error(`[backfill] Fetch failed: ${err?.message || String(err)}`);
+      markProgressError(backfillProgress, err);
       return 0;
     }
 
     if (messages.length === 0) {
       console.log("[backfill] No messages to process.");
-      backfillProgress.phase = "done";
-      backfillProgress.active = false;
-      // Reset to idle after 15s so frontend stops showing "done"
-      setTimeout(() => { if (backfillProgress.phase === "done") backfillProgress.phase = "idle"; }, 15000);
+      markProgressDone(backfillProgress);
       return 0;
     }
 
@@ -229,10 +223,7 @@ async function main() {
     }
 
     console.log(`[backfill] Done! Found ${totalEvents} new events.\n`);
-    backfillProgress.phase = "done";
-    backfillProgress.active = false;
-    // Reset to idle after 15s so frontend stops showing "done"
-    setTimeout(() => { if (backfillProgress.phase === "done") backfillProgress.phase = "idle"; }, 15000);
+    markProgressDone(backfillProgress);
     return totalEvents;
   };
 
@@ -609,9 +600,7 @@ async function main() {
       }
     }
 
-    friendsSendProgress.phase = "done";
-    friendsSendProgress.active = false;
-    setTimeout(() => { if (friendsSendProgress.phase === "done") friendsSendProgress.phase = "idle"; }, 15000);
+    markProgressDone(friendsSendProgress);
   };
 
   const friendsTagExtract = () => runTagExtraction(friendsStore);

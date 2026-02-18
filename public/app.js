@@ -1,16 +1,3 @@
-// Admin mode: ?admin=TOKEN in URL, or saved token in localStorage
-const adminToken = new URLSearchParams(window.location.search).get("admin") || localStorage.getItem("adminToken");
-const isAdmin = !!adminToken;
-// Persist URL token to localStorage so login survives navigation
-if (adminToken && !localStorage.getItem("adminToken")) {
-  localStorage.setItem("adminToken", adminToken);
-}
-
-// API base: use Railway URL when hosted on Firebase, relative path when on Railway/localhost
-const API_BASE = window.location.hostname.includes("firebaseapp.com") || window.location.hostname.includes("web.app")
-  ? "https://whatsapp-events-nyc-production.up.railway.app"
-  : "";
-
 // State
 let allEvents = [];
 let categories = [];
@@ -93,17 +80,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   backfillPollTimer = setInterval(pollBackfillStatus, 5000);
 });
 
-// Helper: fetch an admin-protected endpoint with Bearer auth header
-function adminFetch(url, options = {}) {
-  const headers = options.headers ? { ...options.headers } : {};
-  headers["Authorization"] = `Bearer ${adminToken}`;
-  return fetch(`${API_BASE}${url}`, { ...options, headers });
-}
-
-// Helper: fetch a public API endpoint
-function apiFetch(url, options = {}) {
-  return fetch(`${API_BASE}${url}`, options);
-}
 
 async function loadData() {
   try {
@@ -981,25 +957,6 @@ function renderRecentBanner() {
   });
 }
 
-function formatRelativeTime(str) {
-  if (!str) return "";
-  // SQLite datetime: "2026-02-11 16:56:17" → replace space with T, add Z for UTC
-  const normalized = str.includes("T") ? str : str.replace(" ", "T");
-  const date = new Date(normalized + (normalized.includes("Z") || normalized.includes("+") ? "" : "Z"));
-  if (isNaN(date.getTime())) return str;
-  const now = new Date();
-  const diffMs = now - date;
-  const diffSec = Math.floor(diffMs / 1000);
-  const diffMin = Math.floor(diffSec / 60);
-  const diffHr = Math.floor(diffMin / 60);
-  const diffDay = Math.floor(diffHr / 24);
-
-  if (diffSec < 60) return "just now";
-  if (diffMin < 60) return `${diffMin}m ago`;
-  if (diffHr < 24) return `${diffHr}h ago`;
-  if (diffDay < 7) return `${diffDay}d ago`;
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
 
 async function showGroupEvents(chatName) {
   try {
@@ -2272,14 +2229,3 @@ function formatTime(t) {
   return `${h12}:${m} ${ampm}`;
 }
 
-const _escapeEl = document.createElement("div");
-function escapeHtml(str) {
-  if (!str) return "";
-  _escapeEl.textContent = str;
-  return _escapeEl.innerHTML;
-}
-
-function escapeAttr(str) {
-  if (!str) return "";
-  return str.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
