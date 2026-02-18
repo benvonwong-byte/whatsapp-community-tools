@@ -442,31 +442,38 @@ export class FriendsStore extends SettingsStore {
 
   // ── Analytics ──
 
-  getDashboardStats(): DashboardStats {
+  private tierClause(tierId: number | null | undefined, alias = "c"): string {
+    if (tierId === undefined) return "";
+    if (tierId === null) return ` AND ${alias}.tier_id IS NULL`;
+    return ` AND ${alias}.tier_id = ${Number(tierId)}`;
+  }
+
+  getDashboardStats(tierId?: number | null): DashboardStats {
     const now = Math.floor(Date.now() / 1000);
     const thirtyDaysAgo = now - 30 * 86400;
     const weekAgo = now - 7 * 86400;
+    const tf = this.tierClause(tierId);
 
     // Only count contacts that have DM chats (not group-only contacts, not broadcasts)
     const total = this.db.prepare(`
       SELECT COUNT(DISTINCT c.id) as c FROM friends_contacts c
-      WHERE c.id NOT LIKE '%@broadcast'
+      WHERE c.id NOT LIKE '%@broadcast'${tf}
         AND EXISTS (SELECT 1 FROM friends_messages m JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0
           WHERE m.chat_id NOT LIKE '%@broadcast' AND (m.sender_id = c.id OR m.chat_id = c.id))
     `).get() as any;
     const active = this.db.prepare(`
       SELECT COUNT(DISTINCT c.id) as c FROM friends_contacts c
       WHERE c.last_seen >= ?
-        AND c.id NOT LIKE '%@broadcast'
+        AND c.id NOT LIKE '%@broadcast'${tf}
         AND EXISTS (SELECT 1 FROM friends_messages m JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0
           WHERE m.chat_id NOT LIKE '%@broadcast' AND (m.sender_id = c.id OR m.chat_id = c.id))
     `).get(thirtyDaysAgo) as any;
     const groups = this.db.prepare(`SELECT COUNT(*) as c FROM friends_groups`).get() as any;
     const weekMsgs = this.db.prepare(
-      `SELECT COUNT(*) as c FROM friends_messages m JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0 WHERE m.chat_id NOT LIKE '%@broadcast' AND m.timestamp >= ?`
+      `SELECT COUNT(*) as c FROM friends_messages m JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0 JOIN friends_contacts c ON c.id = m.chat_id WHERE m.chat_id NOT LIKE '%@broadcast' AND m.timestamp >= ?${tf}`
     ).get(weekAgo) as any;
     const totalMsgs = this.db.prepare(
-      `SELECT COUNT(*) as c FROM friends_messages m JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0 WHERE m.chat_id NOT LIKE '%@broadcast'`
+      `SELECT COUNT(*) as c FROM friends_messages m JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0 JOIN friends_contacts c ON c.id = m.chat_id WHERE m.chat_id NOT LIKE '%@broadcast'${tf}`
     ).get() as any;
 
     return {
@@ -478,8 +485,9 @@ export class FriendsStore extends SettingsStore {
     };
   }
 
-  getWeeklyVolume(weeks: number): Array<{ week: string; count: number; sent: number; received: number }> {
+  getWeeklyVolume(weeks: number, tierId?: number | null): Array<{ week: string; count: number; sent: number; received: number }> {
     const startTs = Math.floor(Date.now() / 1000) - weeks * 7 * 86400;
+    const tf = this.tierClause(tierId);
     return this.db.prepare(`
       SELECT
         strftime('%Y-W%W', datetime(m.timestamp, 'unixepoch', 'localtime')) as week,
@@ -488,14 +496,16 @@ export class FriendsStore extends SettingsStore {
         SUM(CASE WHEN m.is_from_me = 0 THEN 1 ELSE 0 END) as received
       FROM friends_messages m
       JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0
-      WHERE m.timestamp >= ? AND m.chat_id NOT LIKE '%@broadcast'
+      ${tierId !== undefined ? 'JOIN friends_contacts c ON c.id = m.chat_id' : ''}
+      WHERE m.timestamp >= ? AND m.chat_id NOT LIKE '%@broadcast'${tf}
       GROUP BY week
       ORDER BY week ASC
     `).all(startTs) as any[];
   }
 
-  getNeglectedContacts(daysSilent: number): any[] {
+  getNeglectedContacts(daysSilent: number, tierId?: number | null): any[] {
     const cutoff = Math.floor(Date.now() / 1000) - daysSilent * 86400;
+    const tf = this.tierClause(tierId);
     return this.db.prepare(`
       SELECT
         c.id, COALESCE(c.display_name, c.name) as name,
@@ -518,7 +528,7 @@ export class FriendsStore extends SettingsStore {
       ) msg_stats ON msg_stats.chat_id = c.id
       WHERE c.last_seen < ? AND c.last_seen > 0
         AND c.id NOT LIKE '%@broadcast'
-        AND COALESCE(c.hidden_from_neglected, 0) = 0
+        AND COALESCE(c.hidden_from_neglected, 0) = 0${tf}
       ORDER BY c.last_seen ASC
       LIMIT 100
     `).all(cutoff) as any[];
@@ -532,8 +542,9 @@ export class FriendsStore extends SettingsStore {
     this.db.prepare(`UPDATE friends_contacts SET hidden_from_neglected = 0 WHERE id = ?`).run(contactId);
   }
 
-  getTopInitiators(limit: number): Array<{ contact_id: string; name: string; my_initiations: number; their_initiations: number }> {
+  getTopInitiators(limit: number, tierId?: number | null): Array<{ contact_id: string; name: string; my_initiations: number; their_initiations: number }> {
     const ninetyDaysAgo = Math.floor(Date.now() / 1000) - 90 * 86400;
+    const tf = this.tierClause(tierId, "fc");
     return this.db.prepare(`
       WITH chat_gaps AS (
         SELECT
@@ -564,6 +575,7 @@ export class FriendsStore extends SettingsStore {
       FROM initiations i
       JOIN contact_map cm ON cm.chat_id = i.chat_id
       JOIN friends_contacts fc ON fc.id = cm.contact_id
+      WHERE 1=1${tf}
       GROUP BY cm.contact_id
       ORDER BY (my_initiations + their_initiations) DESC
       LIMIT ?
@@ -801,6 +813,10 @@ export class FriendsStore extends SettingsStore {
     this.db.prepare(`DELETE FROM friends_tiers WHERE id = ?`).run(id);
   }
 
+  updateTierSortOrder(id: number, sortOrder: number) {
+    this.db.prepare(`UPDATE friends_tiers SET sort_order = ? WHERE id = ?`).run(sortOrder, id);
+  }
+
   setContactTier(contactId: string, tierId: number | null) {
     this.db.prepare(`UPDATE friends_contacts SET tier_id = ? WHERE id = ?`).run(tierId, contactId);
   }
@@ -869,10 +885,13 @@ export class FriendsStore extends SettingsStore {
     `).all() as any[];
   }
 
-  getDashboardVoiceTotal(): { total_notes: number; total_minutes: number } {
+  getDashboardVoiceTotal(tierId?: number | null): { total_notes: number; total_minutes: number } {
+    const tf = this.tierClause(tierId);
     const row = this.db.prepare(`
-      SELECT COUNT(*) as total_notes, COALESCE(SUM(duration_estimate) / 60.0, 0) as total_minutes
-      FROM friends_voice_notes
+      SELECT COUNT(*) as total_notes, COALESCE(SUM(v.duration_estimate) / 60.0, 0) as total_minutes
+      FROM friends_voice_notes v
+      ${tierId !== undefined ? 'JOIN friends_contacts c ON c.id = v.contact_id' : ''}
+      WHERE 1=1${tf}
     `).get() as any;
     return { total_notes: row?.total_notes || 0, total_minutes: Math.round((row?.total_minutes || 0) * 10) / 10 };
   }
@@ -909,7 +928,20 @@ export class FriendsStore extends SettingsStore {
     `).all(contactId) as any[];
   }
 
-  getAllTags(): Array<{ id: number; name: string; contact_count: number }> {
+  getAllTags(tierId?: number | null): Array<{ id: number; name: string; contact_count: number }> {
+    const tf = this.tierClause(tierId);
+    if (tierId !== undefined) {
+      return this.db.prepare(`
+        SELECT t.id, t.name, COUNT(ct.contact_id) as contact_count
+        FROM friends_tags t
+        LEFT JOIN friends_contact_tags ct ON ct.tag_id = t.id
+        LEFT JOIN friends_contacts c ON c.id = ct.contact_id
+        WHERE 1=1${tf}
+        GROUP BY t.id
+        HAVING contact_count > 0
+        ORDER BY contact_count DESC
+      `).all() as any[];
+    }
     return this.db.prepare(`
       SELECT t.id, t.name, COUNT(ct.contact_id) as contact_count
       FROM friends_tags t
@@ -977,11 +1009,12 @@ export class FriendsStore extends SettingsStore {
 
   // ── Calendar ──
 
-  getCalendarData(year: number, month: number): Array<{ day: number; contacts: Array<{ id: string; name: string; count: number; tier_color: string | null }> }> {
+  getCalendarData(year: number, month: number, tierId?: number | null): Array<{ day: number; contacts: Array<{ id: string; name: string; count: number; tier_color: string | null }> }> {
     const startDate = `${year}-${String(month).padStart(2, "0")}-01`;
     const endMonth = month === 12 ? 1 : month + 1;
     const endYear = month === 12 ? year + 1 : year;
     const endDate = `${endYear}-${String(endMonth).padStart(2, "0")}-01`;
+    const tf = this.tierClause(tierId);
 
     const rows = this.db.prepare(`
       WITH daily AS (
@@ -1009,7 +1042,7 @@ export class FriendsStore extends SettingsStore {
       FROM ranked r
       LEFT JOIN friends_contacts c ON c.id = r.contact_id
       LEFT JOIN friends_tiers t ON t.id = c.tier_id
-      WHERE r.rn <= 5
+      WHERE r.rn <= 5${tf}
       ORDER BY r.day ASC, r.msg_count DESC
     `).all(startDate, endDate) as any[];
 
@@ -1026,11 +1059,12 @@ export class FriendsStore extends SettingsStore {
   // ── Enhanced Dashboard Analytics ──
 
   /** Top friends by message volume within a time window — DM chats only */
-  getTopFriends(limit = 5, windowDays = 30, offsetDays = 0): Array<{ id: string; name: string; messages: number; messages_prev: number; tier_color: string | null; tag_names: string | null }> {
+  getTopFriends(limit = 5, windowDays = 30, offsetDays = 0, tierId?: number | null): Array<{ id: string; name: string; messages: number; messages_prev: number; tier_color: string | null; tag_names: string | null }> {
     const now = Math.floor(Date.now() / 1000);
     const windowEnd = now - offsetDays * 86400;
     const windowStart = windowEnd - windowDays * 86400;
     const prevStart = windowStart - windowDays * 86400;
+    const tf = this.tierClause(tierId);
     return this.db.prepare(`
       SELECT
         c.id, COALESCE(c.display_name, c.name) as name,
@@ -1045,7 +1079,7 @@ export class FriendsStore extends SettingsStore {
       JOIN friends_messages m ON m.chat_id = c.id
       LEFT JOIN friends_tiers t ON t.id = c.tier_id
       WHERE m.timestamp >= ?
-        AND c.id NOT LIKE '%@broadcast'
+        AND c.id NOT LIKE '%@broadcast'${tf}
       GROUP BY c.id
       ORDER BY messages DESC
       LIMIT ?
@@ -1053,7 +1087,8 @@ export class FriendsStore extends SettingsStore {
   }
 
   /** Reciprocity stats per contact — sent/received balance (DM only), sorted by healthiest balance */
-  getReciprocityStats(): Array<{ id: string; name: string; sent: number; received: number; ratio: number; tag_names: string | null; group_names: string | null }> {
+  getReciprocityStats(tierId?: number | null): Array<{ id: string; name: string; sent: number; received: number; ratio: number; tag_names: string | null; group_names: string | null }> {
+    const tf = this.tierClause(tierId);
     return this.db.prepare(`
       SELECT
         c.id, COALESCE(c.display_name, c.name) as name,
@@ -1068,7 +1103,7 @@ export class FriendsStore extends SettingsStore {
       FROM friends_contacts c
       JOIN friends_chats ch ON ch.chat_id = c.id AND ch.is_group = 0
       JOIN friends_messages m ON m.chat_id = c.id
-      WHERE c.id NOT LIKE '%@broadcast'
+      WHERE c.id NOT LIKE '%@broadcast'${tf}
       GROUP BY c.id
       HAVING (sent + received) > 10
       ORDER BY (sent + received) DESC
@@ -1079,11 +1114,12 @@ export class FriendsStore extends SettingsStore {
   }
 
   /** Streak data: consecutive days with messages per contact (DM only) */
-  getLongestStreaks(limit = 5): Array<{ id: string; name: string; current_streak: number; longest_streak: number }> {
+  getLongestStreaks(limit = 5, tierId?: number | null): Array<{ id: string; name: string; current_streak: number; longest_streak: number }> {
+    const tf = this.tierClause(tierId);
     const contacts = this.db.prepare(`
       SELECT c.id, COALESCE(c.display_name, c.name) as name FROM friends_contacts c
       JOIN friends_chats ch ON ch.chat_id = c.id AND ch.is_group = 0
-      WHERE c.id NOT LIKE '%@broadcast'
+      WHERE c.id NOT LIKE '%@broadcast'${tf}
       ORDER BY c.last_seen DESC LIMIT 50
     `).all() as any[];
     const results: Array<{ id: string; name: string; current_streak: number; longest_streak: number }> = [];
@@ -1120,23 +1156,26 @@ export class FriendsStore extends SettingsStore {
   }
 
   /** Message volume by hour of day (DM only) */
-  getHourlyDistribution(): Array<{ hour: number; count: number }> {
+  getHourlyDistribution(tierId?: number | null): Array<{ hour: number; count: number }> {
+    const tf = this.tierClause(tierId);
     return this.db.prepare(`
       SELECT CAST(strftime('%H', datetime(m.timestamp, 'unixepoch', 'localtime')) AS INTEGER) as hour,
         COUNT(*) as count
       FROM friends_messages m
       JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0
-      WHERE m.chat_id NOT LIKE '%@broadcast'
+      ${tierId !== undefined ? 'JOIN friends_contacts c ON c.id = m.chat_id' : ''}
+      WHERE m.chat_id NOT LIKE '%@broadcast'${tf}
       GROUP BY hour
       ORDER BY hour ASC
     `).all() as any[];
   }
 
   /** Fastest responders */
-  getFastestResponders(limit = 5): Array<{ id: string; name: string; avg_response_sec: number }> {
+  getFastestResponders(limit = 5, tierId?: number | null): Array<{ id: string; name: string; avg_response_sec: number }> {
     const now = Math.floor(Date.now() / 1000);
     const ninetyDaysAgo = now - 90 * 86400;
-    const contacts = this.db.prepare(`SELECT id, COALESCE(display_name, name) as name FROM friends_contacts WHERE last_seen >= ? ORDER BY last_seen DESC`).all(ninetyDaysAgo) as any[];
+    const tf = this.tierClause(tierId).replace(/\bc\./g, 'friends_contacts.');
+    const contacts = this.db.prepare(`SELECT id, COALESCE(display_name, name) as name FROM friends_contacts WHERE last_seen >= ?${tf} ORDER BY last_seen DESC`).all(ninetyDaysAgo) as any[];
     const results: Array<{ id: string; name: string; avg_response_sec: number }> = [];
     for (const c of contacts) {
       const resp = this.getResponseTimesForContact(c.id, ninetyDaysAgo, now);
@@ -1148,8 +1187,8 @@ export class FriendsStore extends SettingsStore {
   }
 
   /** Most balanced friendship (closest reciprocity to 50/50) */
-  getMostBalanced(): { id: string; name: string; sent: number; received: number; ratio: number } | null {
-    const stats = this.getReciprocityStats();
+  getMostBalanced(tierId?: number | null): { id: string; name: string; sent: number; received: number; ratio: number } | null {
+    const stats = this.getReciprocityStats(tierId);
     if (stats.length === 0) return null;
     return stats.reduce((best, curr) => curr.ratio > best.ratio ? curr : best);
   }

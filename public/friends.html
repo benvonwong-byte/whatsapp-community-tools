@@ -355,15 +355,46 @@
     .contact-chip .chip-name { font-weight: 500; color: var(--text); }
     .contact-chip .chip-meta { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
 
-    /* Tier kanban viewport */
-    .tier-lanes-viewport {
-      height: calc(100vh - 320px);
-      min-height: 200px;
-      overflow-x: auto;
-      overflow-y: hidden;
-    }
-    .tier-lanes-viewport .group-lane-body {
+    /* Tier kanban viewport — grid layout */
+    .tier-lanes-viewport.group-lanes {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      overflow-x: hidden;
       overflow-y: auto;
+      max-height: calc(100vh - 280px);
+      min-height: 200px;
+    }
+    .tier-lanes-viewport > .group-lane {
+      min-width: 0;
+      max-width: none;
+      flex: none;
+    }
+    .tier-lanes-viewport > .group-lane > .group-lane-body {
+      max-height: 220px;
+      overflow-y: auto;
+      padding: 8px;
+    }
+    /* Collapsible tiers */
+    .group-lane.collapsed > .group-lane-body,
+    .group-lane.collapsed > .tier-pagination {
+      display: none;
+    }
+    .tier-collapse-btn {
+      font-size: 10px;
+      transition: transform 0.2s;
+    }
+    /* Board drag-and-drop reorder */
+    .tier-lanes-viewport > .group-lane > .group-lane-header {
+      cursor: grab;
+    }
+    .tier-lanes-viewport > .group-lane.board-dragging {
+      opacity: 0.4;
+      transform: scale(0.97);
+    }
+    .tier-lanes-viewport > .group-lane.board-drag-over {
+      outline: 2px dashed var(--accent);
+      outline-offset: -2px;
     }
 
     /* Tier search input */
@@ -925,6 +956,11 @@
       transition: border-color 0.15s;
     }
     .tier-pill:hover { border-color: var(--accent); }
+    .tier-pill.active {
+      border-color: var(--accent);
+      background: rgba(79, 195, 247, 0.1);
+      box-shadow: 0 0 0 1px var(--accent);
+    }
     .tier-pill .dot {
       width: 8px; height: 8px; border-radius: 50%;
     }
@@ -1234,7 +1270,7 @@
       .tab { padding: 10px 12px; font-size: 12px; }
       .group-lanes { flex-direction: column; }
       .group-lane { max-width: none; min-width: 0; }
-      .tier-lanes-viewport { height: auto; overflow-y: visible; }
+      .tier-lanes-viewport.group-lanes { grid-template-columns: 1fr; max-height: none; overflow-y: visible; }
       .contacts-table { font-size: 11px; }
       .contacts-table th, .contacts-table td { padding: 6px 6px; }
       .contact-detail { width: 100%; max-width: 100vw; }
@@ -1490,6 +1526,13 @@
         <div class="section-title" style="margin-bottom:0;">Friend Tiers</div>
         <div style="display:flex;align-items:center;gap:8px;">
           <input type="text" id="tier-search-input" class="tier-search-input" placeholder="Search contacts...">
+          <select id="tier-sort-select" class="tier-search-input" style="width:auto;">
+            <option value="default">Sort: Default</option>
+            <option value="name-asc">Name A-Z</option>
+            <option value="name-desc">Name Z-A</option>
+            <option value="count-desc">Most People</option>
+            <option value="count-asc">Fewest People</option>
+          </select>
           <button id="create-tier-btn" class="header-btn" style="font-size:11px;padding:5px 14px;">+ New Tier</button>
         </div>
       </div>

@@ -26,20 +26,26 @@ export function createFriendsRouter(
 
   // ── Dashboard ──
 
-  router.get("/dashboard", (_req: Request, res: Response) => {
-    const stats = store.getDashboardStats();
-    const weeklyVolume = store.getWeeklyVolume(12);
-    const neglected = store.getNeglectedContacts(30);
-    const topInitiators = store.getTopInitiators(10);
+  router.get("/dashboard", (req: Request, res: Response) => {
+    // Parse optional tier filter
+    const tierParam = req.query.tier as string | undefined;
+    let tierId: number | null | undefined = undefined;
+    if (tierParam === "none") tierId = null;
+    else if (tierParam && !isNaN(parseInt(tierParam))) tierId = parseInt(tierParam);
+
+    const stats = store.getDashboardStats(tierId);
+    const weeklyVolume = store.getWeeklyVolume(12, tierId);
+    const neglected = store.getNeglectedContacts(30, tierId);
+    const topInitiators = store.getTopInitiators(10, tierId);
     const health = store.getHealth();
-    const tierDistribution = store.getTierDistribution();
-    const voiceTotal = store.getDashboardVoiceTotal();
-    const topFriends = store.getTopFriends(5);
-    const reciprocity = store.getReciprocityStats();
-    const streaks = store.getLongestStreaks(5);
-    const hourly = store.getHourlyDistribution();
-    const fastResponders = store.getFastestResponders(5);
-    const mostBalanced = store.getMostBalanced();
+    const tierDistribution = store.getTierDistribution(); // Always global
+    const voiceTotal = store.getDashboardVoiceTotal(tierId);
+    const topFriends = store.getTopFriends(5, 30, 0, tierId);
+    const reciprocity = store.getReciprocityStats(tierId);
+    const streaks = store.getLongestStreaks(5, tierId);
+    const hourly = store.getHourlyDistribution(tierId);
+    const fastResponders = store.getFastestResponders(5, tierId);
+    const mostBalanced = store.getMostBalanced(tierId);
     res.json({ stats, weeklyVolume, neglected, topInitiators, health, tierDistribution, voiceTotal,
       topFriends, reciprocity, streaks, hourly, fastResponders, mostBalanced });
   });
@@ -48,7 +54,11 @@ export function createFriendsRouter(
 
   router.get("/neglected", (req: Request, res: Response) => {
     const days = parseInt(req.query.days as string) || 30;
-    const contacts = store.getNeglectedContacts(days);
+    const tierParam = req.query.tier as string | undefined;
+    let tierId: number | null | undefined = undefined;
+    if (tierParam === "none") tierId = null;
+    else if (tierParam && !isNaN(parseInt(tierParam))) tierId = parseInt(tierParam);
+    const contacts = store.getNeglectedContacts(days, tierId);
     res.json({ contacts, days });
   });
 
@@ -58,7 +68,11 @@ export function createFriendsRouter(
     const days = parseInt(req.query.days as string) || 30;
     const offset = parseInt(req.query.offset as string) || 0;
     const limit = parseInt(req.query.limit as string) || 5;
-    const topFriends = store.getTopFriends(Math.min(limit, 20), days, offset);
+    const tierParam = req.query.tier as string | undefined;
+    let tierId: number | null | undefined = undefined;
+    if (tierParam === "none") tierId = null;
+    else if (tierParam && !isNaN(parseInt(tierParam))) tierId = parseInt(tierParam);
+    const topFriends = store.getTopFriends(Math.min(limit, 20), days, offset, tierId);
 
     // Compute date labels for the window
     const now = new Date();
@@ -381,6 +395,15 @@ export function createFriendsRouter(
     res.json({ ok: true, id });
   });
 
+  router.put("/tiers/reorder", (req: Request, res: Response) => {
+    const { order } = req.body; // array of { id, sort_order }
+    if (!Array.isArray(order)) { res.status(400).json({ error: "order must be an array" }); return; }
+    for (const item of order) {
+      store.updateTierSortOrder(item.id, item.sort_order);
+    }
+    res.json({ ok: true });
+  });
+
   router.put("/tiers/:id", (req: Request, res: Response) => {
     const { name, color, sort_order } = req.body;
     store.updateTier(parseInt(req.params.id as string), name, color, sort_order ?? 0);
@@ -400,8 +423,12 @@ export function createFriendsRouter(
 
   // ── Tags ──
 
-  router.get("/tags", (_req: Request, res: Response) => {
-    res.json(store.getAllTags());
+  router.get("/tags", (req: Request, res: Response) => {
+    const tierParam = req.query.tier as string | undefined;
+    let tierId: number | null | undefined = undefined;
+    if (tierParam === "none") tierId = null;
+    else if (tierParam && !isNaN(parseInt(tierParam))) tierId = parseInt(tierParam);
+    res.json(store.getAllTags(tierId));
   });
 
   router.post("/tags/extract", async (_req: Request, res: Response) => {
@@ -423,7 +450,11 @@ export function createFriendsRouter(
     const now = new Date();
     const year = parseInt(req.query.year as string) || now.getFullYear();
     const month = parseInt(req.query.month as string) || (now.getMonth() + 1);
-    const data = store.getCalendarData(year, month);
+    const tierParam = req.query.tier as string | undefined;
+    let tierId: number | null | undefined = undefined;
+    if (tierParam === "none") tierId = null;
+    else if (tierParam && !isNaN(parseInt(tierParam))) tierId = parseInt(tierParam);
+    const data = store.getCalendarData(year, month, tierId);
     res.json({ year, month, days: data });
   });
 

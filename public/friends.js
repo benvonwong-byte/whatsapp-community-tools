@@ -17,6 +17,7 @@ let calMonth = new Date().getMonth() + 1;
 let negWindowDays = 30;
 let neglectedData = [];
 let negNavBound = false;
+let dashboardTierFilter = null; // null = all, number = tier_id, "none" = unassigned
 
 // ── Init ──
 
@@ -254,7 +255,8 @@ function setupContactFilters() {
 
 async function loadDashboard() {
   try {
-    const res = await adminFetch("/api/friends/dashboard");
+    const tierParam = dashboardTierFilter !== null ? "?tier=" + encodeURIComponent(dashboardTierFilter) : "";
+    const res = await adminFetch("/api/friends/dashboard" + tierParam);
     if (!res.ok) throw new Error("Server returned " + res.status);
     const data = await res.json();
     renderSummaryCards(data.stats, data.voiceTotal);
@@ -286,7 +288,8 @@ let dashTagFilter = null; // currently selected tag name or null
 
 async function loadDashboardTags() {
   try {
-    const res = await adminFetch("/api/friends/tags");
+    const tagTierParam = dashboardTierFilter !== null ? "?tier=" + encodeURIComponent(dashboardTierFilter) : "";
+    const res = await adminFetch("/api/friends/tags" + tagTierParam);
     if (!res.ok) return;
     const tags = await res.json();
     renderDashboardTagCloud(tags);
@@ -364,13 +367,37 @@ function setupTagAllButton() {
 function renderTierPills(distribution) {
   const container = $("tier-pills");
   if (!container || !distribution) return;
-  container.innerHTML = distribution.map(d =>
-    '<div class="tier-pill">' +
+
+  // "All" pill first
+  let html = '<div class="tier-pill' + (dashboardTierFilter === null ? ' active' : '') + '" data-tier-filter="all">' +
+    '<span>All</span>' +
+  '</div>';
+
+  html += distribution.map(function(d) {
+    var filterId = d.tier_id === null ? "none" : String(d.tier_id);
+    var isActive = String(dashboardTierFilter) === filterId;
+    return '<div class="tier-pill' + (isActive ? ' active' : '') + '" data-tier-filter="' + esc(filterId) + '">' +
       '<span class="dot" style="background:' + esc(d.tier_color || '#666') + '"></span>' +
       '<span>' + esc(d.tier_name || 'Unassigned') + '</span>' +
       '<span class="count">' + d.count + '</span>' +
-    '</div>'
-  ).join("");
+    '</div>';
+  }).join("");
+
+  container.innerHTML = html;
+
+  // Click handlers
+  container.querySelectorAll(".tier-pill").forEach(function(pill) {
+    pill.addEventListener("click", function() {
+      var filter = pill.dataset.tierFilter;
+      if (filter === "all") {
+        dashboardTierFilter = null;
+      } else {
+        // Toggle: clicking same tier resets to All
+        dashboardTierFilter = String(dashboardTierFilter) === filter ? null : filter;
+      }
+      loadDashboard();
+    });
+  });
 }
 
 function renderSummaryCards(stats, voiceTotal) {
@@ -670,7 +697,8 @@ async function loadTopFriends() {
   const nextBtn = $("tf-next");
 
   try {
-    const res = await adminFetch("/api/friends/top-friends?days=" + tfWindowDays + "&offset=" + tfOffsetDays + "&limit=10");
+    const tfTierParam = dashboardTierFilter !== null ? "&tier=" + encodeURIComponent(dashboardTierFilter) : "";
+    const res = await adminFetch("/api/friends/top-friends?days=" + tfWindowDays + "&offset=" + tfOffsetDays + "&limit=10" + tfTierParam);
     if (!res.ok) throw new Error("Failed");
     const data = await res.json();
 
@@ -1783,6 +1811,8 @@ var tierSearch = "";
 var tierAllContacts = [];
 var tierCurrentList = [];
 var TIER_PAGE_SIZE = 50;
+var tierSortMode = "default";
+var chipDragOccurred = false;
 
 function renderContactChip(c, sourceTier) {
   return '<div class="contact-chip" draggable="true" data-contact-id="' + esc(String(c.id)) + '" data-source-tier="' + esc(String(sourceTier)) + '">' +
@@ -1851,17 +1881,30 @@ function renderTierLanes(tiersList, allContacts) {
     }
   }
 
+  // Sort tiers before rendering
+  var sortedTiers = tiersList.slice();
+  if (tierSortMode === "name-asc") {
+    sortedTiers.sort(function(a, b) { return (a.name || "").localeCompare(b.name || ""); });
+  } else if (tierSortMode === "name-desc") {
+    sortedTiers.sort(function(a, b) { return (b.name || "").localeCompare(a.name || ""); });
+  } else if (tierSortMode === "count-desc") {
+    sortedTiers.sort(function(a, b) { return (byTier[b.id] || []).length - (byTier[a.id] || []).length; });
+  } else if (tierSortMode === "count-asc") {
+    sortedTiers.sort(function(a, b) { return (byTier[a.id] || []).length - (byTier[b.id] || []).length; });
+  }
+
   // Render tier columns with pagination
   var html = '';
-  tiersList.forEach(function(t) {
+  sortedTiers.forEach(function(t) {
     var members = byTier[t.id] || [];
     var page = tierPages[t.id] || 0;
     var totalPages = Math.ceil(members.length / TIER_PAGE_SIZE);
     if (page >= totalPages && totalPages > 0) { page = totalPages - 1; tierPages[t.id] = page; }
     var pageMembers = members.slice(page * TIER_PAGE_SIZE, (page + 1) * TIER_PAGE_SIZE);
 
-    html += '<div class="group-lane" data-tier-id="' + esc(String(t.id)) + '">' +
+    html += '<div class="group-lane" draggable="true" data-tier-id="' + esc(String(t.id)) + '">' +
       '<div class="group-lane-header">' +
+        '<button class="lane-btn tier-collapse-btn" data-action="toggle-tier" title="Collapse/Expand">&#9660;</button>' +
         '<span class="color-dot" style="background:' + esc(t.color || '#4fc3f7') + '"></span>' +
         '<span class="lane-title">' + esc(t.name) + '</span>' +
         '<span class="lane-count">' + members.length + '</span>' +
@@ -1906,7 +1949,98 @@ function renderTierLanes(tiersList, allContacts) {
     });
   });
 
+  // Wire up collapse toggle buttons
+  container.querySelectorAll('[data-action="toggle-tier"]').forEach(function(btn) {
+    btn.addEventListener("click", function(e) {
+      e.stopPropagation();
+      var lane = btn.closest(".group-lane");
+      if (lane) {
+        lane.classList.toggle("collapsed");
+        btn.innerHTML = lane.classList.contains("collapsed") ? "&#9654;" : "&#9660;";
+      }
+    });
+  });
+
   setupTierDragAndDrop();
+  setupBoardDragAndDrop(container);
+}
+
+function setupBoardDragAndDrop(container) {
+  var boards = container.querySelectorAll(".group-lane[draggable]");
+  var draggedBoard = null;
+
+  boards.forEach(function(board) {
+    // Drag starts from header only — prevent from body/buttons
+    board.addEventListener("dragstart", function(e) {
+      // Only allow drag if it started from the header area (not contact chips or buttons)
+      var target = e.target;
+      if (target.classList.contains("contact-chip") || target.closest(".contact-chip")) {
+        return; // Let chip drag handle it
+      }
+      draggedBoard = board;
+      board.classList.add("board-dragging");
+      e.dataTransfer.setData("text/board", board.dataset.tierId);
+      e.dataTransfer.effectAllowed = "move";
+    });
+
+    board.addEventListener("dragend", function() {
+      board.classList.remove("board-dragging");
+      draggedBoard = null;
+      container.querySelectorAll(".board-drag-over").forEach(function(el) {
+        el.classList.remove("board-drag-over");
+      });
+    });
+
+    board.addEventListener("dragover", function(e) {
+      if (!draggedBoard || draggedBoard === board) return;
+      // Only highlight if this is a board drag (not a chip drag)
+      if (!e.dataTransfer.types.includes("text/board")) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      board.classList.add("board-drag-over");
+    });
+
+    board.addEventListener("dragleave", function() {
+      board.classList.remove("board-drag-over");
+    });
+
+    board.addEventListener("drop", async function(e) {
+      board.classList.remove("board-drag-over");
+      if (!draggedBoard || draggedBoard === board) return;
+      if (!e.dataTransfer.types.includes("text/board")) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      // Reorder: move draggedBoard before or after this board in DOM
+      var allLanes = Array.from(container.querySelectorAll(".group-lane[draggable]"));
+      var fromIdx = allLanes.indexOf(draggedBoard);
+      var toIdx = allLanes.indexOf(board);
+      if (fromIdx < 0 || toIdx < 0) return;
+
+      // Move in DOM
+      if (fromIdx < toIdx) {
+        container.insertBefore(draggedBoard, board.nextSibling);
+      } else {
+        container.insertBefore(draggedBoard, board);
+      }
+
+      // Save new order to backend
+      var reorderedLanes = Array.from(container.querySelectorAll(".group-lane[draggable]"));
+      var order = reorderedLanes.map(function(lane, i) {
+        return { id: parseInt(lane.dataset.tierId), sort_order: i };
+      });
+
+      try {
+        await adminFetch("/api/friends/tiers/reorder", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ order: order }),
+        });
+      } catch (err) {
+        console.error("Tier reorder failed:", err);
+      }
+    });
+  });
 }
 
 function setupTierDragAndDrop() {
@@ -1918,13 +2052,23 @@ function setupTierDragAndDrop() {
 
   chips.forEach(function(chip) {
     chip.addEventListener("dragstart", function(e) {
+      chipDragOccurred = true;
       e.dataTransfer.setData("text/plain", JSON.stringify({
         contactId: chip.dataset.contactId,
         sourceTier: chip.dataset.sourceTier,
       }));
       chip.classList.add("dragging");
     });
-    chip.addEventListener("dragend", function() { chip.classList.remove("dragging"); });
+    chip.addEventListener("dragend", function() {
+      chip.classList.remove("dragging");
+      setTimeout(function() { chipDragOccurred = false; }, 100);
+    });
+    chip.addEventListener("click", function(e) {
+      if (chipDragOccurred) return;
+      e.stopPropagation();
+      var contactId = chip.dataset.contactId;
+      if (contactId) openContactDetail(contactId);
+    });
   });
 
   zones.forEach(function(zone) {
@@ -1985,6 +2129,17 @@ function setupTierHandlers() {
           renderTierLanes(tierCurrentList, tierAllContacts);
         }
       }, 250);
+    });
+  }
+
+  // Tier sort dropdown
+  var sortSelect = $("tier-sort-select");
+  if (sortSelect) {
+    sortSelect.addEventListener("change", function() {
+      tierSortMode = sortSelect.value;
+      if (tierCurrentList.length > 0 || tierAllContacts.length > 0) {
+        renderTierLanes(tierCurrentList, tierAllContacts);
+      }
     });
   }
 }
@@ -2075,7 +2230,8 @@ async function loadCalendar() {
   if (titleEl) titleEl.textContent = monthNames[calMonth - 1] + " " + calYear;
 
   try {
-    const res = await adminFetch("/api/friends/calendar?year=" + calYear + "&month=" + calMonth);
+    const calTierParam = dashboardTierFilter !== null ? "&tier=" + encodeURIComponent(dashboardTierFilter) : "";
+    const res = await adminFetch("/api/friends/calendar?year=" + calYear + "&month=" + calMonth + calTierParam);
     if (!res.ok) throw new Error("Failed to load calendar");
     const data = await res.json();
     renderCalendar(data.year, data.month, data.days);
