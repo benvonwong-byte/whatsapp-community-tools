@@ -25,7 +25,7 @@ export interface RelationshipAnalysis {
 }
 
 export class RelationshipStore extends SettingsStore {
-  private stmts!: {
+  declare private stmts: {
     saveMessage: Database.Statement;
     isDuplicate: Database.Statement;
     getUnanalyzed: Database.Statement;

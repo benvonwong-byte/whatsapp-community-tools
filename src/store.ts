@@ -38,7 +38,7 @@ export interface GroupStats {
 
 export class EventStore extends BaseStore {
   // Pre-prepared statements for hot paths
-  private stmts!: {
+  declare private stmts: {
     isMessageProcessed: Database.Statement;
     markMessageProcessed: Database.Statement;
     isEventDuplicate: Database.Statement;

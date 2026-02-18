@@ -115,7 +115,7 @@ export interface ActivityPoint {
 // ── Store ──
 
 export class FriendsStore extends SettingsStore {
-  private stmts!: {
+  declare private stmts: {
     upsertChat: Database.Statement;
     getChats: Database.Statement;
     setChatMonitored: Database.Statement;

@@ -56,7 +56,7 @@ export interface MetacrisisTopic {
 }
 
 export class MetacrisisStore extends SettingsStore {
-  private stmts!: {
+  declare private stmts: {
     saveMessage: Database.Statement;
     isDuplicate: Database.Statement;
     getUnprocessed: Database.Statement;
