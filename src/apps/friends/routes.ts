@@ -596,6 +596,12 @@ export function createFriendsRouter(
     // Build tier list for frontend
     const tiers = store.getTiers();
 
+    // Batch query: active days and total chars per contact (for words/active day)
+    const activeDaysMap: Record<string, { activeDays: number; totalChars: number }> = {};
+    for (const r of store.getActiveDaysAndChars()) {
+      activeDaysMap[r.chat_id] = { activeDays: r.active_days, totalChars: r.total_chars };
+    }
+
     const nodes = allContacts.map(c => {
       const groupArr = c.group_names ? c.group_names.split(", ") : [];
       const tagArr = c.tag_names ? c.tag_names.split(", ") : [];
@@ -611,6 +617,8 @@ export function createFriendsRouter(
       }
       const msgsPerDay = daysKnown > 0 ? Math.round((c.total_messages / daysKnown) * 100) / 100 : 0;
       const recentPerDay = Math.round((c.messages_30d / 30) * 100) / 100;
+      const ad = activeDaysMap[c.id] || { activeDays: 1, totalChars: 0 };
+      const wordsPerActiveDay = ad.activeDays > 0 ? Math.round((ad.totalChars / 5 / ad.activeDays) * 100) / 100 : 0;
       return {
         id: c.id, name: displayName,
         // Raw metrics
@@ -619,7 +627,7 @@ export function createFriendsRouter(
         lastSeen: c.last_seen, firstSeen: c.first_seen,
         // Computed metrics for axes
         daysSince, daysKnown, ratio, quality: c.quality_score || 0,
-        msgsPerDay, recentPerDay,
+        msgsPerDay, recentPerDay, wordsPerActiveDay,
         groupCount: groupArr.length, tagCount: tagArr.length,
         // Metadata
         tierId: c.tier_id, tierName: c.tier_name, tierColor: c.tier_color,

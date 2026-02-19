@@ -3334,6 +3334,7 @@ const GX = {
     { key: "messages", label: "Total Messages", short: "Total", type: "num" },
     { key: "msgsPerDay", label: "Avg Msgs/Day", short: "Msgs/Day", type: "num" },
     { key: "recentPerDay", label: "Recent Msgs/Day (30d)", short: "Recent/Day", type: "num" },
+    { key: "wordsPerActiveDay", label: "Words/Active Day", short: "Words/Day", type: "num" },
     { key: "messages30d", label: "Recent (30d)", short: "30d", type: "num" },
     { key: "daysSince", label: "Days Since Contact", short: "Days", type: "num" },
     { key: "quality", label: "Quality Score", short: "Quality", type: "num" },

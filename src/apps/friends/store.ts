@@ -899,6 +899,19 @@ export class FriendsStore extends SettingsStore {
     }));
   }
 
+  /** Get active days and total chars per contact for graph metrics */
+  getActiveDaysAndChars(): { chat_id: string; active_days: number; total_chars: number }[] {
+    return this.db.prepare(`
+      SELECT fm.chat_id,
+        COUNT(DISTINCT date(fm.timestamp, 'unixepoch')) as active_days,
+        COALESCE(SUM(fm.char_count), 0) as total_chars
+      FROM friends_messages fm
+      JOIN friends_chats ch ON ch.chat_id = fm.chat_id AND ch.is_group = 0
+      WHERE fm.chat_id NOT LIKE '%@broadcast'
+      GROUP BY fm.chat_id
+    `).all() as { chat_id: string; active_days: number; total_chars: number }[];
+  }
+
   /** Resolve all DM chat_ids for a contact (handles both sender_id and chat_id lookups for iMessage) */
   private contactChatIds(contactId: string): string[] {
     const bySender = this.db.prepare(`
