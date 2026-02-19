@@ -3321,6 +3321,7 @@ const GX = {
   yAxis: "messages",
   colorMode: "tier", sizeMode: "messages",
   zoomMode: "dynamic",
+  logScale: false, // logarithmic Y axis
   currentTransform: d3.zoomIdentity,
   filtersOpen: false,
   filters: {},
@@ -3503,6 +3504,12 @@ function gxMakeScale(axisDef, nodes, key, rangeArr) {
       .range(rangeArr);
   }
   const ext = d3.extent(nodes, d => d[key] || 0);
+  if (GX.logScale) {
+    // Log scale: clamp domain minimum to 1 (log(0) is undefined)
+    const lo = Math.max(1, ext[0] || 1);
+    const hi = Math.max(lo + 1, ext[1] || 2);
+    return d3.scaleLog().domain([lo, hi]).range(rangeArr).clamp(true);
+  }
   const pad = (ext[1] - ext[0]) * 0.05 || 1;
   return d3.scaleLinear().domain([ext[0] - pad, ext[1] + pad]).range(rangeArr);
 }
@@ -3614,7 +3621,7 @@ function gxRender() {
       .attr("transform", "rotate(-90)");
 
     // Y-axis drag zoom: drag up/down to zoom Y, centered on selected point
-    GX.zoom = d3.zoom().scaleExtent([0.3, 20])
+    GX.zoom = d3.zoom().scaleExtent([0.1, 100])
       .filter(e => e.type === "wheel" || e.type === "mousedown" || e.type === "touchstart")
       .on("zoom", (e) => {
         // Only apply Y scaling — X is locked to time window
@@ -3654,7 +3661,7 @@ function gxRender() {
   // Rotate X-axis tick labels to prevent overlap
   svg.select(".gx-x-axis").selectAll("text").attr("transform", "rotate(-35)").attr("text-anchor", "end").attr("dx", "-4px").attr("dy", "4px");
   const xLabel = xDef.label;
-  const yLabel = yDef?.label || yKey;
+  const yLabel = (yDef?.label || yKey) + (GX.logScale ? " (log)" : "");
   svg.select(".gx-x-label").attr("x", W / 2).attr("y", H - 4).text(xLabel);
   svg.select(".gx-y-label").attr("x", -H / 2).attr("y", 12).text(yLabel);
 
@@ -3665,6 +3672,8 @@ function gxRender() {
   };
   const yv = d => {
     const v = d[yKey];
+    // Log scale: clamp to 1 minimum (log(0) undefined)
+    if (GX.logScale) return Math.max(1, v || 0);
     return v instanceof Date ? v : (v || 0);
   };
 
@@ -3821,7 +3830,7 @@ function gxDynamicRescale(transform) {
 
   const xKey = GX.xAxis, yKey = GX.yAxis;
   const xv = d => { const v = d[xKey]; return v instanceof Date ? v : (v || 0); };
-  const yv = d => { const v = d[yKey]; return v instanceof Date ? v : (v || 0); };
+  const yv = d => { const v = d[yKey]; if (GX.logScale) return Math.max(1, v || 0); return v instanceof Date ? v : (v || 0); };
 
   const wrap = $("gx-canvas-wrap");
   const W = wrap ? wrap.clientWidth : 800;
@@ -3912,7 +3921,7 @@ function gxNavigate(dir) {
   const ys = GX._ys || GX.yScale;
   const xKey = GX.xAxis, yKey = GX.yAxis;
   const xv = d => { const v = d[xKey]; return v instanceof Date ? v : (v || 0); };
-  const yv = d => { const v = d[yKey]; return v instanceof Date ? v : (v || 0); };
+  const yv = d => { const v = d[yKey]; if (GX.logScale) return Math.max(1, v || 0); return v instanceof Date ? v : (v || 0); };
   const cx = xs(xv(GX.selected)), cy = ys(yv(GX.selected));
   let best = null, bestDist = Infinity;
   for (const n of GX.nodes) {
@@ -4005,10 +4014,10 @@ function setupGraphHandlers() {
   const closeBtn = $("gx-detail-close");
   if (closeBtn) closeBtn.addEventListener("click", () => gxSelect(null));
 
-  // Zoom mode toggle
-  const btnZoom = $("gx-btn-zoom");
-  if (btnZoom) btnZoom.addEventListener("click", () => {
-    gxToggleZoomMode();
+  // Log scale toggle
+  const btnLog = $("gx-btn-log");
+  if (btnLog) btnLog.addEventListener("click", () => {
+    gxToggleLogScale();
   });
 
   // Filter toggle
@@ -4068,7 +4077,7 @@ function setupGraphHandlers() {
       case "t": GX.showTagLines = !GX.showTagLines; $("gx-btn-tags")?.classList.toggle("active"); gxRender(); break;
       case "l": case "L": GX.showLabels = !GX.showLabels; $("gx-btn-labels")?.classList.toggle("active"); gxRender(); break;
       case "f": case "F": e.preventDefault(); $("gx-search")?.focus(); break;
-      case "d": case "D": gxToggleZoomMode(); break;
+      case "w": case "W": gxToggleLogScale(); break;
       case "/": e.preventDefault();
         GX.filtersOpen = !GX.filtersOpen;
         $("gx-filter-panel")?.classList.toggle("open", GX.filtersOpen);
@@ -4101,18 +4110,16 @@ function setupGraphHandlers() {
   });
 }
 
-function gxToggleZoomMode() {
-  GX.zoomMode = GX.zoomMode === "dynamic" ? "fixed" : "dynamic";
-  const btn = $("gx-btn-zoom");
+function gxToggleLogScale() {
+  GX.logScale = !GX.logScale;
+  const btn = $("gx-btn-log");
   if (btn) {
-    btn.classList.toggle("active", GX.zoomMode === "dynamic");
-    btn.textContent = GX.zoomMode === "dynamic" ? "DZ" : "FZ";
-    btn.title = GX.zoomMode === "dynamic" ? "Dynamic Zoom (D) — data re-spaces" : "Fixed Zoom (D) — optical zoom";
+    btn.classList.toggle("active", GX.logScale);
+    btn.title = GX.logScale ? "Linear Y scale (W)" : "Logarithmic Y scale (W)";
   }
-  // Reset zoom transform and re-render
   GX.currentTransform = d3.zoomIdentity;
   if (GX.zoom) d3.select("#gx-svg").call(GX.zoom.transform, d3.zoomIdentity);
-  GX.g = null; // force rebuild since zoom behavior changes
+  GX.g = null;
   gxRender();
 }
 
