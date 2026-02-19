@@ -49,24 +49,45 @@ class CallRecorder {
     this._blob = null;
 
     try {
-      let recordStream;
+      let rawStream;
 
       if (audioSource === "system+mic") {
-        recordStream = await this._getSystemPlusMic();
+        rawStream = await this._getSystemPlusMic();
       } else {
-        recordStream = await this._getMicOnly();
+        rawStream = await this._getMicOnly();
       }
 
-      // Set up audio analysis for level meter
-      this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      // Create a 16kHz AudioContext for downsampling + mono conversion.
+      // This dramatically reduces file size (48kHz stereo -> 16kHz mono = ~6x smaller PCM).
+      // Combined with low-bitrate Opus encoding, a 1-hour call is ~20MB instead of ~120MB+.
+      const TARGET_SAMPLE_RATE = 16000;
+      let ctxOpts = {};
+      try { ctxOpts = { sampleRate: TARGET_SAMPLE_RATE }; } catch {}
+      this.audioContext = new (window.AudioContext || window.webkitAudioContext)(ctxOpts);
+
+      // Source -> ChannelMerger (force mono) -> Analyser (level meter) -> Destination (for recording)
+      const source = this.audioContext.createMediaStreamSource(rawStream);
+
+      // Force mono: merge all channels into 1
+      const merger = this.audioContext.createChannelMerger(1);
+      source.connect(merger);
+
+      // Level meter
       this.analyser = this.audioContext.createAnalyser();
       this.analyser.fftSize = 256;
-      const source = this.audioContext.createMediaStreamSource(recordStream);
-      source.connect(this.analyser);
+      merger.connect(this.analyser);
 
-      // MediaRecorder
+      // Output destination for MediaRecorder (16kHz mono stream)
+      const dest = this.audioContext.createMediaStreamDestination();
+      this.analyser.connect(dest);
+
+      const recordStream = dest.stream;
+
+      // MediaRecorder with low bitrate — 48kbps Opus is plenty for speech
       const mimeType = this._getSupportedMimeType();
-      this.mediaRecorder = new MediaRecorder(recordStream, mimeType ? { mimeType } : {});
+      const recorderOpts = { audioBitsPerSecond: 48000 };
+      if (mimeType) recorderOpts.mimeType = mimeType;
+      this.mediaRecorder = new MediaRecorder(recordStream, recorderOpts);
       this.mediaRecorder.ondataavailable = (e) => {
         if (e.data.size > 0) this.audioChunks.push(e.data);
       };
@@ -169,7 +190,7 @@ class CallRecorder {
     const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
     this.streams.push(micStream);
 
-    // Mix both streams via Web Audio API
+    // Mix both streams into a single raw stream (downsampling happens later in start())
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
     const dest = ctx.createMediaStreamDestination();
 
@@ -179,7 +200,6 @@ class CallRecorder {
     const micSource = ctx.createMediaStreamSource(micStream);
     micSource.connect(dest);
 
-    // Keep the mixing context alive
     this._mixingContext = ctx;
     return dest.stream;
   }
