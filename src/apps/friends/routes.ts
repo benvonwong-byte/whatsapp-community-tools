@@ -596,7 +596,7 @@ export function createFriendsRouter(
     }
 
     try {
-      // Step 1: Extract search keywords from natural language using Gemini
+      // Step 1: Parse query — extract exact phrases for message search
       const { GoogleGenerativeAI } = await import("@google/generative-ai");
       const { config } = await import("../../config");
       if (!config.geminiApiKey) {
@@ -606,22 +606,28 @@ export function createFriendsRouter(
       const genAI = new GoogleGenerativeAI(config.geminiApiKey);
       const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
-      // Get all available tags for context
-      const allTags = store.getAllTags().slice(0, 200).map(t => t.name);
+      const parseResult = await model.generateContent(`You parse natural language search queries into structured search parameters for a personal contacts database.
 
-      const parseResult = await model.generateContent(`You are a search assistant for a personal contacts CRM. Parse the user's natural language search query into structured search parameters.
-
-Available tags in the system: ${allTags.join(", ")}
+CRITICAL RULES:
+- "phrases": Keep the user's EXACT wording. Do NOT generalize or paraphrase. "guest room" stays "guest room", NOT "housing" or "accommodation".
+- Only break into multiple phrases if the query clearly has distinct concepts (e.g. "lives in SF and plays guitar" → ["san francisco", "guitar"]).
+- "name": Only set if the user is searching for a specific person by name.
+- Do NOT invent synonyms, broader categories, or related concepts. Be LITERAL.
 
 Return ONLY a JSON object:
 {
-  "keywords": ["keyword1", "keyword2"],     // Words to search in message content
-  "tags": ["matching_tag1", "matching_tag2"], // Exact tag names from the available tags list that match the intent
-  "name": "name to search",                  // If searching for a specific person
-  "explanation": "What the user is looking for"
+  "phrases": ["exact phrase from query"],
+  "name": null,
+  "explanation": "brief description of what user wants"
 }
 
-User query: "${query}"`);
+Examples:
+- "guest room" → {"phrases": ["guest room"], "name": null, "explanation": "People who mentioned having a guest room"}
+- "friends in San Francisco" → {"phrases": ["san francisco", "sf"], "name": null, "explanation": "People connected to San Francisco"}
+- "John who does photography" → {"phrases": ["photography", "photo"], "name": "John", "explanation": "Person named John involved in photography"}
+- "people who surf" → {"phrases": ["surf", "surfing"], "name": null, "explanation": "People who surf"}
+
+User query: "${query.replace(/"/g, '\\"')}"`);
 
       const parseText = parseResult.response.text();
       const jsonMatch = parseText.match(/\{[\s\S]*\}/);
@@ -630,33 +636,51 @@ User query: "${query}"`);
         return;
       }
       const parsed = JSON.parse(jsonMatch[0]);
+      const phrases: string[] = parsed.phrases || [];
 
       // Step 2: Search using extracted parameters
       let results: any[] = [];
+      const seenIds = new Set<string>();
 
-      // Search by tags
-      if (parsed.tags && parsed.tags.length > 0) {
-        const tagContacts = store.getContactsWithTags(parsed.tags, "OR");
-        const allContacts = store.getContactsWithStats();
-        const tagResults = allContacts.filter(c => tagContacts.includes(c.id)).map(c => ({
-          ...c, match_source: "tag", match_reason: "Has tags: " + parsed.tags.filter((t: string) =>
-            (c as any).tag_names && (c as any).tag_names.includes(t)
-          ).join(", ")
-        }));
-        results.push(...tagResults);
-      }
-
-      // Search by message content keywords
-      if (parsed.keywords && parsed.keywords.length > 0) {
-        const msgResults = store.searchMessageContent(parsed.keywords, 30);
+      // Search message content with exact phrases (highest priority)
+      if (phrases.length > 0) {
+        const msgResults = store.searchMessageContent(phrases, 50);
         for (const r of msgResults) {
-          if (!results.find(x => x.id === r.contact_id)) {
+          if (!seenIds.has(r.contact_id)) {
+            seenIds.add(r.contact_id);
             results.push({
               id: r.contact_id, name: r.name, tier_name: r.tier_name, tier_color: r.tier_color,
               tag_names: r.tag_names, match_source: "message",
               match_reason: `${r.match_count} message matches`,
-              snippet: r.snippet?.substring(0, 200)
+              snippet: r.snippet?.substring(0, 200),
+              score: r.match_count * 10
             });
+          }
+        }
+      }
+
+      // Search by tags — only literal substring matches, not conceptual
+      if (phrases.length > 0) {
+        const allTags = store.getAllTags().slice(0, 500);
+        const matchingTags = allTags.filter(t =>
+          phrases.some(p => t.name.includes(p.toLowerCase()) || p.toLowerCase().includes(t.name))
+        ).map(t => t.name);
+
+        if (matchingTags.length > 0) {
+          const tagContacts = store.getContactsWithTags(matchingTags, "OR");
+          const allContacts = store.getContactsWithStats();
+          for (const c of allContacts) {
+            if (tagContacts.includes(c.id) && !seenIds.has(c.id)) {
+              seenIds.add(c.id);
+              const matchedTags = matchingTags.filter((t: string) =>
+                (c as any).tag_names && (c as any).tag_names.includes(t)
+              );
+              results.push({
+                ...c, match_source: "tag",
+                match_reason: "Tagged: " + matchedTags.join(", "),
+                score: matchedTags.length * 5
+              });
+            }
           }
         }
       }
@@ -664,19 +688,22 @@ User query: "${query}"`);
       // Search by name
       if (parsed.name) {
         const allContacts = store.getContactsWithStats();
-        const nameResults = allContacts.filter(c =>
-          c.name.toLowerCase().includes(parsed.name.toLowerCase())
-        ).map(c => ({
-          ...c, match_source: "name", match_reason: "Name match"
-        }));
-        for (const r of nameResults) {
-          if (!results.find(x => x.id === r.id)) results.push(r);
+        for (const c of allContacts) {
+          if (c.name.toLowerCase().includes(parsed.name.toLowerCase()) && !seenIds.has(c.id)) {
+            seenIds.add(c.id);
+            results.push({
+              ...c, match_source: "name", match_reason: "Name match", score: 3
+            });
+          }
         }
       }
 
+      // Sort by score descending
+      results.sort((a, b) => (b.score || 0) - (a.score || 0));
+
       res.json({
         query,
-        parsed: { keywords: parsed.keywords, tags: parsed.tags, name: parsed.name, explanation: parsed.explanation },
+        parsed: { phrases, name: parsed.name, explanation: parsed.explanation },
         results: results.slice(0, 50)
       });
     } catch (err: any) {

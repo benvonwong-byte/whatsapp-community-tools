@@ -1208,19 +1208,20 @@ export class FriendsStore extends SettingsStore {
     return { archived: stats?.count || 0, freedChars: stats?.chars || 0 };
   }
 
-  /** Search contacts by message content. Returns contacts with matching message snippets. */
-  searchMessageContent(keywords: string[], limit = 50): Array<{ contact_id: string; name: string; tier_name: string | null; tier_color: string | null; tag_names: string | null; snippet: string; match_count: number }> {
-    if (keywords.length === 0) return [];
-    // Build SQL with LIKE conditions for each keyword
-    const conditions = keywords.map(() => `m.body LIKE ?`).join(" OR ");
-    const params = keywords.map(k => `%${k}%`);
+  /** Search contacts by exact phrases in message content. Any phrase match counts; results sorted by total matches. */
+  searchMessageContent(phrases: string[], limit = 50): Array<{ contact_id: string; name: string; tier_name: string | null; tier_color: string | null; tag_names: string | null; snippet: string; match_count: number }> {
+    if (phrases.length === 0) return [];
+    // Each phrase is searched as a complete substring (e.g. "guest room" searches for that exact phrase)
+    const conditions = phrases.map(() => `LOWER(m.body) LIKE LOWER(?)`).join(" OR ");
+    const snippetConditions = phrases.map(() => `LOWER(m2.body) LIKE LOWER(?)`).join(" OR ");
+    const params = phrases.map(p => `%${p}%`);
     return this.db.prepare(`
       SELECT c.id as contact_id, COALESCE(c.display_name, c.name) as name,
              t.name as tier_name, t.color as tier_color,
              (SELECT GROUP_CONCAT(tg.name, ', ')
               FROM friends_contact_tags ct JOIN friends_tags tg ON tg.id = ct.tag_id
               WHERE ct.contact_id = c.id) as tag_names,
-             (SELECT m2.body FROM friends_messages m2 WHERE m2.chat_id = c.id AND (${conditions.replace(/m\.body/g, 'm2.body')}) AND m2.body != '' LIMIT 1) as snippet,
+             (SELECT m2.body FROM friends_messages m2 WHERE m2.chat_id = c.id AND (${snippetConditions}) AND m2.body != '' ORDER BY m2.timestamp DESC LIMIT 1) as snippet,
              COUNT(*) as match_count
       FROM friends_messages m
       JOIN friends_contacts c ON c.id = m.chat_id

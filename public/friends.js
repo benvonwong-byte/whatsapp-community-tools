@@ -317,15 +317,25 @@ function setupAISearch() {
       if (data.results.length === 0) {
         html += '<div style="color:var(--text-dim);font-size:12px;">No contacts found matching your query.</div>';
       }
+      const searchPhrases = data.parsed?.phrases || [];
       html += data.results.map(r => {
         const tierBadge = r.tier_color && r.tier_name
           ? '<span class="ai-search-result-tier" style="background:' + esc(r.tier_color) + '22;color:' + esc(r.tier_color) + ';border:1px solid ' + esc(r.tier_color) + '44;">' + esc(r.tier_name) + '</span>'
           : '';
+        let snippetHtml = '';
+        if (r.snippet) {
+          let s = esc(r.snippet.substring(0, 150));
+          for (const p of searchPhrases) {
+            const re = new RegExp('(' + p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi');
+            s = s.replace(re, '<mark>$1</mark>');
+          }
+          snippetHtml = '<div class="ai-search-result-meta">"...' + s + '..."</div>';
+        }
+        const sourceIcon = r.match_source === 'message' ? '💬 ' : r.match_source === 'tag' ? '🏷 ' : '👤 ';
         return '<div class="ai-search-result" data-contact-id="' + esc(r.id) + '">' +
           '<div><span class="ai-search-result-name">' + esc(r.name || r.id) + '</span>' + tierBadge +
-          (r.snippet ? '<div class="ai-search-result-meta">"...' + esc(r.snippet.substring(0, 100)) + '..."</div>' : '') +
-          '</div>' +
-          '<div class="ai-search-result-reason">' + esc(r.match_reason || r.match_source || "") + '</div>' +
+          snippetHtml + '</div>' +
+          '<div class="ai-search-result-reason">' + sourceIcon + esc(r.match_reason || r.match_source || "") + '</div>' +
         '</div>';
       }).join("");
       results.innerHTML = html;
