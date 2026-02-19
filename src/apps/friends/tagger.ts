@@ -119,7 +119,7 @@ export async function runTagExtraction(store: FriendsStore): Promise<number> {
 export async function runDirectTagExtraction(
   store: FriendsStore,
   getChats: () => Promise<any[]>,
-  limit = 50
+  limit = 15
 ): Promise<number> {
   if (!config.geminiApiKey) {
     console.log("[direct-tagger] No GEMINI_API_KEY, skipping.");
