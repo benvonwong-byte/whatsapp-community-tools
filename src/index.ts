@@ -21,6 +21,7 @@ import { createFriendsHandler } from "./apps/friends/handler";
 import { createFriendsRouter, SendProgress } from "./apps/friends/routes";
 import { runTagExtraction, runDirectTagExtraction, runTagConsolidation } from "./apps/friends/tagger";
 import { createRecordingRouter } from "./apps/recording/routes";
+import { createCallsRouter } from "./apps/calls/routes";
 
 // ── Event link enrichment ──
 
@@ -693,6 +694,11 @@ async function main() {
   appRouters.push({
     path: "/api/friends",
     router: createFriendsRouter(friendsStore, friendsScan, friendsBackfill, friendsSendMessage, friendsSendProgress, friendsTagExtract, friendsFetchHistory, friendsTagConsolidate),
+  });
+
+  appRouters.push({
+    path: "/api/calls",
+    router: createCallsRouter(friendsStore),
   });
 
   startServer({

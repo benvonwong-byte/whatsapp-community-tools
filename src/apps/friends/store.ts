@@ -240,6 +240,26 @@ export class FriendsStore extends SettingsStore {
         timestamp INTEGER NOT NULL,
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
       );
+
+      CREATE TABLE IF NOT EXISTS friends_call_recordings (
+        id TEXT PRIMARY KEY,
+        contact_id TEXT DEFAULT NULL,
+        title TEXT DEFAULT '',
+        call_type TEXT DEFAULT 'phone',
+        duration_seconds INTEGER DEFAULT 0,
+        transcript_text TEXT DEFAULT '',
+        utterances_json TEXT DEFAULT '[]',
+        speaker_map_json TEXT DEFAULT '{}',
+        assemblyai_id TEXT DEFAULT '',
+        audio_captured TEXT DEFAULT 'mic',
+        status TEXT DEFAULT 'recording',
+        error_message TEXT DEFAULT '',
+        recorded_at INTEGER NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_friends_calls_contact ON friends_call_recordings(contact_id);
+      CREATE INDEX IF NOT EXISTS idx_friends_calls_status ON friends_call_recordings(status);
+      CREATE INDEX IF NOT EXISTS idx_friends_calls_recorded ON friends_call_recordings(recorded_at);
     `);
 
     // Migration: add tier_id column to friends_contacts
@@ -1536,6 +1556,79 @@ export class FriendsStore extends SettingsStore {
     const lastTs = (this.stmts.getLastTimestamp.get() as any)?.ts || null;
     const todayCount = (this.stmts.getTodayCount.get() as any)?.count || 0;
     return { lastMessageTimestamp: lastTs, todayMessageCount: todayCount };
+  }
+
+  // ── Call Recordings ──
+
+  saveCallRecording(call: {
+    id: string; contact_id?: string | null; title?: string; call_type?: string;
+    duration_seconds: number; transcript_text: string; utterances_json: string;
+    speaker_map_json?: string; assemblyai_id?: string; audio_captured?: string;
+    status: string; error_message?: string; recorded_at: number;
+  }) {
+    this.db.prepare(`
+      INSERT INTO friends_call_recordings (id, contact_id, title, call_type, duration_seconds, transcript_text, utterances_json, speaker_map_json, assemblyai_id, audio_captured, status, error_message, recorded_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        contact_id = excluded.contact_id, title = excluded.title, call_type = excluded.call_type,
+        duration_seconds = excluded.duration_seconds, transcript_text = excluded.transcript_text,
+        utterances_json = excluded.utterances_json, speaker_map_json = excluded.speaker_map_json,
+        assemblyai_id = excluded.assemblyai_id, audio_captured = excluded.audio_captured,
+        status = excluded.status, error_message = excluded.error_message
+    `).run(
+      call.id, call.contact_id || null, call.title || "", call.call_type || "phone",
+      call.duration_seconds, call.transcript_text, call.utterances_json,
+      call.speaker_map_json || "{}", call.assemblyai_id || "", call.audio_captured || "mic",
+      call.status, call.error_message || "", call.recorded_at
+    );
+  }
+
+  getCallRecording(id: string) {
+    return this.db.prepare(`SELECT * FROM friends_call_recordings WHERE id = ?`).get(id) as any;
+  }
+
+  getCallRecordings(limit = 50, offset = 0, contactId?: string) {
+    if (contactId) {
+      return this.db.prepare(`
+        SELECT cr.*, COALESCE(c.display_name, c.name) as contact_name
+        FROM friends_call_recordings cr
+        LEFT JOIN friends_contacts c ON c.id = cr.contact_id
+        WHERE cr.contact_id = ? ORDER BY cr.recorded_at DESC LIMIT ? OFFSET ?
+      `).all(contactId, limit, offset) as any[];
+    }
+    return this.db.prepare(`
+      SELECT cr.*, COALESCE(c.display_name, c.name) as contact_name
+      FROM friends_call_recordings cr
+      LEFT JOIN friends_contacts c ON c.id = cr.contact_id
+      ORDER BY cr.recorded_at DESC LIMIT ? OFFSET ?
+    `).all(limit, offset) as any[];
+  }
+
+  updateCallContact(id: string, contactId: string | null) {
+    this.db.prepare(`UPDATE friends_call_recordings SET contact_id = ? WHERE id = ?`).run(contactId, id);
+  }
+
+  updateCallSpeakers(id: string, speakerMap: string) {
+    this.db.prepare(`UPDATE friends_call_recordings SET speaker_map_json = ? WHERE id = ?`).run(speakerMap, id);
+  }
+
+  updateCallTitle(id: string, title: string) {
+    this.db.prepare(`UPDATE friends_call_recordings SET title = ? WHERE id = ?`).run(title, id);
+  }
+
+  deleteCallRecording(id: string) {
+    this.db.prepare(`DELETE FROM friends_call_recordings WHERE id = ?`).run(id);
+  }
+
+  searchCallTranscripts(query: string, limit = 20) {
+    return this.db.prepare(`
+      SELECT cr.id, cr.title, cr.contact_id, COALESCE(c.display_name, c.name) as contact_name,
+        cr.duration_seconds, cr.recorded_at, cr.status
+      FROM friends_call_recordings cr
+      LEFT JOIN friends_contacts c ON c.id = cr.contact_id
+      WHERE cr.transcript_text LIKE ? OR cr.title LIKE ?
+      ORDER BY cr.recorded_at DESC LIMIT ?
+    `).all(`%${query}%`, `%${query}%`, limit) as any[];
   }
 
 }

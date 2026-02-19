@@ -76,6 +76,7 @@ document.addEventListener("DOMContentLoaded", () => {
       else if (target === "tiers") loadTiers();
       else if (target === "groups") loadGroups();
       else if (target === "graph") loadGraph();
+      else if (target === "calls") loadCallsTab();
       else if (target === "messaging") loadMessagingRecipients();
       else if (target === "chats") loadChats();
     });
@@ -93,6 +94,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupCalendarHandlers();
   setupAISearch();
   setupGraphHandlers();
+  setupCallsTab();
   _initNameEditHandlers();
 
   // Load initial tab — show skeleton immediately
@@ -3138,6 +3140,153 @@ async function toggleMonitor(chatId, enabled) {
     alert("Failed to toggle monitor: " + err.message);
     // Reload to reset state
     loadChats();
+  }
+}
+
+// ── Calls Tab ──
+
+let _callsTabRecorder = null;
+let _callsTabOffset = 0;
+const _CALLS_TAB_PAGE = 20;
+
+function setupCallsTab() {
+  const btn = $("calls-tab-record");
+  if (!btn) return;
+
+  _callsTabRecorder = new CallRecorder({
+    onStateChange: (state) => {
+      if (state === "recording") {
+        btn.textContent = "Stop";
+        btn.style.background = "var(--red)";
+      } else {
+        btn.textContent = "Record";
+        btn.style.background = "var(--accent)";
+        $("calls-tab-timer").textContent = "00:00";
+        $("calls-tab-level").style.width = "0%";
+      }
+    },
+    onTimer: (formatted) => { $("calls-tab-timer").textContent = formatted; },
+    onLevel: (level) => { $("calls-tab-level").style.width = (level * 100) + "%"; },
+  });
+
+  btn.addEventListener("click", async () => {
+    if (_callsTabRecorder.state === "recording") {
+      btn.disabled = true;
+      btn.textContent = "Processing...";
+      const blob = await _callsTabRecorder.stop();
+      if (blob) {
+        await _callsTabTranscribe(blob);
+      }
+      btn.disabled = false;
+    } else {
+      const source = $("calls-tab-source")?.value || "mic";
+      try {
+        await _callsTabRecorder.start(source);
+      } catch (err) {
+        alert("Failed to start: " + err.message);
+      }
+    }
+  });
+
+  const moreBtn = $("calls-tab-more");
+  if (moreBtn) moreBtn.addEventListener("click", () => _loadCallsTabList(true));
+}
+
+async function _callsTabTranscribe(blob) {
+  const btn = $("calls-tab-record");
+  btn.textContent = "Transcribing...";
+  btn.disabled = true;
+
+  try {
+    const formData = new FormData();
+    formData.append("audio", blob, "call." + (blob.type.includes("webm") ? "webm" : "mp4"));
+    const res = await adminFetch("/api/calls/transcribe", { method: "POST", body: formData });
+    if (!res.ok) throw new Error("Transcription failed");
+    const data = await res.json();
+
+    const callId = "call_" + Date.now() + "_" + Math.random().toString(36).substring(2, 8);
+    const callType = $("calls-tab-type")?.value || "phone";
+
+    // Save immediately
+    await adminFetch("/api/calls/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: callId,
+        call_type: callType,
+        duration_seconds: _callsTabRecorder.durationSeconds || Math.round(data.duration || 0),
+        transcript_text: data.text || "",
+        utterances_json: JSON.stringify(data.utterances || []),
+        assemblyai_id: data.assemblyai_id || "",
+        audio_captured: _callsTabRecorder.audioSource,
+        status: "done",
+        recorded_at: Math.floor(Date.now() / 1000),
+      }),
+    });
+
+    _callsTabRecorder.reset();
+    _loadCallsTabList();
+  } catch (err) {
+    alert("Transcription error: " + err.message);
+    _callsTabRecorder.reset();
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function loadCallsTab() {
+  _callsTabOffset = 0;
+  _loadCallsTabList();
+}
+
+async function _loadCallsTabList(more = false) {
+  if (!more) _callsTabOffset = 0;
+  try {
+    const res = await cachedFetch(`/api/calls?limit=${_CALLS_TAB_PAGE}&offset=${_callsTabOffset}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const calls = data.calls || [];
+
+    const list = $("calls-tab-list");
+    if (!list) return;
+    if (!more) list.innerHTML = "";
+
+    if (calls.length === 0 && !more) {
+      list.innerHTML = '<div style="color:var(--text-dim);font-size:12px;padding:12px;">No recordings yet</div>';
+      $("calls-tab-more").style.display = "none";
+      return;
+    }
+
+    for (const call of calls) {
+      const div = document.createElement("div");
+      div.style.cssText = "background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:6px;cursor:pointer;";
+      div.addEventListener("mouseenter", () => div.style.borderColor = "var(--accent)");
+      div.addEventListener("mouseleave", () => div.style.borderColor = "var(--border)");
+
+      const date = new Date(call.recorded_at * 1000);
+      const dateStr = date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      const mins = Math.floor(call.duration_seconds / 60);
+      const secs = call.duration_seconds % 60;
+      const durStr = `${mins}:${String(secs).padStart(2, "0")}`;
+      const title = call.title || (call.call_type ? call.call_type.charAt(0).toUpperCase() + call.call_type.slice(1) + " call" : "Call");
+      const preview = (call.transcript_text || "").substring(0, 100);
+
+      div.innerHTML = `<div style="display:flex;align-items:center;gap:8px;">
+        <div style="flex:1;font-size:12px;font-weight:600;">${esc(title)}</div>
+        <div style="font-size:10px;color:var(--text-dim);">${durStr} · ${dateStr}</div>
+      </div>
+      ${call.contact_name ? `<div style="font-size:10px;color:var(--accent);margin-top:2px;">${esc(call.contact_name)}</div>` : ""}
+      ${preview ? `<div style="font-size:10px;color:var(--text-dim);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(preview)}</div>` : ""}`;
+
+      div.addEventListener("click", () => window.open(`/calls.html`, "_blank"));
+      list.appendChild(div);
+    }
+
+    _callsTabOffset += calls.length;
+    const moreBtn = $("calls-tab-more");
+    if (moreBtn) moreBtn.style.display = calls.length >= _CALLS_TAB_PAGE ? "" : "none";
+  } catch (err) {
+    console.error("Failed to load calls:", err);
   }
 }
 
