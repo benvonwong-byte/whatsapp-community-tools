@@ -6,13 +6,24 @@ let chats = [];
 let selectedRecipients = new Set();
 let currentSort = { field: "last_seen", dir: "desc" };
 
-// ── Data cache for faster tab switching ──
+// ── Data cache with stale-while-revalidate ──
 const _cache = {};
-const CACHE_TTL = 60000; // 1 minute
+const CACHE_TTL = 120000; // 2 min fresh
+const CACHE_STALE = 600000; // 10 min stale-usable
 function cachedFetch(url, opts) {
   const key = url + (opts ? JSON.stringify(opts) : "");
   const cached = _cache[key];
-  if (cached && Date.now() - cached.time < CACHE_TTL) return Promise.resolve(cached.response.clone());
+  if (cached) {
+    const age = Date.now() - cached.time;
+    if (age < CACHE_TTL) return Promise.resolve(cached.response.clone());
+    // Stale-while-revalidate: return stale immediately, refresh in background
+    if (age < CACHE_STALE) {
+      adminFetch(url, opts).then(res => {
+        if (res.ok) _cache[key] = { time: Date.now(), response: res.clone() };
+      }).catch(() => {});
+      return Promise.resolve(cached.response.clone());
+    }
+  }
   return adminFetch(url, opts).then(res => {
     if (res.ok) _cache[key] = { time: Date.now(), response: res.clone() };
     return res;
@@ -84,15 +95,17 @@ document.addEventListener("DOMContentLoaded", () => {
   setupGraphHandlers();
   _initNameEditHandlers();
 
-  // Load initial tab
+  // Load initial tab — show skeleton immediately
+  showDashboardSkeleton();
   loadDashboard();
 
-  // Prefetch other tabs' data in background after initial load
+  // Prefetch other tabs eagerly (stale-while-revalidate means this is cheap)
   setTimeout(() => {
     cachedFetch("/api/friends/contacts?sort=last_seen&dir=desc");
     cachedFetch("/api/friends/tiers");
     cachedFetch("/api/friends/groups");
-  }, 2000);
+    cachedFetch("/api/friends/tags");
+  }, 500);
 });
 
 // ── Scan & Backfill Buttons ──
@@ -358,6 +371,15 @@ function setupAISearch() {
 
   btn.addEventListener("click", doSearch);
   input.addEventListener("keydown", (e) => { if (e.key === "Enter") doSearch(); });
+}
+
+function showDashboardSkeleton() {
+  const cards = $("summary-cards");
+  if (cards && !cards.children.length) {
+    cards.innerHTML = Array(5).fill(0).map(() =>
+      '<div class="stat-card skeleton-card"><div class="skel-line skel-big"></div><div class="skel-line skel-sm"></div></div>'
+    ).join("");
+  }
 }
 
 async function loadDashboard() {
@@ -2929,23 +2951,34 @@ async function toggleMonitor(chatId, enabled) {
   }
 }
 
-// ── Graph Visualization ──
+// ── Graph Visualization (force-graph) ──
 
 let graphInstance = null;
 let graphData = null;
+let graphPaused = false;
+let graphShowLabels = true;
+let graphShowEdges = true;
+let graphHighlightNode = null;
+let graphNeighborSet = new Set();
+
+function graphNodeLabel(n) {
+  if (n.name && n.name.trim() && n.name !== "Unknown") return n.name;
+  const ph = (n.id || "").split("@")[0];
+  if (ph && /^\d{7,15}$/.test(ph)) return "+" + ph;
+  return n.name || n.id || "?";
+}
 
 async function loadGraph() {
   const container = $("graph-container");
   const loading = $("graph-loading");
   if (!container) return;
-  if (loading) loading.textContent = "Loading graph data...";
+  if (loading) { loading.style.display = "flex"; loading.textContent = "Loading graph data..."; }
 
   try {
     const minMsgs = $("graph-min-messages")?.value || "50";
     const res = await cachedFetch("/api/friends/graph?minMessages=" + minMsgs);
     if (!res.ok) throw new Error("Failed to load graph");
     graphData = await res.json();
-
     if (loading) loading.style.display = "none";
     renderGraph(graphData);
   } catch (err) {
@@ -2954,168 +2987,233 @@ async function loadGraph() {
   }
 }
 
+function getNodeColor(n, mode) {
+  if (mode === "activity") {
+    const m = Math.min(n.messages30d || 0, 100);
+    const r = Math.round(40 + m * 2.1);
+    const g = Math.round(60 + m * 1.8);
+    const b = Math.round(80 + m * 1.7);
+    return `rgb(${r},${g},${b})`;
+  }
+  if (mode === "recency") {
+    const now = Date.now() / 1000;
+    const days = (now - (n.lastSeen || 0)) / 86400;
+    if (days < 7) return "#4fc3f7";
+    if (days < 30) return "#81c784";
+    if (days < 90) return "#ffb74d";
+    if (days < 365) return "#f06292";
+    return "#555";
+  }
+  // tier (default)
+  return n.tierColor || "#555";
+}
+
+function getNodeSize(n, mode) {
+  if (mode === "quality") return Math.max(2, Math.min(14, (n.quality || 0) / 8));
+  if (mode === "recent") return Math.max(2, Math.min(14, Math.sqrt(n.messages30d || 0) * 1.5));
+  if (mode === "equal") return 4;
+  // messages (default)
+  return Math.max(2, Math.min(14, Math.sqrt(n.messages || 0) / 3));
+}
+
 function renderGraph(data) {
   const container = $("graph-container");
   if (!container || !data || !data.nodes.length) return;
 
-  // Clean up previous instance
-  if (graphInstance) { graphInstance.kill(); graphInstance = null; }
+  // Clean up previous
+  if (graphInstance) { graphInstance._destructor(); graphInstance = null; }
 
-  // Build graphology graph
-  const Graph = graphology;
-  const graph = new Graph();
-
-  // Default tier colors
-  const defaultColors = ["#4fc3f7", "#81c784", "#ffb74d", "#f06292", "#ba68c8", "#00b894", "#e17055"];
   const tierFilter = $("graph-tier-filter")?.value || "all";
+  const viewMode = $("graph-view-mode")?.value || "force";
+  const colorBy = $("graph-color-by")?.value || "tier";
+  const sizeBy = $("graph-size-by")?.value || "messages";
 
-  // Filter by tier
+  // Filter nodes
   const filteredNodes = tierFilter === "all"
     ? data.nodes
     : data.nodes.filter(n => tierFilter === "none" ? !n.tierId : String(n.tierId) === tierFilter);
-
   const nodeIds = new Set(filteredNodes.map(n => n.id));
 
-  // Add nodes
-  for (const n of filteredNodes) {
-    const size = Math.max(3, Math.min(20, Math.sqrt(n.messages) / 2));
-    const color = n.tierColor || "#555";
-    const now = Math.floor(Date.now() / 1000);
-    const daysSinceContact = (now - (n.lastSeen || 0)) / 86400;
-    const alpha = daysSinceContact < 7 ? 1 : daysSinceContact < 30 ? 0.8 : daysSinceContact < 90 ? 0.5 : 0.3;
+  // Filter edges
+  const filteredEdges = data.edges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target));
 
-    graph.addNode(n.id, {
-      label: n.name || n.id.split("@")[0],
-      size,
-      color: color + Math.round(alpha * 255).toString(16).padStart(2, "0"),
-      x: Math.random() * 100,
-      y: Math.random() * 100,
-      // Custom data for tooltips
-      _data: n
-    });
-  }
-
-  // Add edges (only between visible nodes)
-  let edgeIdx = 0;
-  for (const e of data.edges) {
-    if (nodeIds.has(e.source) && nodeIds.has(e.target)) {
-      try {
-        graph.addEdge(e.source, e.target, {
-          size: Math.min(3, e.weight),
-          color: "rgba(255,255,255,0.08)"
-        });
-      } catch { /* duplicate edge */ }
-      edgeIdx++;
-    }
-  }
-
-  // Layout
-  const layout = $("graph-layout")?.value || "force";
-  if (layout === "concentric") {
-    // Concentric layout by tier
-    const tiers = {};
-    filteredNodes.forEach(n => {
-      const key = n.tierId || "none";
-      if (!tiers[key]) tiers[key] = [];
-      tiers[key].push(n.id);
-    });
-    const tierKeys = Object.keys(tiers).sort((a, b) => (a === "none" ? 999 : parseInt(a)) - (b === "none" ? 999 : parseInt(b)));
-    tierKeys.forEach((tk, ring) => {
-      const members = tiers[tk];
-      const radius = 30 + ring * 40;
-      members.forEach((id, i) => {
-        const angle = (2 * Math.PI * i) / members.length;
-        graph.setNodeAttribute(id, "x", Math.cos(angle) * radius);
-        graph.setNodeAttribute(id, "y", Math.sin(angle) * radius);
-      });
-    });
-  } else {
-    // Force-directed layout using ForceAtlas2
-    if (typeof ForceAtlas2 !== "undefined" && ForceAtlas2.assign) {
-      ForceAtlas2.assign(graph, {
-        iterations: 100,
-        settings: {
-          gravity: 1,
-          scalingRatio: 10,
-          barnesHutOptimize: graph.order > 500,
-          strongGravityMode: true,
-          slowDown: 5
-        }
-      });
-    }
-  }
-
-  // Create Sigma renderer
-  graphInstance = new Sigma(graph, container, {
-    renderEdgeLabels: false,
-    labelFont: "sans-serif",
-    labelSize: 11,
-    labelColor: { color: "#ccc" },
-    labelRenderedSizeThreshold: 8,
-    defaultEdgeType: "line",
-    minCameraRatio: 0.1,
-    maxCameraRatio: 10
+  // Build neighbor map for highlight on hover
+  const neighborMap = {};
+  filteredEdges.forEach(e => {
+    if (!neighborMap[e.source]) neighborMap[e.source] = new Set();
+    if (!neighborMap[e.target]) neighborMap[e.target] = new Set();
+    neighborMap[e.source].add(e.target);
+    neighborMap[e.target].add(e.source);
   });
 
-  // Tooltip on hover
-  const tooltip = $("graph-tooltip");
-  graphInstance.on("enterNode", ({ node }) => {
-    const attrs = graph.getNodeAttributes(node);
-    const d = attrs._data;
-    if (!d || !tooltip) return;
-    const tierBadge = d.tierName ? '<span style="background:' + (d.tierColor || "#555") + '22;color:' + (d.tierColor || "#555") + ';padding:1px 6px;border-radius:3px;font-size:10px;">' + d.tierName + '</span>' : '';
-    tooltip.innerHTML =
-      '<strong>' + (d.name || d.id) + '</strong> ' + tierBadge + '<br>' +
-      '<span style="color:var(--text-dim);">' + d.messages + ' messages (' + d.messages30d + ' last 30d)</span><br>' +
-      (d.tags.length > 0 ? '<span style="color:var(--accent);font-size:10px;">' + d.tags.slice(0, 5).join(", ") + '</span><br>' : '') +
-      (d.groups.length > 0 ? '<span style="color:var(--text-dim);font-size:10px;">Groups: ' + d.groups.slice(0, 3).join(", ") + '</span>' : '');
-    tooltip.style.display = "block";
-  });
+  // Search state
+  const searchQ = ($("graph-search")?.value || "").toLowerCase().trim();
 
-  graphInstance.on("leaveNode", () => {
-    if (tooltip) tooltip.style.display = "none";
-  });
+  // DAG mode mapping
+  const dagModes = { "force": null, "radial-out": "radialout", "radial-in": "radialin", "td": "td", "bu": "bu", "lr": "lr", "rl": "rl" };
+  const dagMode = dagModes[viewMode] || null;
+
+  // Build graph data — force-graph expects { nodes: [{id, ...}], links: [{source, target, ...}] }
+  const gData = {
+    nodes: filteredNodes.map(n => ({
+      id: n.id, name: n.name, label: graphNodeLabel(n),
+      messages: n.messages, messages30d: n.messages30d,
+      sent: n.sent, received: n.received, lastSeen: n.lastSeen,
+      tierId: n.tierId, tierName: n.tierName, tierColor: n.tierColor,
+      tags: n.tags || [], groups: n.groups || [],
+      quality: n.quality,
+      _color: getNodeColor(n, colorBy),
+      _size: getNodeSize(n, sizeBy)
+    })),
+    links: filteredEdges.map(e => ({ source: e.source, target: e.target, weight: e.weight }))
+  };
+
+  graphHighlightNode = null;
+  graphNeighborSet = new Set();
+
+  graphInstance = ForceGraph()(container)
+    .graphData(gData)
+    .backgroundColor("#0a0a0f")
+    .nodeId("id")
+    .nodeLabel("")  // we draw custom tooltip
+    .nodeVal(n => n._size * n._size)
+    .nodeColor(n => {
+      if (searchQ && !n.label.toLowerCase().includes(searchQ)) return "rgba(60,60,70,0.3)";
+      if (graphHighlightNode) {
+        if (n.id === graphHighlightNode) return "#fff";
+        if (graphNeighborSet.has(n.id)) return n._color;
+        return "rgba(60,60,70,0.25)";
+      }
+      return n._color;
+    })
+    .nodeCanvasObjectMode(() => "after")
+    .nodeCanvasObject((node, ctx, globalScale) => {
+      if (!graphShowLabels) return;
+      const sz = node._size || 4;
+      // Only show labels at sufficient zoom or for highlighted nodes
+      const showLabel = globalScale > 1.2 || (graphHighlightNode && (node.id === graphHighlightNode || graphNeighborSet.has(node.id)));
+      if (!showLabel && globalScale <= 2.5) return;
+      const label = node.label;
+      const fontSize = Math.max(10, 12 / globalScale);
+      ctx.font = `${fontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      // Highlighted nodes get brighter text
+      if (graphHighlightNode && node.id === graphHighlightNode) {
+        ctx.fillStyle = "#fff";
+      } else if (graphHighlightNode && !graphNeighborSet.has(node.id)) {
+        ctx.fillStyle = "rgba(180,180,180,0.15)";
+      } else if (searchQ && !node.label.toLowerCase().includes(searchQ)) {
+        ctx.fillStyle = "rgba(180,180,180,0.15)";
+      } else {
+        ctx.fillStyle = "rgba(220,220,230,0.7)";
+      }
+      ctx.fillText(label, node.x, node.y + sz + 2);
+    })
+    .linkColor(link => {
+      if (!graphShowEdges) return "rgba(0,0,0,0)";
+      if (graphHighlightNode) {
+        const s = typeof link.source === "object" ? link.source.id : link.source;
+        const t = typeof link.target === "object" ? link.target.id : link.target;
+        if (s === graphHighlightNode || t === graphHighlightNode) return "rgba(79,195,247,0.4)";
+        return "rgba(255,255,255,0.02)";
+      }
+      return "rgba(255,255,255,0.06)";
+    })
+    .linkWidth(link => {
+      if (!graphShowEdges) return 0;
+      if (graphHighlightNode) {
+        const s = typeof link.source === "object" ? link.source.id : link.source;
+        const t = typeof link.target === "object" ? link.target.id : link.target;
+        if (s === graphHighlightNode || t === graphHighlightNode) return 1.5;
+      }
+      return 0.3;
+    })
+    .linkDirectionalParticles(link => {
+      if (!graphHighlightNode) return 0;
+      const s = typeof link.source === "object" ? link.source.id : link.source;
+      const t = typeof link.target === "object" ? link.target.id : link.target;
+      return (s === graphHighlightNode || t === graphHighlightNode) ? 2 : 0;
+    })
+    .linkDirectionalParticleWidth(1.5)
+    .linkDirectionalParticleColor(() => "rgba(79,195,247,0.6)")
+    .dagMode(dagMode)
+    .dagLevelDistance(dagMode ? 50 : undefined)
+    .d3AlphaDecay(0.02)
+    .d3VelocityDecay(0.3)
+    .warmupTicks(dagMode ? 150 : 80)
+    .cooldownTime(dagMode ? 0 : 5000)
+    .onNodeHover(node => {
+      container.style.cursor = node ? "pointer" : "default";
+      graphHighlightNode = node ? node.id : null;
+      graphNeighborSet = node && neighborMap[node.id] ? neighborMap[node.id] : new Set();
+      // Update tooltip
+      const tooltip = $("graph-tooltip");
+      if (!tooltip) return;
+      if (!node) { tooltip.style.display = "none"; return; }
+      const tierBadge = node.tierName
+        ? `<span class="tt-tier" style="background:${node.tierColor || "#555"}22;color:${node.tierColor || "#555"};">${esc(node.tierName)}</span>`
+        : "";
+      tooltip.innerHTML =
+        `<div class="tt-name">${esc(node.label)} ${tierBadge}</div>` +
+        `<div class="tt-stats">${node.messages} msgs total &middot; ${node.messages30d} last 30d</div>` +
+        `<div class="tt-stats">Sent ${node.sent} &middot; Received ${node.received}</div>` +
+        (node.tags.length > 0 ? `<div class="tt-tags">${node.tags.slice(0, 6).join(", ")}</div>` : "") +
+        (node.groups.length > 0 ? `<div class="tt-groups">Groups: ${node.groups.slice(0, 4).join(", ")}</div>` : "");
+      tooltip.style.display = "block";
+    })
+    .onNodeClick(node => {
+      if (node) openContactDetail(node.id);
+    })
+    .onBackgroundClick(() => {
+      graphHighlightNode = null;
+      graphNeighborSet = new Set();
+    });
 
   // Move tooltip with mouse
   container.addEventListener("mousemove", (e) => {
+    const tooltip = $("graph-tooltip");
     if (tooltip && tooltip.style.display !== "none") {
       const rect = container.getBoundingClientRect();
-      tooltip.style.left = (e.clientX - rect.left + 15) + "px";
-      tooltip.style.top = (e.clientY - rect.top + 15) + "px";
+      let tx = e.clientX - rect.left + 16;
+      let ty = e.clientY - rect.top + 16;
+      if (tx + 280 > rect.width) tx = e.clientX - rect.left - 290;
+      if (ty + 200 > rect.height) ty = e.clientY - rect.top - 200;
+      tooltip.style.left = tx + "px";
+      tooltip.style.top = ty + "px";
     }
   });
 
-  // Click to open contact detail
-  graphInstance.on("clickNode", ({ node }) => {
-    openContactDetail(node);
-  });
+  // Fit to view after warmup
+  setTimeout(() => {
+    if (graphInstance) graphInstance.zoomToFit(400, 40);
+  }, dagMode ? 200 : 2000);
 
-  // Search highlight
-  const searchInput = $("graph-search");
-  if (searchInput) {
-    searchInput.addEventListener("input", () => {
-      const q = searchInput.value.toLowerCase().trim();
-      graph.forEachNode((node, attrs) => {
-        const match = !q || (attrs.label && attrs.label.toLowerCase().includes(q));
-        graph.setNodeAttribute(node, "hidden", !match && q.length > 0);
-      });
-      graphInstance.refresh();
-    });
+  // Update status bar
+  const status = $("graph-status");
+  if (status) {
+    status.textContent = `${filteredNodes.length} contacts \u00B7 ${filteredEdges.length} connections \u00B7 View: ${viewMode} \u00B7 Hover for details, click to open`;
   }
 
   // Legend
   const legend = $("graph-legend");
   if (legend) {
-    const tierColors = {};
-    filteredNodes.forEach(n => {
-      if (n.tierName && n.tierColor) tierColors[n.tierName] = n.tierColor;
-    });
-    legend.innerHTML = Object.entries(tierColors).map(([name, color]) =>
-      '<span class="graph-legend-item"><span class="graph-legend-dot" style="background:' + color + ';"></span>' + name + '</span>'
-    ).join("") + '<span class="graph-legend-item"><span class="graph-legend-dot" style="background:#555;"></span>Unassigned</span>';
+    if (colorBy === "tier") {
+      const tierColors = {};
+      filteredNodes.forEach(n => { if (n.tierName && n.tierColor) tierColors[n.tierName] = n.tierColor; });
+      legend.innerHTML = Object.entries(tierColors).map(([name, color]) =>
+        `<span class="graph-legend-item"><span class="graph-legend-dot" style="background:${color};"></span>${name}</span>`
+      ).join("") + '<span class="graph-legend-item"><span class="graph-legend-dot" style="background:#555;"></span>None</span>';
+    } else if (colorBy === "recency") {
+      legend.innerHTML = [
+        ["#4fc3f7","<7d"], ["#81c784","<30d"], ["#ffb74d","<90d"], ["#f06292","<1y"], ["#555",">1y"]
+      ].map(([c,l]) => `<span class="graph-legend-item"><span class="graph-legend-dot" style="background:${c};"></span>${l}</span>`).join("");
+    } else {
+      legend.innerHTML = '<span class="graph-legend-item">Brighter = more active (30d)</span>';
+    }
   }
 
-  // Populate tier filter
+  // Populate tier filter (once)
   const tierSelect = $("graph-tier-filter");
   if (tierSelect && tierSelect.options.length <= 1) {
     const tiers = {};
@@ -3131,16 +3229,137 @@ function renderGraph(data) {
     noneOpt.textContent = "Unassigned";
     tierSelect.appendChild(noneOpt);
   }
+
+  graphPaused = false;
+  updatePauseBtn();
+}
+
+function updatePauseBtn() {
+  const btn = $("graph-btn-pause");
+  if (btn) {
+    btn.textContent = graphPaused ? "Resume" : "Pause";
+    btn.classList.toggle("active", graphPaused);
+  }
+}
+
+function cycleSelect(id) {
+  const sel = $(id);
+  if (!sel) return;
+  sel.selectedIndex = (sel.selectedIndex + 1) % sel.options.length;
+  sel.dispatchEvent(new Event("change"));
 }
 
 function setupGraphHandlers() {
-  const tierFilter = $("graph-tier-filter");
-  const layoutSelect = $("graph-layout");
-  const minMsgSelect = $("graph-min-messages");
+  const rerender = () => { if (graphData) renderGraph(graphData); };
+  const reload = () => { invalidateCache("/api/friends/graph"); loadGraph(); };
 
-  if (tierFilter) tierFilter.addEventListener("change", () => { if (graphData) renderGraph(graphData); });
-  if (layoutSelect) layoutSelect.addEventListener("change", () => { if (graphData) renderGraph(graphData); });
-  if (minMsgSelect) minMsgSelect.addEventListener("change", () => { invalidateCache("/api/friends/graph"); loadGraph(); });
+  ["graph-view-mode", "graph-tier-filter", "graph-color-by", "graph-size-by"].forEach(id => {
+    const el = $(id);
+    if (el) el.addEventListener("change", rerender);
+  });
+  const minSel = $("graph-min-messages");
+  if (minSel) minSel.addEventListener("change", reload);
+
+  // Search
+  const searchInput = $("graph-search");
+  if (searchInput) {
+    searchInput.addEventListener("input", () => {
+      if (graphInstance) graphInstance.nodeColor(graphInstance.nodeColor());  // trigger re-render
+    });
+  }
+
+  // Buttons
+  const fitBtn = $("graph-btn-fit");
+  if (fitBtn) fitBtn.addEventListener("click", () => { if (graphInstance) graphInstance.zoomToFit(400, 40); });
+
+  const pauseBtn = $("graph-btn-pause");
+  if (pauseBtn) pauseBtn.addEventListener("click", () => {
+    if (!graphInstance) return;
+    graphPaused = !graphPaused;
+    if (graphPaused) graphInstance.pauseAnimation(); else graphInstance.resumeAnimation();
+    updatePauseBtn();
+  });
+
+  const helpBtn = $("graph-btn-help");
+  if (helpBtn) helpBtn.addEventListener("click", () => {
+    const overlay = $("graph-help-overlay");
+    if (overlay) overlay.style.display = overlay.style.display === "none" ? "flex" : "none";
+  });
+
+  // Help overlay dismiss on click
+  const helpOverlay = $("graph-help-overlay");
+  if (helpOverlay) helpOverlay.addEventListener("click", (e) => {
+    if (e.target === helpOverlay) helpOverlay.style.display = "none";
+  });
+
+  // ── Keyboard shortcuts ──
+  document.addEventListener("keydown", (e) => {
+    // Only handle if graph tab is active
+    const graphTab = $("tab-graph");
+    if (!graphTab || graphTab.style.display === "none") return;
+    // Skip if typing in input
+    if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.tagName === "SELECT") {
+      if (e.key === "Escape") { e.target.blur(); e.target.value = ""; if (graphInstance) graphInstance.nodeColor(graphInstance.nodeColor()); }
+      return;
+    }
+
+    switch (e.key) {
+      case " ":
+        e.preventDefault();
+        if (!graphInstance) return;
+        graphPaused = !graphPaused;
+        if (graphPaused) graphInstance.pauseAnimation(); else graphInstance.resumeAnimation();
+        updatePauseBtn();
+        break;
+      case "0":
+        if (graphInstance) graphInstance.zoomToFit(400, 40);
+        break;
+      case "+": case "=":
+        if (graphInstance) graphInstance.zoom(graphInstance.zoom() * 1.5, 300);
+        break;
+      case "-": case "_":
+        if (graphInstance) graphInstance.zoom(graphInstance.zoom() / 1.5, 300);
+        break;
+      case "v": case "V":
+        cycleSelect("graph-view-mode");
+        break;
+      case "t": case "T":
+        cycleSelect("graph-tier-filter");
+        break;
+      case "c": case "C":
+        cycleSelect("graph-color-by");
+        break;
+      case "s": case "S":
+        cycleSelect("graph-size-by");
+        break;
+      case "f": case "F":
+        e.preventDefault();
+        const si = $("graph-search");
+        if (si) si.focus();
+        break;
+      case "l": case "L":
+        graphShowLabels = !graphShowLabels;
+        if (graphInstance) graphInstance.nodeCanvasObject(graphInstance.nodeCanvasObject());
+        break;
+      case "e": case "E":
+        graphShowEdges = !graphShowEdges;
+        if (graphInstance) {
+          graphInstance.linkColor(graphInstance.linkColor());
+          graphInstance.linkWidth(graphInstance.linkWidth());
+        }
+        break;
+      case "?":
+        const ov = $("graph-help-overlay");
+        if (ov) ov.style.display = ov.style.display === "none" ? "flex" : "none";
+        break;
+      case "Escape":
+        const ovl = $("graph-help-overlay");
+        if (ovl) ovl.style.display = "none";
+        graphHighlightNode = null;
+        graphNeighborSet = new Set();
+        break;
+    }
+  });
 }
 
 // ── Utility Functions ──

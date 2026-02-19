@@ -113,6 +113,13 @@
     .stat-value { font-size: 22px; font-weight: 700; color: var(--accent); }
     .stat-label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
 
+    /* Skeleton loading */
+    @keyframes skel-shimmer { 0%{background-position:-200px 0} 100%{background-position:200px 0} }
+    .skel-line { background: linear-gradient(90deg, var(--surface2) 25%, var(--surface) 50%, var(--surface2) 75%); background-size:400px 100%; animation: skel-shimmer 1.2s ease-in-out infinite; border-radius:4px; }
+    .skel-big { height:24px; width:60px; margin:0 auto 6px; }
+    .skel-sm { height:10px; width:80px; margin:0 auto; }
+    .skeleton-card { min-height:58px; display:flex; flex-direction:column; justify-content:center; }
+
     /* Chart container */
     .chart-container { position: relative; width: 100%; height: 220px; }
     .chart-container canvas { width: 100% !important; height: 100% !important; }
@@ -930,19 +937,50 @@
     }
 
     /* Graph */
-    .graph-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; justify-content: space-between; }
-    .graph-filters { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
-    .graph-filters select {
-      background: var(--surface2); color: var(--text); border: 1px solid var(--border);
-      border-radius: 4px; padding: 4px 8px; font-size: 12px;
+    .graph-toolbar { display:flex; flex-wrap:wrap; gap:6px; align-items:center; justify-content:space-between; margin-bottom:6px; }
+    .graph-toolbar-left, .graph-toolbar-right { display:flex; flex-wrap:wrap; gap:5px; align-items:center; }
+    .graph-select {
+      background:var(--surface2); color:var(--text); border:1px solid var(--border);
+      border-radius:5px; padding:5px 8px; font-size:11px; cursor:pointer; outline:none;
+      transition: border-color 0.15s;
     }
-    .graph-legend { display: flex; gap: 10px; font-size: 11px; color: var(--text-dim); }
-    .graph-legend-item { display: flex; align-items: center; gap: 4px; }
-    .graph-legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+    .graph-select:focus { border-color:var(--accent); }
+    .graph-btn {
+      background:var(--surface2); color:var(--text-dim); border:1px solid var(--border);
+      border-radius:5px; padding:4px 10px; font-size:11px; cursor:pointer;
+      transition: all 0.15s;
+    }
+    .graph-btn:hover { background:var(--surface); color:var(--text); border-color:var(--accent); }
+    .graph-btn.active { background:var(--accent); color:#000; border-color:var(--accent); }
+    .graph-legend { display:flex; gap:8px; font-size:10px; color:var(--text-dim); }
+    .graph-legend-item { display:flex; align-items:center; gap:3px; }
+    .graph-legend-dot { width:8px; height:8px; border-radius:50%; }
     .graph-tooltip {
-      position: absolute; background: var(--surface); border: 1px solid var(--border);
-      border-radius: 6px; padding: 10px; font-size: 12px; pointer-events: none; z-index: 10;
-      max-width: 250px; box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+      position:absolute; display:none; background:rgba(20,20,30,0.95); border:1px solid var(--border);
+      border-radius:8px; padding:12px 14px; font-size:12px; pointer-events:none; z-index:20;
+      max-width:280px; box-shadow:0 8px 32px rgba(0,0,0,0.6); backdrop-filter:blur(8px);
+      line-height:1.5;
+    }
+    .graph-tooltip .tt-name { font-weight:700; font-size:13px; margin-bottom:4px; }
+    .graph-tooltip .tt-tier { font-size:10px; padding:1px 6px; border-radius:3px; margin-left:4px; }
+    .graph-tooltip .tt-stats { color:var(--text-dim); font-size:11px; }
+    .graph-tooltip .tt-tags { color:var(--accent); font-size:10px; margin-top:4px; }
+    .graph-tooltip .tt-groups { color:var(--text-dim); font-size:10px; }
+    .graph-status {
+      font-size:10px; color:var(--text-dim); padding:4px 0; text-align:center; opacity:0.6;
+    }
+    .graph-help-overlay {
+      position:absolute; inset:0; background:rgba(0,0,0,0.7); z-index:30;
+      display:flex; align-items:center; justify-content:center; backdrop-filter:blur(4px);
+    }
+    .graph-help-card {
+      background:var(--surface); border:1px solid var(--border); border-radius:10px;
+      padding:20px 28px; max-width:360px; color:var(--text);
+    }
+    .graph-help-grid { display:grid; grid-template-columns:auto 1fr; gap:6px 14px; font-size:12px; }
+    .graph-help-grid kbd {
+      background:var(--surface2); border:1px solid var(--border); border-radius:3px;
+      padding:1px 6px; font-family:monospace; font-size:11px; text-align:center; min-width:36px;
     }
 
     /* Group Modal */
@@ -1742,31 +1780,74 @@
 
     <!-- ==================== Graph Tab ==================== -->
     <div id="tab-graph" class="tab-content">
-      <div class="graph-controls">
-        <div class="graph-filters">
-          <label style="font-size:11px;color:var(--text-dim);">Tier:</label>
-          <select id="graph-tier-filter">
+      <div class="graph-toolbar">
+        <div class="graph-toolbar-left">
+          <select id="graph-view-mode" class="graph-select" title="View mode (V)">
+            <option value="force">Force</option>
+            <option value="radial-out">Radial Out</option>
+            <option value="radial-in">Radial In</option>
+            <option value="td">Top → Down</option>
+            <option value="bu">Bottom → Up</option>
+            <option value="lr">Left → Right</option>
+            <option value="rl">Right → Left</option>
+          </select>
+          <select id="graph-tier-filter" class="graph-select" title="Filter by tier (T)">
             <option value="all">All Tiers</option>
           </select>
-          <label style="font-size:11px;color:var(--text-dim);margin-left:8px;">Layout:</label>
-          <select id="graph-layout">
-            <option value="force">Force-directed</option>
-            <option value="concentric">Concentric (by Tier)</option>
+          <select id="graph-color-by" class="graph-select" title="Color by (C)">
+            <option value="tier">Color: Tier</option>
+            <option value="activity">Color: Activity</option>
+            <option value="recency">Color: Recency</option>
           </select>
-          <label style="font-size:11px;color:var(--text-dim);margin-left:8px;">Show:</label>
-          <select id="graph-min-messages">
-            <option value="50">Active (50+ msgs)</option>
-            <option value="10">10+ messages</option>
-            <option value="1">All with messages</option>
+          <select id="graph-size-by" class="graph-select" title="Size by (S)">
+            <option value="messages">Size: Messages</option>
+            <option value="quality">Size: Quality</option>
+            <option value="recent">Size: Recent Activity</option>
+            <option value="equal">Size: Equal</option>
           </select>
-          <input type="text" id="graph-search" placeholder="Search graph..." style="margin-left:8px;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 8px;font-size:12px;width:150px;">
+          <select id="graph-min-messages" class="graph-select" title="Min messages">
+            <option value="50">50+ msgs</option>
+            <option value="20">20+ msgs</option>
+            <option value="10">10+ msgs</option>
+            <option value="1">All</option>
+          </select>
+          <div class="graph-search-wrap">
+            <input type="text" id="graph-search" class="graph-select" placeholder="Search... (F)" style="width:140px;">
+          </div>
         </div>
-        <div class="graph-legend" id="graph-legend"></div>
+        <div class="graph-toolbar-right">
+          <div class="graph-legend" id="graph-legend"></div>
+          <button class="graph-btn" id="graph-btn-fit" title="Fit to screen (0)">Fit</button>
+          <button class="graph-btn" id="graph-btn-pause" title="Pause/resume simulation (Space)">Pause</button>
+          <button class="graph-btn" id="graph-btn-help" title="Keyboard shortcuts (?)">?</button>
+        </div>
       </div>
-      <div id="graph-container" style="width:100%;height:calc(100vh - 180px);background:var(--bg);border-radius:8px;border:1px solid var(--border);position:relative;">
-        <div id="graph-loading" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--text-dim);">Click to load graph...</div>
-        <div id="graph-tooltip" class="graph-tooltip" style="display:none;"></div>
+      <div id="graph-container" style="width:100%;height:calc(100vh - 160px);background:#0a0a0f;border-radius:8px;border:1px solid var(--border);position:relative;overflow:hidden;">
+        <div id="graph-loading" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--text-dim);z-index:5;">Loading graph...</div>
+        <div id="graph-tooltip" class="graph-tooltip"></div>
+        <div id="graph-help-overlay" class="graph-help-overlay" style="display:none;">
+          <div class="graph-help-card">
+            <h3 style="margin:0 0 12px 0;font-size:14px;">Keyboard Shortcuts</h3>
+            <div class="graph-help-grid">
+              <kbd>Space</kbd><span>Pause / Resume</span>
+              <kbd>0</kbd><span>Fit to screen</span>
+              <kbd>+</kbd><span>Zoom in</span>
+              <kbd>-</kbd><span>Zoom out</span>
+              <kbd>V</kbd><span>Cycle view mode</span>
+              <kbd>T</kbd><span>Cycle tier filter</span>
+              <kbd>C</kbd><span>Cycle color mode</span>
+              <kbd>S</kbd><span>Cycle size mode</span>
+              <kbd>F</kbd><span>Focus search</span>
+              <kbd>Esc</kbd><span>Clear search / close</span>
+              <kbd>L</kbd><span>Toggle labels</span>
+              <kbd>E</kbd><span>Toggle edges</span>
+              <kbd>?</kbd><span>Toggle this help</span>
+            </div>
+            <p style="margin:10px 0 0;font-size:11px;color:var(--text-dim);">Click node to open contact. Hover for details. Drag to rearrange.</p>
+          </div>
+        </div>
       </div>
+      <div class="graph-status" id="graph-status"></div>
     </div>
 
     <!-- ==================== Messaging Tab ==================== -->
@@ -1915,9 +1996,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/graphology@0.25.4/dist/graphology.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/graphology-layout-forceatlas2@0.10.1/dist/graphology-layout-forceatlas2.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/sigma@2.4.0/build/sigma.min.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/force-graph"></script>
   <script src="shared.js"></script>
   <script src="friends.js"></script>
 </body>

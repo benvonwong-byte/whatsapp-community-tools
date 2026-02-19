@@ -549,8 +549,8 @@ export function createFriendsRouter(
       quality: c.quality_score
     }));
 
-    // Edges based on shared groups
-    const edges: Array<{ source: string; target: string; weight: number }> = [];
+    // Edges based on shared groups (with group names)
+    const edges: Array<{ source: string; target: string; weight: number; groups: string[] }> = [];
     const groupMembers: Record<string, string[]> = {};
     for (const c of allContacts) {
       if (c.group_names) {
@@ -560,19 +560,21 @@ export function createFriendsRouter(
         }
       }
     }
-    const edgeMap = new Map<string, number>();
-    for (const members of Object.values(groupMembers)) {
+    const edgeMap = new Map<string, { weight: number; groups: string[] }>();
+    for (const [groupName, members] of Object.entries(groupMembers)) {
       if (members.length > 50) continue;
       for (let i = 0; i < members.length; i++) {
         for (let j = i + 1; j < members.length; j++) {
           const key = members[i] < members[j] ? members[i] + "|" + members[j] : members[j] + "|" + members[i];
-          edgeMap.set(key, (edgeMap.get(key) || 0) + 1);
+          const existing = edgeMap.get(key);
+          if (existing) { existing.weight++; existing.groups.push(groupName); }
+          else edgeMap.set(key, { weight: 1, groups: [groupName] });
         }
       }
     }
-    for (const [key, weight] of edgeMap) {
+    for (const [key, val] of edgeMap) {
       const [source, target] = key.split("|");
-      edges.push({ source, target, weight });
+      edges.push({ source, target, weight: val.weight, groups: val.groups });
     }
 
     res.json({ nodes, edges });
