@@ -576,10 +576,20 @@ export function createFriendsRouter(
     }
   });
 
-  // ── Graph data ──
+  // ── Graph data (with server-side cache) ──
+
+  let _graphCache: { data: any; time: number; minMessages: number } | null = null;
+  const GRAPH_CACHE_TTL = 60000; // 60 seconds
 
   router.get("/graph", (_req: Request, res: Response) => {
     const minMessages = parseInt(_req.query.minMessages as string) || 10;
+
+    // Return cached response if fresh
+    if (_graphCache && _graphCache.minMessages === minMessages && (Date.now() - _graphCache.time) < GRAPH_CACHE_TTL) {
+      res.json(_graphCache.data);
+      return;
+    }
+
     const allContacts = store.getContactsWithStats().filter(c => c.total_messages >= minMessages);
     const now = Math.floor(Date.now() / 1000);
 
@@ -664,7 +674,9 @@ export function createFriendsRouter(
       }
     }
 
-    res.json({ nodes, edges, tagEdges, tiers });
+    const responseData = { nodes, edges, tagEdges, tiers };
+    _graphCache = { data: responseData, time: Date.now(), minMessages };
+    res.json(responseData);
   });
 
   // ── Data Management ──

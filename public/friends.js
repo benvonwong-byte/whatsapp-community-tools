@@ -107,7 +107,9 @@ document.addEventListener("DOMContentLoaded", () => {
     cachedFetch("/api/friends/tiers");
     cachedFetch("/api/friends/groups");
     cachedFetch("/api/friends/tags");
-  }, 500);
+    // Prefetch graph data so it's instant when user clicks the tab
+    _prefetchGraphData();
+  }, 300);
 });
 
 // ── Scan & Backfill Buttons ──
@@ -3359,24 +3361,56 @@ const GX = {
   tiers: []
 };
 
+// Prefetch graph data in background so tab switch is instant
+let _graphPrefetchPromise = null;
+function _prefetchGraphData() {
+  if (!_graphPrefetchPromise) {
+    _graphPrefetchPromise = cachedFetch("/api/friends/graph?minMessages=" + GX.minMessages)
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (data) _applyGraphData(data);
+        return data;
+      })
+      .catch(() => null);
+  }
+  return _graphPrefetchPromise;
+}
+
+function _applyGraphData(data) {
+  for (const n of data.nodes) {
+    n.lastContactDate = n.lastSeen ? new Date(n.lastSeen * 1000) : new Date(0);
+    n.firstSeenDate = n.firstSeen ? new Date(n.firstSeen * 1000) : new Date(0);
+  }
+  GX.data = data;
+  GX.tiers = data.tiers || [];
+}
+
 async function loadGraph() {
   const loading = $("gx-loading");
-  if (loading) loading.style.display = "flex";
-  try {
-    const res = await cachedFetch("/api/friends/graph?minMessages=" + GX.minMessages);
-    if (!res.ok) throw new Error("Failed");
-    const data = await res.json();
-    // Add computed date fields for time axes
-    for (const n of data.nodes) {
-      n.lastContactDate = n.lastSeen ? new Date(n.lastSeen * 1000) : new Date(0);
-      n.firstSeenDate = n.firstSeen ? new Date(n.firstSeen * 1000) : new Date(0);
-    }
-    GX.data = data;
-    GX.tiers = data.tiers || [];
+
+  // If data already loaded (from prefetch), render immediately
+  if (GX.data) {
     if (loading) loading.style.display = "none";
     gxBuildToolbar();
     gxBuildFilters();
-    gxRender();
+    gxRender(true); // fast = true: skip transitions on first paint
+    return;
+  }
+
+  // If prefetch in flight, wait for it
+  if (loading) loading.style.display = "flex";
+  try {
+    const data = await _prefetchGraphData();
+    if (!data) {
+      // Prefetch failed; try direct fetch
+      const res = await adminFetch("/api/friends/graph?minMessages=" + GX.minMessages);
+      if (!res.ok) throw new Error("Failed");
+      _applyGraphData(await res.json());
+    }
+    if (loading) loading.style.display = "none";
+    gxBuildToolbar();
+    gxBuildFilters();
+    gxRender(true);
   } catch (err) {
     console.error("Graph load error:", err);
     if (loading) loading.textContent = "Failed to load: " + err.message;
@@ -3578,7 +3612,7 @@ function gxDeoverlapLabels(nodes, xs, ys, xv, yv) {
   return result;
 }
 
-function gxRender() {
+function gxRender(fast) {
   const wrap = $("gx-canvas-wrap");
   if (!wrap || !GX.data) return;
 
@@ -3638,7 +3672,8 @@ function gxRender() {
     });
   }
 
-  const t = d3.transition().duration(500).ease(d3.easeCubicOut);
+  const dur = fast ? 0 : 500;
+  const t = d3.transition().duration(dur).ease(d3.easeCubicOut);
   let xs = GX.xScale; // X stays fixed to time window
   let ys = GX.yScale;
 
@@ -3733,14 +3768,33 @@ function gxRender() {
     const lblMerge = lblSel.merge(lblEnter);
     lblMerge.text(d => d.name.length > 16 ? d.name.substring(0, 14) + ".." : d.name);
 
-    // Compute de-overlapped label positions
-    const labelPositions = gxDeoverlapLabels(nodes, xs, ys, xv, yv);
-    lblMerge.transition(t)
-      .attr("x", d => labelPositions[d.id]?.x ?? xs(xv(d)))
-      .attr("y", d => labelPositions[d.id]?.y ?? ys(yv(d)))
-      .attr("dy", 0) // offset already baked into y
-      .attr("text-anchor", d => labelPositions[d.id]?.anchor ?? "middle")
-      .attr("opacity", d => (GX.searchQ && !d.name.toLowerCase().includes(GX.searchQ)) ? 0.05 : 0.6);
+    if (fast) {
+      // Fast mode: place labels naively first, de-overlap in background
+      lblMerge
+        .attr("x", d => xs(xv(d)))
+        .attr("y", d => ys(yv(d)) + gxGetRadius(d) + 12)
+        .attr("text-anchor", "middle")
+        .attr("opacity", d => (GX.searchQ && !d.name.toLowerCase().includes(GX.searchQ)) ? 0.05 : 0.6);
+      // Defer de-overlap to idle time
+      const _xs = xs, _ys = ys, _xv = xv, _yv = yv;
+      (window.requestIdleCallback || requestAnimationFrame)(() => {
+        const labelPositions = gxDeoverlapLabels(nodes, _xs, _ys, _xv, _yv);
+        lblMerge.transition().duration(300).ease(d3.easeCubicOut)
+          .attr("x", d => labelPositions[d.id]?.x ?? _xs(_xv(d)))
+          .attr("y", d => labelPositions[d.id]?.y ?? _ys(_yv(d)))
+          .attr("dy", 0)
+          .attr("text-anchor", d => labelPositions[d.id]?.anchor ?? "middle");
+      });
+    } else {
+      // Normal mode: compute de-overlap synchronously
+      const labelPositions = gxDeoverlapLabels(nodes, xs, ys, xv, yv);
+      lblMerge.transition(t)
+        .attr("x", d => labelPositions[d.id]?.x ?? xs(xv(d)))
+        .attr("y", d => labelPositions[d.id]?.y ?? ys(yv(d)))
+        .attr("dy", 0)
+        .attr("text-anchor", d => labelPositions[d.id]?.anchor ?? "middle")
+        .attr("opacity", d => (GX.searchQ && !d.name.toLowerCase().includes(GX.searchQ)) ? 0.05 : 0.6);
+    }
   } else {
     GX.g.select(".gx-labels-layer").selectAll("text.gx-label").transition(t).attr("opacity", 0).remove();
   }
