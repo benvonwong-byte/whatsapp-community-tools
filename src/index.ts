@@ -19,7 +19,7 @@ import { createMetacrisisRouter } from "./apps/metacrisis/routes";
 import { FriendsStore } from "./apps/friends/store";
 import { createFriendsHandler } from "./apps/friends/handler";
 import { createFriendsRouter, SendProgress } from "./apps/friends/routes";
-import { runTagExtraction, runDirectTagExtraction } from "./apps/friends/tagger";
+import { runTagExtraction, runDirectTagExtraction, runTagConsolidation } from "./apps/friends/tagger";
 import { createRecordingRouter } from "./apps/recording/routes";
 
 // ── Event link enrichment ──
@@ -636,6 +636,8 @@ async function main() {
     return count;
   };
 
+  const friendsTagConsolidate = () => runTagConsolidation(friendsStore);
+
   // Auto-run tag extraction every 30 minutes
   setInterval(async () => {
     try {
@@ -690,7 +692,7 @@ async function main() {
 
   appRouters.push({
     path: "/api/friends",
-    router: createFriendsRouter(friendsStore, friendsScan, friendsBackfill, friendsSendMessage, friendsSendProgress, friendsTagExtract, friendsFetchHistory),
+    router: createFriendsRouter(friendsStore, friendsScan, friendsBackfill, friendsSendMessage, friendsSendProgress, friendsTagExtract, friendsFetchHistory, friendsTagConsolidate),
   });
 
   startServer({

@@ -21,7 +21,8 @@ export function createFriendsRouter(
   ) => Promise<void>,
   sendProgress: SendProgress,
   tagExtractTrigger?: () => Promise<number>,
-  fetchHistoryTrigger?: (contactId: string) => Promise<number>
+  fetchHistoryTrigger?: (contactId: string) => Promise<number>,
+  tagConsolidateTrigger?: () => Promise<{ merged: number; deleted: number; remaining: number }>
 ): Router {
   const router = Router();
 
@@ -456,6 +457,65 @@ export function createFriendsRouter(
       res.json({ ok: true, contactsProcessed: count });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || "Tag extraction failed" });
+    }
+  });
+
+  // Merge tags: merge source tag IDs into a canonical tag ID
+  router.post("/tags/merge", (req: Request, res: Response) => {
+    const { merges } = req.body;
+    if (!Array.isArray(merges)) {
+      res.status(400).json({ error: "Expected { merges: [{ sourceIds: number[], canonicalId: number }] }" });
+      return;
+    }
+    let totalReassigned = 0;
+    for (const m of merges) {
+      if (!Array.isArray(m.sourceIds) || typeof m.canonicalId !== "number") continue;
+      totalReassigned += store.mergeTags(m.sourceIds, m.canonicalId);
+    }
+    const remaining = store.getAllTags();
+    res.json({ ok: true, reassigned: totalReassigned, remainingTags: remaining.length });
+  });
+
+  // Rename a tag
+  router.put("/tags/:id", (req: Request, res: Response) => {
+    const tagId = parseInt(req.params.id as string);
+    const { name } = req.body;
+    if (isNaN(tagId) || !name) { res.status(400).json({ error: "Tag ID and name required" }); return; }
+    store.renameTag(tagId, name);
+    res.json({ ok: true });
+  });
+
+  // Delete singleton tags (used by 0-1 contacts)
+  router.post("/tags/cleanup", (req: Request, res: Response) => {
+    const maxCount = parseInt(req.body.maxContactCount as string) || 1;
+    const allTags = store.getAllTags();
+    const toDelete = allTags.filter(t => t.contact_count <= maxCount);
+    let deleted = 0;
+    for (const t of toDelete) {
+      store.mergeTags([t.id], t.id); // this will just clean up orphans
+    }
+    // Actually delete contact_tags for low-count tags, then clean tags table
+    const db = (store as any).db;
+    for (const t of toDelete) {
+      db.prepare(`DELETE FROM friends_contact_tags WHERE tag_id = ?`).run(t.id);
+      db.prepare(`DELETE FROM friends_tags WHERE id = ?`).run(t.id);
+      deleted++;
+    }
+    const remaining = store.getAllTags();
+    res.json({ ok: true, deleted, remainingTags: remaining.length });
+  });
+
+  // AI-powered tag consolidation
+  router.post("/tags/consolidate", async (_req: Request, res: Response) => {
+    if (!tagConsolidateTrigger) {
+      res.status(503).json({ error: "Tag consolidation not configured" });
+      return;
+    }
+    try {
+      const result = await tagConsolidateTrigger();
+      res.json({ ok: true, ...result });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || "Consolidation failed" });
     }
   });
 

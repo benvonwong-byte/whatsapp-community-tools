@@ -206,3 +206,124 @@ export async function runDirectTagExtraction(
   console.log(`[direct-tagger] Done! Tagged ${processed} of ${untagged.length} contacts.`);
   return processed;
 }
+
+const CONSOLIDATE_PROMPT = `You are consolidating a tag taxonomy. Given a list of tags with their usage counts, group similar/redundant tags and pick ONE canonical tag name for each group.
+
+Rules:
+- Keep the most popular (highest count) tag name as the canonical form, unless a clearer name exists
+- Merge tags that mean the same thing (e.g., "travel plans" + "travel planning" + "travel logistics" -> "travel")
+- Merge overly specific tags into broader ones (e.g., "photography business" + "photography exhibition" -> "photography")
+- Keep genuinely distinct tags separate (e.g., "photography" and "music" are different)
+- Prefer shorter, cleaner tag names (1-2 words ideal, 3 words max)
+- Preserve the category prefix (loc:, ctx:, tone:, emo:) — only merge within the same category
+- Delete tags that are too vague to be useful (e.g., "general", "stuff", "things")
+
+Return ONLY a JSON array of merge groups:
+[
+  { "canonical": "tag name to keep", "merge": ["tag1 to merge into canonical", "tag2 to merge into canonical", ...] },
+  ...
+]
+
+Only include groups where there are actual merges (2+ tags being combined). Tags not mentioned should be kept as-is.
+
+Tags:
+`;
+
+/**
+ * Use AI to consolidate similar tags into canonical forms.
+ * Processes tags in batches by category to stay within token limits.
+ */
+export async function runTagConsolidation(store: FriendsStore): Promise<{ merged: number; deleted: number; remaining: number }> {
+  if (!config.geminiApiKey) {
+    console.log("[consolidate] No GEMINI_API_KEY, skipping.");
+    return { merged: 0, deleted: 0, remaining: 0 };
+  }
+
+  const allTags = store.getAllTags();
+  console.log(`[consolidate] Starting with ${allTags.length} tags.`);
+
+  const genAI = new GoogleGenerativeAI(config.geminiApiKey);
+  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+
+  // Group tags by category prefix
+  const categories: Record<string, typeof allTags> = { topic: [], loc: [], ctx: [], tone: [], emo: [] };
+  for (const t of allTags) {
+    if (t.name.startsWith("loc:")) categories.loc.push(t);
+    else if (t.name.startsWith("ctx:")) categories.ctx.push(t);
+    else if (t.name.startsWith("tone:")) categories.tone.push(t);
+    else if (t.name.startsWith("emo:")) categories.emo.push(t);
+    else categories.topic.push(t);
+  }
+
+  let totalMerged = 0;
+  let totalDeleted = 0;
+
+  for (const [cat, tags] of Object.entries(categories)) {
+    if (tags.length < 3) continue;
+
+    // Process in chunks of ~200 tags to stay within token limits
+    for (let i = 0; i < tags.length; i += 200) {
+      const chunk = tags.slice(i, i + 200);
+      const tagList = chunk.map(t => `${t.name} (${t.contact_count})`).join("\n");
+
+      try {
+        const result = await model.generateContent(CONSOLIDATE_PROMPT + tagList);
+        const text = result.response.text();
+        const jsonMatch = text.match(/\[[\s\S]*\]/);
+        if (!jsonMatch) continue;
+
+        const mergeGroups: Array<{ canonical: string; merge: string[] }> = JSON.parse(jsonMatch[0]);
+
+        for (const group of mergeGroups) {
+          if (!group.canonical || !Array.isArray(group.merge) || group.merge.length === 0) continue;
+
+          // Find canonical tag ID
+          const canonicalTag = allTags.find(t => t.name === group.canonical);
+          if (!canonicalTag) {
+            // Canonical name might be new — create it
+            const canonicalId = store.getOrCreateTag(group.canonical);
+            const sourceIds = group.merge
+              .map(name => allTags.find(t => t.name === name)?.id)
+              .filter((id): id is number => id !== undefined);
+            if (sourceIds.length > 0) {
+              const reassigned = store.mergeTags(sourceIds, canonicalId);
+              totalMerged += reassigned;
+              console.log(`[consolidate][${cat}] "${group.canonical}" <- merged ${sourceIds.length} tags (${reassigned} reassigned)`);
+            }
+          } else {
+            const sourceIds = group.merge
+              .map(name => allTags.find(t => t.name === name)?.id)
+              .filter((id): id is number => id !== undefined && id !== canonicalTag.id);
+            if (sourceIds.length > 0) {
+              const reassigned = store.mergeTags(sourceIds, canonicalTag.id);
+              totalMerged += reassigned;
+              console.log(`[consolidate][${cat}] "${group.canonical}" <- merged ${sourceIds.length} tags (${reassigned} reassigned)`);
+            }
+          }
+        }
+
+        // Small delay to avoid rate limiting
+        await new Promise(r => setTimeout(r, 2000));
+      } catch (err: any) {
+        console.error(`[consolidate][${cat}] Failed:`, err?.message || err);
+        if (err?.message?.includes("429")) {
+          await new Promise(r => setTimeout(r, 15000));
+        }
+      }
+    }
+  }
+
+  // Clean up singleton tags (used by only 1 contact and low confidence)
+  const afterTags = store.getAllTags();
+  const singletons = afterTags.filter(t => t.contact_count <= 1);
+  const db = (store as any).db;
+  for (const t of singletons) {
+    db.prepare(`DELETE FROM friends_contact_tags WHERE tag_id = ?`).run(t.id);
+    db.prepare(`DELETE FROM friends_tags WHERE id = ?`).run(t.id);
+    totalDeleted++;
+  }
+
+  const remaining = store.getAllTags().length;
+  console.log(`[consolidate] Done! Merged ${totalMerged} tag assignments, deleted ${totalDeleted} singleton tags. ${remaining} tags remaining.`);
+  return { merged: totalMerged, deleted: totalDeleted, remaining };
+}

@@ -1125,6 +1125,51 @@ export class FriendsStore extends SettingsStore {
     return result.changes > 0;
   }
 
+  /** Merge multiple source tags into a single canonical tag. Returns number of reassigned contact-tag rows. */
+  mergeTags(sourceTagIds: number[], canonicalTagId: number): number {
+    if (sourceTagIds.length === 0) return 0;
+    let reassigned = 0;
+    const txn = this.db.transaction(() => {
+      for (const srcId of sourceTagIds) {
+        if (srcId === canonicalTagId) continue;
+        // For contacts that already have the canonical tag, merge mention_count
+        this.db.prepare(`
+          UPDATE friends_contact_tags SET
+            mention_count = mention_count + COALESCE((SELECT mention_count FROM friends_contact_tags WHERE contact_id = friends_contact_tags.contact_id AND tag_id = ?), 0),
+            confidence = MAX(confidence, COALESCE((SELECT confidence FROM friends_contact_tags WHERE contact_id = friends_contact_tags.contact_id AND tag_id = ?), 0))
+          WHERE tag_id = ? AND contact_id IN (SELECT contact_id FROM friends_contact_tags WHERE tag_id = ?)
+        `).run(srcId, srcId, canonicalTagId, srcId);
+        // Delete the source tag rows for contacts that already have canonical
+        this.db.prepare(`
+          DELETE FROM friends_contact_tags WHERE tag_id = ? AND contact_id IN (SELECT contact_id FROM friends_contact_tags WHERE tag_id = ?)
+        `).run(srcId, canonicalTagId);
+        // Reassign remaining source tag rows to canonical
+        const result = this.db.prepare(`UPDATE friends_contact_tags SET tag_id = ? WHERE tag_id = ?`).run(canonicalTagId, srcId);
+        reassigned += result.changes;
+        // Delete orphaned source tag
+        this.db.prepare(`DELETE FROM friends_tags WHERE id = ? AND id NOT IN (SELECT DISTINCT tag_id FROM friends_contact_tags)`).run(srcId);
+      }
+    });
+    txn();
+    // Clean up any now-unused tags
+    this.db.prepare(`DELETE FROM friends_tags WHERE id NOT IN (SELECT DISTINCT tag_id FROM friends_contact_tags)`).run();
+    return reassigned;
+  }
+
+  /** Rename a tag */
+  renameTag(tagId: number, newName: string): boolean {
+    const normalized = newName.toLowerCase().trim();
+    // Check if target name already exists
+    const existing = this.db.prepare(`SELECT id FROM friends_tags WHERE name = ? AND id != ?`).get(normalized, tagId) as { id: number } | undefined;
+    if (existing) {
+      // Merge into existing tag
+      this.mergeTags([tagId], existing.id);
+      return true;
+    }
+    this.db.prepare(`UPDATE friends_tags SET name = ? WHERE id = ?`).run(normalized, tagId);
+    return true;
+  }
+
   // ── Tag buffer methods ──
 
   addToTagBuffer(contactId: string, body: string, timestamp: number) {
