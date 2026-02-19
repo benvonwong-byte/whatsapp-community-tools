@@ -904,7 +904,8 @@ export class FriendsStore extends SettingsStore {
     const init = this.getInitiatorStatsForContact(contactId, startTs, endTs);
     const resp = this.getResponseTimesForContact(contactId, startTs, endTs);
 
-    const msgStats = this.db.prepare(`
+    // All-time message stats (no timestamp filter)
+    const allTimeStats = this.db.prepare(`
       WITH contact_chats AS (
         SELECT DISTINCT m.chat_id FROM friends_messages m
         JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0
@@ -916,16 +917,41 @@ export class FriendsStore extends SettingsStore {
         SUM(CASE WHEN is_from_me = 0 THEN 1 ELSE 0 END) as received
       FROM friends_messages
       WHERE chat_id IN (SELECT chat_id FROM contact_chats)
-        AND timestamp >= ? AND timestamp <= ?
+    `).get(contactId) as any;
+
+    // Also check using chat_id = contactId directly (for iMessage where chat_id IS the contact id)
+    const altStats = this.db.prepare(`
+      SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN is_from_me = 1 THEN 1 ELSE 0 END) as sent,
+        SUM(CASE WHEN is_from_me = 0 THEN 1 ELSE 0 END) as received
+      FROM friends_messages fm
+      JOIN friends_chats ch ON ch.chat_id = fm.chat_id AND ch.is_group = 0
+      WHERE fm.chat_id = ?
+    `).get(contactId) as any;
+
+    // Use whichever found more messages (covers both sender_id and chat_id lookups)
+    const best = (altStats?.total || 0) > (allTimeStats?.total || 0) ? altStats : allTimeStats;
+
+    // Recent stats for the specified time window
+    const recentStats = this.db.prepare(`
+      SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN is_from_me = 1 THEN 1 ELSE 0 END) as sent,
+        SUM(CASE WHEN is_from_me = 0 THEN 1 ELSE 0 END) as received
+      FROM friends_messages fm
+      JOIN friends_chats ch ON ch.chat_id = fm.chat_id AND ch.is_group = 0
+      WHERE fm.chat_id = ? AND fm.timestamp >= ? AND fm.timestamp <= ?
     `).get(contactId, startTs, endTs) as any;
 
     const totalInit = (init.my_initiations + init.their_initiations) || 1;
     const initiationRatio = Math.round((init.my_initiations / totalInit) * 100);
 
     return {
-      total_messages: msgStats?.total || 0,
-      sent_messages: msgStats?.sent || 0,
-      received_messages: msgStats?.received || 0,
+      total_messages: best?.total || 0,
+      sent_messages: best?.sent || 0,
+      received_messages: best?.received || 0,
+      recent_messages: recentStats?.total || 0,
       initiation_ratio: initiationRatio,
       my_avg_response_sec: Math.round(resp.my_avg_response_sec),
       their_avg_response_sec: Math.round(resp.their_avg_response_sec),
