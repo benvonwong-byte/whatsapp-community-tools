@@ -2963,17 +2963,23 @@ const GX = {
   searchQ: "",
   xAxis: "messages", yAxis: "daysSince",
   colorMode: "tier", sizeMode: "messages",
+  zoomMode: "dynamic", // "fixed" (optical) or "dynamic" (semantic re-spacing)
+  currentTransform: d3.zoomIdentity,
+  filtersOpen: false,
+  filters: {}, // { metricKey: { min: number, max: number } }
   axes: [
-    { key: "messages", label: "Messages", short: "Msgs" },
-    { key: "messages30d", label: "Recent (30d)", short: "30d" },
-    { key: "daysSince", label: "Days Since Contact", short: "Days" },
-    { key: "quality", label: "Quality Score", short: "Quality" },
-    { key: "ratio", label: "Sent/Recv Ratio", short: "Ratio" },
-    { key: "groupCount", label: "Groups", short: "Groups" },
-    { key: "tagCount", label: "Tags", short: "Tags" },
-    { key: "daysKnown", label: "Relationship Age", short: "Age" },
-    { key: "sent", label: "Sent", short: "Sent" },
-    { key: "received", label: "Received", short: "Recv" }
+    { key: "messages", label: "Messages", short: "Msgs", type: "num" },
+    { key: "messages30d", label: "Recent (30d)", short: "30d", type: "num" },
+    { key: "daysSince", label: "Days Since Contact", short: "Days", type: "num" },
+    { key: "quality", label: "Quality Score", short: "Quality", type: "num" },
+    { key: "ratio", label: "Sent/Recv Ratio", short: "Ratio", type: "num" },
+    { key: "groupCount", label: "Groups", short: "Groups", type: "num" },
+    { key: "tagCount", label: "Tags", short: "Tags", type: "num" },
+    { key: "daysKnown", label: "Relationship Age", short: "Age", type: "num" },
+    { key: "sent", label: "Sent", short: "Sent", type: "num" },
+    { key: "received", label: "Received", short: "Recv", type: "num" },
+    { key: "lastContactDate", label: "Last Contact Date", short: "LastDate", type: "time" },
+    { key: "firstSeenDate", label: "First Seen Date", short: "1stDate", type: "time" }
   ],
   colors: [
     { key: "tier", label: "Tier" },
@@ -2997,10 +3003,16 @@ async function loadGraph() {
     const res = await cachedFetch("/api/friends/graph?minMessages=" + GX.minMessages);
     if (!res.ok) throw new Error("Failed");
     const data = await res.json();
+    // Add computed date fields for time axes
+    for (const n of data.nodes) {
+      n.lastContactDate = n.lastSeen ? new Date(n.lastSeen * 1000) : new Date(0);
+      n.firstSeenDate = n.firstSeen ? new Date(n.firstSeen * 1000) : new Date(0);
+    }
     GX.data = data;
     GX.tiers = data.tiers || [];
     if (loading) loading.style.display = "none";
     gxBuildToolbar();
+    gxBuildFilters();
     gxRender();
   } catch (err) {
     console.error("Graph load error:", err);
@@ -3066,7 +3078,38 @@ function gxFilteredNodes() {
   if (GX.tierFilter !== "all") {
     nodes = nodes.filter(n => GX.tierFilter === "none" ? !n.tierId : String(n.tierId) === GX.tierFilter);
   }
+  // Apply range filters
+  for (const [key, range] of Object.entries(GX.filters)) {
+    const axisDef = GX.axes.find(a => a.key === key);
+    if (!axisDef) continue;
+    nodes = nodes.filter(n => {
+      let val;
+      if (axisDef.type === "time") {
+        val = n[key] ? n[key].getTime() : 0;
+        if (range.min !== undefined && val < range.min) return false;
+        if (range.max !== undefined && val > range.max) return false;
+      } else {
+        val = n[key] || 0;
+        if (range.min !== undefined && val < range.min) return false;
+        if (range.max !== undefined && val > range.max) return false;
+      }
+      return true;
+    });
+  }
   return nodes;
+}
+
+function gxMakeScale(axisDef, nodes, key, rangeArr) {
+  if (axisDef && axisDef.type === "time") {
+    const ext = d3.extent(nodes, d => d[key] || new Date(0));
+    const pad = ((ext[1] || 0) - (ext[0] || 0)) * 0.05 || 86400000;
+    return d3.scaleTime()
+      .domain([new Date(ext[0].getTime() - pad), new Date(ext[1].getTime() + pad)])
+      .range(rangeArr);
+  }
+  const ext = d3.extent(nodes, d => d[key] || 0);
+  const pad = (ext[1] - ext[0]) * 0.05 || 1;
+  return d3.scaleLinear().domain([ext[0] - pad, ext[1] + pad]).range(rangeArr);
 }
 
 function gxRender() {
@@ -3081,17 +3124,15 @@ function gxRender() {
 
   const W = wrap.clientWidth;
   const H = wrap.clientHeight;
-  const margin = { top: 20, right: 20, bottom: 36, left: 50 };
+  const margin = { top: 20, right: 20, bottom: 36, left: 60 };
 
   const xKey = GX.xAxis;
   const yKey = GX.yAxis;
-  const xExt = d3.extent(nodes, d => d[xKey] || 0);
-  const yExt = d3.extent(nodes, d => d[yKey] || 0);
-  const xPad = (xExt[1] - xExt[0]) * 0.05 || 1;
-  const yPad = (yExt[1] - yExt[0]) * 0.05 || 1;
+  const xDef = GX.axes.find(a => a.key === xKey);
+  const yDef = GX.axes.find(a => a.key === yKey);
 
-  GX.xScale = d3.scaleLinear().domain([xExt[0] - xPad, xExt[1] + xPad]).range([margin.left, W - margin.right]);
-  GX.yScale = d3.scaleLinear().domain([yExt[0] - yPad, yExt[1] + yPad]).range([H - margin.bottom, margin.top]);
+  GX.xScale = gxMakeScale(xDef, nodes, xKey, [margin.left, W - margin.right]);
+  GX.yScale = gxMakeScale(yDef, nodes, yKey, [H - margin.bottom, margin.top]);
 
   const svg = d3.select("#gx-svg");
   svg.attr("width", W).attr("height", H);
@@ -3110,7 +3151,18 @@ function gxRender() {
     svg.append("text").attr("class", "gx-axis-label gx-x-label").attr("x", W / 2).attr("y", H - 4);
     svg.append("text").attr("class", "gx-axis-label gx-y-label")
       .attr("transform", "rotate(-90)").attr("x", -H / 2).attr("y", 12);
-    GX.zoom = d3.zoom().scaleExtent([0.3, 20]).on("zoom", (e) => { GX.g.attr("transform", e.transform); });
+
+    GX.zoom = d3.zoom().scaleExtent([0.3, 20]).on("zoom", (e) => {
+      GX.currentTransform = e.transform;
+      if (GX.zoomMode === "fixed") {
+        // Optical zoom: just transform the group
+        GX.g.attr("transform", e.transform);
+      } else {
+        // Dynamic zoom: rescale axes so data spreads out
+        GX.g.attr("transform", d3.zoomIdentity); // keep group at identity
+        gxDynamicRescale(e.transform);
+      }
+    });
     svg.call(GX.zoom);
     svg.on("click", (e) => {
       if (e.target.classList.contains("gx-bg") || e.target.tagName === "svg") gxSelect(null);
@@ -3118,17 +3170,44 @@ function gxRender() {
   }
 
   const t = d3.transition().duration(500).ease(d3.easeCubicOut);
-  const xs = GX.xScale;
-  const ys = GX.yScale;
+  let xs = GX.xScale;
+  let ys = GX.yScale;
 
-  svg.select(".gx-x-axis").transition(t).call(d3.axisBottom(xs).ticks(8).tickSize(-H + margin.top + margin.bottom));
-  svg.select(".gx-y-axis").transition(t).call(d3.axisLeft(ys).ticks(6).tickSize(-W + margin.left + margin.right));
+  // In dynamic zoom mode, apply current transform to scale domains
+  if (GX.zoomMode === "dynamic" && GX.currentTransform.k !== 1) {
+    xs = GX.currentTransform.rescaleX(xs);
+    ys = GX.currentTransform.rescaleY(ys);
+    GX.g.attr("transform", d3.zoomIdentity);
+  }
+  // Store the working scales for navigation etc
+  GX._xs = xs;
+  GX._ys = ys;
+
+  const xAxisGen = xDef && xDef.type === "time"
+    ? d3.axisBottom(xs).ticks(6).tickFormat(d3.timeFormat("%b %Y"))
+    : d3.axisBottom(xs).ticks(8);
+  const yAxisGen = yDef && yDef.type === "time"
+    ? d3.axisLeft(ys).ticks(6).tickFormat(d3.timeFormat("%b %Y"))
+    : d3.axisLeft(ys).ticks(6);
+
+  svg.select(".gx-x-axis").transition(t).call(xAxisGen.tickSize(-H + margin.top + margin.bottom));
+  svg.select(".gx-y-axis").transition(t).call(yAxisGen.tickSize(-W + margin.left + margin.right));
   svg.selectAll(".gx-axis line").attr("stroke", "rgba(255,255,255,0.04)");
   svg.selectAll(".gx-axis path").attr("stroke", "rgba(255,255,255,0.08)");
-  const xLabel = GX.axes.find(a => a.key === xKey)?.label || xKey;
-  const yLabel = GX.axes.find(a => a.key === yKey)?.label || yKey;
+  const xLabel = xDef?.label || xKey;
+  const yLabel = yDef?.label || yKey;
   svg.select(".gx-x-label").text(xLabel);
   svg.select(".gx-y-label").text(yLabel);
+
+  // Helper to get value for scale
+  const xv = d => {
+    const v = d[xKey];
+    return v instanceof Date ? v : (v || 0);
+  };
+  const yv = d => {
+    const v = d[yKey];
+    return v instanceof Date ? v : (v || 0);
+  };
 
   // Edges (group connections)
   const nodeMap = {};
@@ -3139,8 +3218,8 @@ function gxRender() {
   const edgeEnter = edgeSel.enter().append("line").attr("class", "gx-edge")
     .attr("stroke", "rgba(79,195,247,0.15)").attr("stroke-opacity", 0);
   edgeSel.merge(edgeEnter).transition(t)
-    .attr("x1", d => xs(nodeMap[d.source]?.[xKey] || 0)).attr("y1", d => ys(nodeMap[d.source]?.[yKey] || 0))
-    .attr("x2", d => xs(nodeMap[d.target]?.[xKey] || 0)).attr("y2", d => ys(nodeMap[d.target]?.[yKey] || 0))
+    .attr("x1", d => xs(xv(nodeMap[d.source] || {}))).attr("y1", d => ys(yv(nodeMap[d.source] || {})))
+    .attr("x2", d => xs(xv(nodeMap[d.target] || {}))).attr("y2", d => ys(yv(nodeMap[d.target] || {})))
     .attr("stroke-width", d => Math.min(2, d.weight * 0.6)).attr("stroke-opacity", 0.15);
 
   // Tag edges
@@ -3150,22 +3229,22 @@ function gxRender() {
   const tagEnter = tagSel.enter().append("line").attr("class", "gx-tag-edge")
     .attr("stroke", "rgba(253,203,110,0.15)").attr("stroke-opacity", 0).attr("stroke-dasharray", "3,3");
   tagSel.merge(tagEnter).transition(t)
-    .attr("x1", d => xs(nodeMap[d.source]?.[xKey] || 0)).attr("y1", d => ys(nodeMap[d.source]?.[yKey] || 0))
-    .attr("x2", d => xs(nodeMap[d.target]?.[xKey] || 0)).attr("y2", d => ys(nodeMap[d.target]?.[yKey] || 0))
+    .attr("x1", d => xs(xv(nodeMap[d.source] || {}))).attr("y1", d => ys(yv(nodeMap[d.source] || {})))
+    .attr("x2", d => xs(xv(nodeMap[d.target] || {}))).attr("y2", d => ys(yv(nodeMap[d.target] || {})))
     .attr("stroke-opacity", 0.2);
 
   // Dots
   const dotSel = GX.g.select(".gx-dots-layer").selectAll("circle.gx-dot").data(nodes, d => d.id);
   dotSel.exit().transition(t).attr("r", 0).attr("opacity", 0).remove();
   const dotEnter = dotSel.enter().append("circle").attr("class", "gx-dot")
-    .attr("cx", d => xs(d[xKey] || 0)).attr("cy", d => ys(d[yKey] || 0))
+    .attr("cx", d => xs(xv(d))).attr("cy", d => ys(yv(d)))
     .attr("r", 0).attr("opacity", 0).attr("cursor", "pointer")
     .on("click", (e, d) => { e.stopPropagation(); gxSelect(d); })
     .on("mouseenter", (e, d) => gxShowTooltip(d, e))
     .on("mouseleave", () => gxHideTooltip());
   const dotMerge = dotSel.merge(dotEnter);
   dotMerge.transition(t)
-    .attr("cx", d => xs(d[xKey] || 0)).attr("cy", d => ys(d[yKey] || 0))
+    .attr("cx", d => xs(xv(d))).attr("cy", d => ys(yv(d)))
     .attr("r", d => gxGetRadius(d)).attr("fill", d => gxGetColor(d))
     .attr("opacity", d => (GX.searchQ && !d.name.toLowerCase().includes(GX.searchQ)) ? 0.08 : 0.85);
   dotMerge.classed("selected", d => GX.selected && d.id === GX.selected.id)
@@ -3179,7 +3258,7 @@ function gxRender() {
       .attr("text-anchor", "middle").attr("font-size", "9px").attr("fill", "rgba(220,220,230,0.6)")
       .attr("pointer-events", "none");
     lblSel.merge(lblEnter).transition(t)
-      .attr("x", d => xs(d[xKey] || 0)).attr("y", d => ys(d[yKey] || 0))
+      .attr("x", d => xs(xv(d))).attr("y", d => ys(yv(d)))
       .attr("dy", d => gxGetRadius(d) + 12)
       .attr("opacity", d => (GX.searchQ && !d.name.toLowerCase().includes(GX.searchQ)) ? 0.05 : 0.6)
       .text(d => d.name.length > 16 ? d.name.substring(0, 14) + ".." : d.name);
@@ -3189,10 +3268,15 @@ function gxRender() {
 
   if (GX.selected) dotMerge.filter(d => d.id === GX.selected.id).raise();
 
+  // Active filters count
+  const filterCount = Object.keys(GX.filters).length;
+  const filterLabel = filterCount > 0 ? ` · ${filterCount} filter${filterCount > 1 ? 's' : ''} active` : "";
+
   const status = $("gx-status");
   if (status) {
-    status.textContent = `${nodes.length} contacts · X: ${xLabel} · Y: ${yLabel} · ` +
-      (GX.selected ? `Selected: ${GX.selected.name}` : "Click a contact or use arrow keys") +
+    status.textContent = `${nodes.length} contacts · X: ${xLabel} · Y: ${yLabel}` +
+      ` · Zoom: ${GX.zoomMode === "dynamic" ? "Dynamic" : "Fixed"}` + filterLabel +
+      (GX.selected ? ` · Selected: ${GX.selected.name}` : "") +
       ` · Press ? for shortcuts`;
   }
 }
@@ -3263,16 +3347,121 @@ function gxHideTooltip() {
   if (tip) tip.style.display = "none";
 }
 
+function gxDynamicRescale(transform) {
+  // In dynamic zoom: rescale the axes using D3's rescaleX/Y,
+  // then reposition all elements without the transform on <g>
+  if (!GX.xScale || !GX.yScale || !GX.data) return;
+  const xs = transform.rescaleX(GX.xScale);
+  const ys = transform.rescaleY(GX.yScale);
+  GX._xs = xs;
+  GX._ys = ys;
+
+  const xKey = GX.xAxis, yKey = GX.yAxis;
+  const xDef = GX.axes.find(a => a.key === xKey);
+  const yDef = GX.axes.find(a => a.key === yKey);
+  const xv = d => { const v = d[xKey]; return v instanceof Date ? v : (v || 0); };
+  const yv = d => { const v = d[yKey]; return v instanceof Date ? v : (v || 0); };
+
+  const dur = 80;
+  const t = d3.transition().duration(dur).ease(d3.easeLinear);
+
+  const wrap = $("gx-canvas-wrap");
+  const W = wrap ? wrap.clientWidth : 800;
+  const H = wrap ? wrap.clientHeight : 600;
+  const margin = { top: 20, right: 20, bottom: 36, left: 60 };
+
+  const xAxisGen = xDef && xDef.type === "time"
+    ? d3.axisBottom(xs).ticks(6).tickFormat(d3.timeFormat("%b %Y"))
+    : d3.axisBottom(xs).ticks(8);
+  const yAxisGen = yDef && yDef.type === "time"
+    ? d3.axisLeft(ys).ticks(6).tickFormat(d3.timeFormat("%b %Y"))
+    : d3.axisLeft(ys).ticks(6);
+
+  const svg = d3.select("#gx-svg");
+  svg.select(".gx-x-axis").call(xAxisGen.tickSize(-H + margin.top + margin.bottom));
+  svg.select(".gx-y-axis").call(yAxisGen.tickSize(-W + margin.left + margin.right));
+  svg.selectAll(".gx-axis line").attr("stroke", "rgba(255,255,255,0.04)");
+  svg.selectAll(".gx-axis path").attr("stroke", "rgba(255,255,255,0.08)");
+
+  // Reposition dots
+  GX.g.select(".gx-dots-layer").selectAll("circle.gx-dot")
+    .attr("cx", d => xs(xv(d))).attr("cy", d => ys(yv(d)));
+
+  // Reposition labels
+  GX.g.select(".gx-labels-layer").selectAll("text.gx-label")
+    .attr("x", d => xs(xv(d))).attr("y", d => ys(yv(d)));
+
+  // Reposition edges
+  const nodeMap = {};
+  GX.nodes.forEach(n => { nodeMap[n.id] = n; });
+  GX.g.select(".gx-edges-layer").selectAll("line.gx-edge")
+    .attr("x1", d => xs(xv(nodeMap[d.source] || {}))).attr("y1", d => ys(yv(nodeMap[d.source] || {})))
+    .attr("x2", d => xs(xv(nodeMap[d.target] || {}))).attr("y2", d => ys(yv(nodeMap[d.target] || {})));
+  GX.g.select(".gx-tag-edges-layer").selectAll("line.gx-tag-edge")
+    .attr("x1", d => xs(xv(nodeMap[d.source] || {}))).attr("y1", d => ys(yv(nodeMap[d.source] || {})))
+    .attr("x2", d => xs(xv(nodeMap[d.target] || {}))).attr("y2", d => ys(yv(nodeMap[d.target] || {})));
+}
+
+function gxBuildFilters() {
+  const panel = $("gx-filter-panel");
+  if (!panel || !GX.data) return;
+
+  // Compute min/max for each numeric axis
+  const allNodes = GX.data.nodes;
+  const rows = GX.axes.filter(a => a.type === "num").map(a => {
+    const vals = allNodes.map(n => n[a.key] || 0);
+    const min = Math.min(...vals);
+    const max = Math.max(...vals);
+    return { key: a.key, label: a.label, short: a.short, min, max };
+  });
+  // Time axes
+  const timeRows = GX.axes.filter(a => a.type === "time").map(a => {
+    const vals = allNodes.map(n => n[a.key] ? n[a.key].getTime() : 0).filter(v => v > 0);
+    const min = vals.length ? Math.min(...vals) : 0;
+    const max = vals.length ? Math.max(...vals) : Date.now();
+    return { key: a.key, label: a.label, short: a.short, min, max, isTime: true };
+  });
+
+  let html = "";
+  for (const r of [...rows, ...timeRows]) {
+    const active = GX.filters[r.key];
+    const fmtMin = r.isTime ? new Date(r.min).toISOString().split("T")[0] : Math.floor(r.min);
+    const fmtMax = r.isTime ? new Date(r.max).toISOString().split("T")[0] : Math.ceil(r.max);
+    const curMin = active ? (r.isTime ? new Date(active.min).toISOString().split("T")[0] : active.min) : fmtMin;
+    const curMax = active ? (r.isTime ? new Date(active.max).toISOString().split("T")[0] : active.max) : fmtMax;
+    html += `<div class="gx-filter-row${active ? ' active' : ''}" data-key="${r.key}" data-type="${r.isTime ? 'time' : 'num'}">
+      <div class="gx-filter-label">${r.label}</div>
+      <div class="gx-filter-inputs">
+        ${r.isTime
+          ? `<input type="date" class="gx-filter-input gx-fmin" value="${curMin}" min="${fmtMin}" max="${fmtMax}">
+             <span class="gx-filter-sep">to</span>
+             <input type="date" class="gx-filter-input gx-fmax" value="${curMax}" min="${fmtMin}" max="${fmtMax}">`
+          : `<input type="number" class="gx-filter-input gx-fmin" value="${curMin}" min="${r.min}" max="${r.max}" step="1" placeholder="min">
+             <span class="gx-filter-sep">to</span>
+             <input type="number" class="gx-filter-input gx-fmax" value="${curMax}" min="${r.min}" max="${r.max}" step="1" placeholder="max">`
+        }
+        <button class="gx-filter-apply" title="Apply filter">&#10003;</button>
+        ${active ? `<button class="gx-filter-clear" title="Clear filter">&times;</button>` : ""}
+      </div>
+    </div>`;
+  }
+  panel.innerHTML = html;
+}
+
 function gxNavigate(dir) {
   if (!GX.nodes.length) return;
   if (!GX.selected) { gxSelect(GX.nodes[0]); return; }
-  const xs = GX.xScale, ys = GX.yScale;
-  const cx = xs(GX.selected[GX.xAxis] || 0), cy = ys(GX.selected[GX.yAxis] || 0);
+  const xs = GX._xs || GX.xScale;
+  const ys = GX._ys || GX.yScale;
+  const xKey = GX.xAxis, yKey = GX.yAxis;
+  const xv = d => { const v = d[xKey]; return v instanceof Date ? v : (v || 0); };
+  const yv = d => { const v = d[yKey]; return v instanceof Date ? v : (v || 0); };
+  const cx = xs(xv(GX.selected)), cy = ys(yv(GX.selected));
   let best = null, bestDist = Infinity;
   for (const n of GX.nodes) {
     if (n.id === GX.selected.id) continue;
     if (GX.searchQ && !n.name.toLowerCase().includes(GX.searchQ)) continue;
-    const nx = xs(n[GX.xAxis] || 0), ny = ys(n[GX.yAxis] || 0);
+    const nx = xs(xv(n)), ny = ys(yv(n));
     const dx = nx - cx, dy = ny - cy;
     let ok = false;
     if (dir === "right" && dx > 5) ok = true;
@@ -3300,6 +3489,9 @@ function setupGraphHandlers() {
       else if (axis === "y") GX.yAxis = key;
       else if (mode === "color") GX.colorMode = key;
       else if (mode === "size") GX.sizeMode = key;
+      // Reset zoom when axes change
+      GX.currentTransform = d3.zoomIdentity;
+      if (GX.zoom) d3.select("#gx-svg").call(GX.zoom.transform, d3.zoomIdentity);
       gxBuildToolbar(); gxRender(); return;
     }
     const tierPill = e.target.closest(".gx-tier-pill");
@@ -3307,6 +3499,19 @@ function setupGraphHandlers() {
       GX.tierFilter = tierPill.dataset.tier;
       document.querySelectorAll(".gx-tier-pill").forEach(p => p.classList.toggle("active", p.dataset.tier === GX.tierFilter));
       gxRender(); return;
+    }
+    // Filter apply/clear buttons
+    const applyBtn = e.target.closest(".gx-filter-apply");
+    if (applyBtn) {
+      const row = applyBtn.closest(".gx-filter-row");
+      if (row) gxApplyFilter(row);
+      return;
+    }
+    const clearBtn = e.target.closest(".gx-filter-clear");
+    if (clearBtn) {
+      const row = clearBtn.closest(".gx-filter-row");
+      if (row) { delete GX.filters[row.dataset.key]; gxBuildFilters(); gxRender(); }
+      return;
     }
   });
 
@@ -3323,6 +3528,20 @@ function setupGraphHandlers() {
   const closeBtn = $("gx-detail-close");
   if (closeBtn) closeBtn.addEventListener("click", () => gxSelect(null));
 
+  // Zoom mode toggle
+  const btnZoom = $("gx-btn-zoom");
+  if (btnZoom) btnZoom.addEventListener("click", () => {
+    gxToggleZoomMode();
+  });
+
+  // Filter toggle
+  const btnFilter = $("gx-btn-filter");
+  if (btnFilter) btnFilter.addEventListener("click", () => {
+    GX.filtersOpen = !GX.filtersOpen;
+    $("gx-filter-panel")?.classList.toggle("open", GX.filtersOpen);
+    btnFilter.classList.toggle("active", GX.filtersOpen);
+  });
+
   const searchInput = $("gx-search");
   if (searchInput) searchInput.addEventListener("input", () => { GX.searchQ = searchInput.value.toLowerCase().trim(); gxRender(); });
 
@@ -3335,6 +3554,9 @@ function setupGraphHandlers() {
     if (!graphTab || !graphTab.classList.contains("active")) return;
     if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") {
       if (e.key === "Escape") { e.target.blur(); e.target.value = ""; GX.searchQ = ""; gxRender(); }
+      if (e.key === "Enter" && e.target.closest(".gx-filter-row")) {
+        gxApplyFilter(e.target.closest(".gx-filter-row"));
+      }
       return;
     }
     switch (e.key) {
@@ -3343,18 +3565,38 @@ function setupGraphHandlers() {
       case "ArrowUp": e.preventDefault(); gxNavigate("up"); break;
       case "ArrowDown": e.preventDefault(); gxNavigate("down"); break;
       case "Enter": if (GX.selected) openContactDetail(GX.selected.id); break;
-      case "Escape": gxSelect(null); $("gx-help-overlay")?.classList.remove("open"); break;
-      case "x": case "X": GX.xAxis = gxCyclePill(GX.xAxis, GX.axes); gxBuildToolbar(); gxRender(); break;
-      case "y": case "Y": GX.yAxis = gxCyclePill(GX.yAxis, GX.axes); gxBuildToolbar(); gxRender(); break;
+      case "Escape":
+        gxSelect(null);
+        $("gx-help-overlay")?.classList.remove("open");
+        if (GX.filtersOpen) { GX.filtersOpen = false; $("gx-filter-panel")?.classList.remove("open"); $("gx-btn-filter")?.classList.remove("active"); }
+        break;
+      case "x": case "X":
+        GX.xAxis = gxCyclePill(GX.xAxis, GX.axes);
+        GX.currentTransform = d3.zoomIdentity;
+        if (GX.zoom) d3.select("#gx-svg").call(GX.zoom.transform, d3.zoomIdentity);
+        gxBuildToolbar(); gxRender(); break;
+      case "y": case "Y":
+        GX.yAxis = gxCyclePill(GX.yAxis, GX.axes);
+        GX.currentTransform = d3.zoomIdentity;
+        if (GX.zoom) d3.select("#gx-svg").call(GX.zoom.transform, d3.zoomIdentity);
+        gxBuildToolbar(); gxRender(); break;
       case "c": case "C": GX.colorMode = gxCyclePill(GX.colorMode, GX.colors); gxBuildToolbar(); gxRender(); break;
       case "s": case "S": GX.sizeMode = gxCyclePill(GX.sizeMode, GX.sizes); gxBuildToolbar(); gxRender(); break;
       case "g": GX.showGroupLines = !GX.showGroupLines; $("gx-btn-lines")?.classList.toggle("active"); gxRender(); break;
       case "t": GX.showTagLines = !GX.showTagLines; $("gx-btn-tags")?.classList.toggle("active"); gxRender(); break;
       case "l": case "L": GX.showLabels = !GX.showLabels; $("gx-btn-labels")?.classList.toggle("active"); gxRender(); break;
       case "f": case "F": e.preventDefault(); $("gx-search")?.focus(); break;
+      case "d": case "D": gxToggleZoomMode(); break;
+      case "/": e.preventDefault();
+        GX.filtersOpen = !GX.filtersOpen;
+        $("gx-filter-panel")?.classList.toggle("open", GX.filtersOpen);
+        $("gx-btn-filter")?.classList.toggle("active", GX.filtersOpen);
+        break;
       case "?": $("gx-help-overlay")?.classList.toggle("open"); break;
       case "r": case "R":
+        GX.currentTransform = d3.zoomIdentity;
         if (GX.zoom) d3.select("#gx-svg").transition().duration(500).call(GX.zoom.transform, d3.zoomIdentity);
+        gxRender();
         break;
       case "+": case "=":
         if (GX.zoom) d3.select("#gx-svg").transition().duration(300).call(GX.zoom.scaleBy, 1.5); break;
@@ -3375,6 +3617,45 @@ function setupGraphHandlers() {
       }
     }
   });
+}
+
+function gxToggleZoomMode() {
+  GX.zoomMode = GX.zoomMode === "dynamic" ? "fixed" : "dynamic";
+  const btn = $("gx-btn-zoom");
+  if (btn) {
+    btn.classList.toggle("active", GX.zoomMode === "dynamic");
+    btn.textContent = GX.zoomMode === "dynamic" ? "DZ" : "FZ";
+    btn.title = GX.zoomMode === "dynamic" ? "Dynamic Zoom (D) — data re-spaces" : "Fixed Zoom (D) — optical zoom";
+  }
+  // Reset zoom transform and re-render
+  GX.currentTransform = d3.zoomIdentity;
+  if (GX.zoom) d3.select("#gx-svg").call(GX.zoom.transform, d3.zoomIdentity);
+  GX.g = null; // force rebuild since zoom behavior changes
+  gxRender();
+}
+
+function gxApplyFilter(row) {
+  const key = row.dataset.key;
+  const type = row.dataset.type;
+  const minInput = row.querySelector(".gx-fmin");
+  const maxInput = row.querySelector(".gx-fmax");
+  if (!minInput || !maxInput) return;
+
+  if (type === "time") {
+    const minVal = minInput.value ? new Date(minInput.value).getTime() : undefined;
+    const maxVal = maxInput.value ? new Date(maxInput.value + "T23:59:59").getTime() : undefined;
+    if (minVal !== undefined || maxVal !== undefined) {
+      GX.filters[key] = { min: minVal, max: maxVal };
+    }
+  } else {
+    const minVal = minInput.value !== "" ? parseFloat(minInput.value) : undefined;
+    const maxVal = maxInput.value !== "" ? parseFloat(maxInput.value) : undefined;
+    if (minVal !== undefined || maxVal !== undefined) {
+      GX.filters[key] = { min: minVal, max: maxVal };
+    }
+  }
+  gxBuildFilters();
+  gxRender();
 }
 
 // ── Utility Functions ──
