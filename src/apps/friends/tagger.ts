@@ -2,7 +2,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { FriendsStore } from "./store";
 import { config } from "../../config";
 
-const TAG_PROMPT = `Analyze these WhatsApp messages from a contact and extract rich context tags across multiple categories.
+const TAG_PROMPT = `Analyze these messages from a contact and extract rich context tags across multiple categories.
 
 Return ONLY a JSON object with these category keys, each containing an array of lowercase tag strings:
 
@@ -147,26 +147,33 @@ export async function runDirectTagExtraction(
   try {
     whatsappChats = await getChats();
   } catch (err: any) {
-    console.error("[direct-tagger] Failed to get WhatsApp chats:", err?.message || err);
-    return 0;
+    console.error("[direct-tagger] Failed to get WhatsApp chats, will use DB fallback:", err?.message || err);
+    whatsappChats = [];
   }
 
   let processed = 0;
   for (const contact of untagged) {
     try {
+      let textBodies: string[] = [];
+
       // Find the WhatsApp chat for this contact
       const chat = whatsappChats!.find((c: any) => c.id._serialized === contact.id);
-      if (!chat) {
-        continue; // Can't find chat, skip
+      if (chat) {
+        // Fetch recent messages from WhatsApp
+        const messages = await chat.fetchMessages({ limit: 200 });
+        textBodies = messages
+          .filter((m: any) => !m.fromMe && m.body && m.body.trim().length > 3 && ((m as any).type === "chat" || !(m as any).type))
+          .map((m: any) => m.body);
       }
 
-      // Fetch recent messages from WhatsApp
-      const messages = await chat.fetchMessages({ limit: 200 });
-
-      // Filter to text messages from the contact (not from me)
-      const textBodies = messages
-        .filter((m: any) => !m.fromMe && m.body && m.body.trim().length > 3 && ((m as any).type === "chat" || !(m as any).type))
-        .map((m: any) => m.body);
+      // Fallback: read messages from database (covers iMessage + WhatsApp contacts without live chat)
+      if (textBodies.length < 5) {
+        const dbMessages = store.getContactMessages(contact.id, 200, 0);
+        const dbBodies = dbMessages
+          .filter((m: any) => !m.is_from_me && m.body && m.body.trim().length > 3 && m.message_type === "chat")
+          .map((m: any) => m.body);
+        if (dbBodies.length > textBodies.length) textBodies = dbBodies;
+      }
 
       if (textBodies.length < 5) {
         continue; // Not enough messages for meaningful tags
