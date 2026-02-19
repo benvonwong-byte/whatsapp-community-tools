@@ -314,6 +314,14 @@ export class RelationshipStore extends SettingsStore {
     return { lastMessageTimestamp: lastTs, todayMessageCount: todayCount };
   }
 
+  /** Fetch messages from the last N hours */
+  getRecentMessages(hours: number = 24): RelationshipMessage[] {
+    const sinceTs = Math.floor(Date.now() / 1000) - hours * 3600;
+    return this.db.prepare(
+      `SELECT * FROM relationship_messages WHERE timestamp >= ? ORDER BY timestamp ASC`
+    ).all(sinceTs) as RelationshipMessage[];
+  }
+
   /** Fetch messages between two dates (for AI chat tool use) */
   getMessagesByRange(startDate: string, endDate: string): RelationshipMessage[] {
     return this.db.prepare(

@@ -1,23 +1,100 @@
-import { RelationshipStore, RelationshipAnalysis } from "./store";
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import { config } from "../../config";
+import { RelationshipStore, RelationshipAnalysis, RelationshipMessage } from "./store";
+
+let geminiModel: any = null;
+function getModel() {
+  if (!geminiModel) {
+    const genAI = new GoogleGenerativeAI(config.geminiApiKey);
+    geminiModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+  }
+  return geminiModel;
+}
+
+/** Format messages into a readable conversation string */
+function formatConversation(messages: RelationshipMessage[]): string {
+  return messages.map((m) => {
+    const time = new Date(m.timestamp * 1000).toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+    const speaker = m.speaker === "self" ? "Ben" : "Hope";
+    const sourceTag = m.source === "in-person" ? "[in-person] " : "";
+    const content = m.type === "voice" ? `[voice note] ${m.transcript}` : m.body;
+    return `[${time}] ${sourceTag}${speaker}: ${content}`;
+  }).join("\n");
+}
+
+/** Ask Gemini for fresh recommendations based on last 24h of chat */
+async function generateFreshRecommendations(
+  messages: RelationshipMessage[],
+  latestAnalysis: RelationshipAnalysis | null
+): Promise<{ forHope: string; forBen: string; forBoth: string } | null> {
+  if (messages.length === 0) return null;
+
+  const conversation = formatConversation(messages).slice(0, 8000);
+  const analysisContext = latestAnalysis
+    ? `\nLATEST ANALYSIS (${latestAnalysis.date}): ${latestAnalysis.summary}`
+    : "";
+
+  const prompt = `You are a relationship coach for Ben and Hope (a couple). Based on their last 24 hours of conversation, give 3 brief, specific, actionable recommendations.
+
+LAST 24 HOURS (${messages.length} messages):
+${conversation}
+${analysisContext}
+
+Each recommendation must reference something specific from the conversation above — not generic advice. Keep each to 1-2 sentences max.
+
+Respond with ONLY a JSON object (no markdown code fences):
+{
+  "forHope": "<one specific thing Hope could do based on the last 24h>",
+  "forBen": "<one specific thing Ben could do based on the last 24h>",
+  "forBoth": "<one shared activity or practice to try together>"
+}
+
+JSON:`;
+
+  try {
+    const model = getModel();
+    const result = await model.generateContent(prompt);
+    let text = result.response.text().trim();
+    if (text.startsWith("```")) {
+      text = text.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
+    }
+    const firstBrace = text.indexOf("{");
+    const lastBrace = text.lastIndexOf("}");
+    if (firstBrace !== -1 && lastBrace !== -1) {
+      text = text.slice(firstBrace, lastBrace + 1);
+    }
+    return JSON.parse(text);
+  } catch (err) {
+    console.error("[updater] Failed to generate fresh recommendations:", err);
+    return null;
+  }
+}
 
 /**
  * Format a concise daily check-in message.
- * Structure: 1 thing for Hope, 1 for Ben, 1 for the relationship, brief stats.
+ * Uses fresh AI recommendations based on last 24h of chat.
  */
-function formatDailyUpdate(analysis: RelationshipAnalysis): string {
+function formatDailyUpdate(
+  analysis: RelationshipAnalysis,
+  freshRecs: { forHope: string; forBen: string; forBoth: string } | null,
+  recentMsgCount: number
+): string {
   const m = JSON.parse(analysis.metricsJson);
   const score = m.overallHealthScore ?? 0;
   const scoreEmoji = score >= 70 ? "🟢" : score >= 40 ? "🟡" : "🔴";
 
   const lines: string[] = [];
-  lines.push(`💕 *Daily Check-in* — ${formatDate(analysis.date)}`);
+  lines.push(`💕 *Daily Check-in* — ${formatDateStr(analysis.date)}`);
   lines.push("");
 
-  // One thing for each person + relationship
-  const recs = m.recommendations || {};
-  const hopeRec = (recs.forHope && recs.forHope[0]) || null;
-  const benRec = (recs.forBen && recs.forBen[0]) || null;
-  const togetherRec = (recs.forBoth && recs.forBoth[0]) || null;
+  // Use fresh recommendations from last 24h if available, fall back to stored analysis
+  const recs = freshRecs || m.recommendations || {};
+  const hopeRec = freshRecs ? freshRecs.forHope : (recs.forHope && recs.forHope[0]) || null;
+  const benRec = freshRecs ? freshRecs.forBen : (recs.forBen && recs.forBen[0]) || null;
+  const togetherRec = freshRecs ? freshRecs.forBoth : (recs.forBoth && recs.forBoth[0]) || null;
 
   if (hopeRec) lines.push(`💗 *Hope:* ${hopeRec}`);
   if (benRec) lines.push(`💙 *Ben:* ${benRec}`);
@@ -42,15 +119,24 @@ function formatDailyUpdate(analysis: RelationshipAnalysis): string {
   }
 
   lines.push("");
-  lines.push(`_${analysis.messageCount} msgs analyzed_`);
+  if (freshRecs && recentMsgCount > 0) {
+    lines.push(`_Based on ${recentMsgCount} msgs in last 24h_`);
+  } else {
+    lines.push(`_${analysis.messageCount} msgs analyzed_`);
+  }
 
   return lines.join("\n");
 }
 
 /**
  * Format a weekly summary — same concise structure with trend line.
+ * Uses fresh AI recommendations based on last 24h of chat.
  */
-function formatWeeklyUpdate(analyses: RelationshipAnalysis[]): string {
+function formatWeeklyUpdate(
+  analyses: RelationshipAnalysis[],
+  freshRecs: { forHope: string; forBen: string; forBoth: string } | null,
+  recentMsgCount: number
+): string {
   if (analyses.length === 0) return "";
 
   const scores = analyses.map((a) => {
@@ -63,15 +149,15 @@ function formatWeeklyUpdate(analyses: RelationshipAnalysis[]): string {
   const endDate = analyses[0].date;
 
   const lines: string[] = [];
-  lines.push(`💕 *Weekly Summary* — ${formatDate(startDate)} to ${formatDate(endDate)}`);
+  lines.push(`💕 *Weekly Summary* — ${formatDateStr(startDate)} to ${formatDateStr(endDate)}`);
   lines.push("");
 
-  // One thing for each person + relationship from most recent analysis
+  // Use fresh recommendations from last 24h if available, fall back to stored analysis
   const latestM = JSON.parse(analyses[0].metricsJson);
-  const recs = latestM.recommendations || {};
-  const hopeRec = (recs.forHope && recs.forHope[0]) || null;
-  const benRec = (recs.forBen && recs.forBen[0]) || null;
-  const togetherRec = (recs.forBoth && recs.forBoth[0]) || null;
+  const recs = freshRecs || latestM.recommendations || {};
+  const hopeRec = freshRecs ? freshRecs.forHope : (recs.forHope && recs.forHope[0]) || null;
+  const benRec = freshRecs ? freshRecs.forBen : (recs.forBen && recs.forBen[0]) || null;
+  const togetherRec = freshRecs ? freshRecs.forBoth : (recs.forBoth && recs.forBoth[0]) || null;
 
   if (hopeRec) lines.push(`💗 *Hope:* ${hopeRec}`);
   if (benRec) lines.push(`💙 *Ben:* ${benRec}`);
@@ -96,12 +182,16 @@ function formatWeeklyUpdate(analyses: RelationshipAnalysis[]): string {
   }
 
   lines.push("");
-  lines.push(`_${totalMsgs} msgs across ${analyses.length} days_`);
+  if (freshRecs && recentMsgCount > 0) {
+    lines.push(`_${totalMsgs} msgs across ${analyses.length} days · recs from last 24h (${recentMsgCount} msgs)_`);
+  } else {
+    lines.push(`_${totalMsgs} msgs across ${analyses.length} days_`);
+  }
 
   return lines.join("\n");
 }
 
-function formatDate(dateStr: string): string {
+function formatDateStr(dateStr: string): string {
   return new Date(dateStr + "T00:00:00").toLocaleDateString("en-US", {
     weekday: "short",
     month: "short",
@@ -111,24 +201,33 @@ function formatDate(dateStr: string): string {
 
 /**
  * Build the update message based on frequency setting.
- * Returns the formatted message or null if no data available.
+ * Fetches last 24h of chat history and generates fresh AI recommendations.
+ * Falls back to stored analysis recommendations if Gemini call fails or no recent messages.
  */
-export function buildUpdateMessage(
+export async function buildUpdateMessage(
   store: RelationshipStore,
   frequency: "daily" | "weekly"
-): string | null {
+): Promise<string | null> {
+  // Fetch last 24h of messages for fresh recommendations
+  const recentMessages = store.getRecentMessages(24);
+  const latestAnalysis = store.getAnalyses(1)[0] || null;
+
+  // Generate fresh recommendations from last 24h (falls back gracefully)
+  const freshRecs = recentMessages.length > 0
+    ? await generateFreshRecommendations(recentMessages, latestAnalysis)
+    : null;
+
   if (frequency === "weekly") {
     const endDate = new Date().toISOString().split("T")[0];
     const startDate = new Date(Date.now() - 7 * 86400000).toISOString().split("T")[0];
     const analyses = store.getAnalysesByRange(startDate, endDate);
     if (analyses.length === 0) return null;
-    return formatWeeklyUpdate(analyses);
+    return formatWeeklyUpdate(analyses, freshRecs, recentMessages.length);
   }
 
-  // Daily: get yesterday's analysis (most recent)
-  const analyses = store.getAnalyses(1);
-  if (analyses.length === 0) return null;
-  return formatDailyUpdate(analyses[0]);
+  // Daily: get most recent analysis
+  if (!latestAnalysis) return null;
+  return formatDailyUpdate(latestAnalysis, freshRecs, recentMessages.length);
 }
 
 /**

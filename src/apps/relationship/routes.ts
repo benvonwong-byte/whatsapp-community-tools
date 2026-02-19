@@ -483,7 +483,7 @@ export function createRelationshipRouter(
   // Optional body: { frequency: "daily" | "weekly" } — defaults to current setting
   router.post("/send-update", requireAdminRole, async (req: Request, res: Response) => {
     const freq = req.body.frequency || store.getSetting("update_frequency") || "daily";
-    const message = buildUpdateMessage(store, freq as "daily" | "weekly");
+    const message = await buildUpdateMessage(store, freq as "daily" | "weekly");
     if (!message) {
       res.status(404).json({ error: "No analysis data available to send" });
       return;
@@ -498,9 +498,9 @@ export function createRelationshipRouter(
   });
 
   // GET /api/relationship/preview-update — preview the update message without sending
-  router.get("/preview-update", (req: Request, res: Response) => {
+  router.get("/preview-update", async (req: Request, res: Response) => {
     const freq = (req.query.frequency as string) || store.getSetting("update_frequency") || "daily";
-    const message = buildUpdateMessage(store, freq as "daily" | "weekly");
+    const message = await buildUpdateMessage(store, freq as "daily" | "weekly");
     res.json({ message: message || "No analysis data available." });
   });
 

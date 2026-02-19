@@ -749,7 +749,7 @@ async function main() {
       try {
         if (shouldSendUpdate(relationshipStore)) {
           const freq = (relationshipStore.getSetting("update_frequency") || "daily") as "daily" | "weekly";
-          const message = buildUpdateMessage(relationshipStore, freq);
+          const message = await buildUpdateMessage(relationshipStore, freq);
           if (message) {
             await relationshipSendUpdate(message);
             relationshipStore.setSetting("update_last_sent", new Date().toISOString());
