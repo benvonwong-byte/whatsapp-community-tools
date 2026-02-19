@@ -26,6 +26,20 @@ export function createFriendsRouter(
 ): Router {
   const router = Router();
 
+  /** Parse a range string like "7d", "30d", "90d", "1y", "all" into startTs/endTs */
+  function parseRange(range?: string): { startTs?: number; endTs?: number } {
+    if (!range || range === "all") return {}; // undefined = no filter (all time)
+    const now = Math.floor(Date.now() / 1000);
+    const endTs = now;
+    let startTs = 0;
+    if (range === "7d") startTs = now - 7 * 86400;
+    else if (range === "30d") startTs = now - 30 * 86400;
+    else if (range === "90d") startTs = now - 90 * 86400;
+    else if (range === "1y") startTs = now - 365 * 86400;
+    else return {}; // unknown range = all time
+    return { startTs, endTs };
+  }
+
   // ── Dashboard ──
 
   router.get("/dashboard", (req: Request, res: Response) => {
@@ -147,20 +161,21 @@ export function createFriendsRouter(
     const contact = store.getContact(decodeURIComponent(req.params.id as string));
     if (!contact) { res.status(404).json({ error: "Contact not found" }); return; }
 
-    const now = Math.floor(Date.now() / 1000);
-    const ninetyDaysAgo = now - 90 * 86400;
-    const stats = store.getContactStats(contact.id, ninetyDaysAgo, now);
+    const { startTs, endTs } = parseRange(req.query.range as string);
+    const stats = store.getContactStats(contact.id, startTs, endTs);
     const groups = store.getContactGroups(contact.id);
     const tags = store.getContactTags(contact.id);
-    const voiceStats = store.getVoiceStatsByContact(contact.id);
-    res.json({ contact, stats, groups, tags, voiceStats });
+    const voiceStats = store.getVoiceStatsByContact(contact.id, startTs, endTs);
+    res.json({ contact, stats, groups, tags, voiceStats, range: req.query.range || "all" });
   });
 
   router.get("/contacts/:id/activity", (req: Request, res: Response) => {
     const granularity = (req.query.granularity as string) || "week";
+    const { startTs } = parseRange(req.query.range as string);
     const activity = store.getContactActivity(
       decodeURIComponent(req.params.id as string),
-      granularity as "day" | "week" | "month"
+      granularity as "day" | "week" | "month",
+      startTs
     );
     res.json(activity);
   });

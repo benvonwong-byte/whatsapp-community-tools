@@ -183,6 +183,15 @@ function setupDetailPanel() {
   if (closeBtn) closeBtn.addEventListener("click", closeDetailPanel);
   if (overlay) overlay.addEventListener("click", closeDetailPanel);
 
+  // Time range pills
+  document.querySelectorAll(".detail-range-pill").forEach(pill => {
+    pill.addEventListener("click", () => {
+      const range = pill.dataset.range;
+      if (!currentDetailContactId || range === currentDetailRange) return;
+      refreshDetailRange(currentDetailContactId, range);
+    });
+  });
+
   const saveNotesBtn = $("save-notes-btn");
   if (saveNotesBtn) {
     saveNotesBtn.addEventListener("click", async () => {
@@ -1369,6 +1378,93 @@ function setupSortableHeaders() {
   if (initialHeader) initialHeader.classList.add(currentSort.dir === "asc" ? "sort-asc" : "sort-desc");
 }
 
+let currentDetailContactId = null;
+let currentDetailRange = "all";
+
+function renderDetailStats(stats) {
+  const detailStats = $("detail-stats");
+  if (!detailStats) return;
+  const myResp = stats.my_avg_response_sec ? formatDuration(stats.my_avg_response_sec) : "--";
+  const theirResp = stats.their_avg_response_sec ? formatDuration(stats.their_avg_response_sec) : "--";
+  detailStats.innerHTML =
+    '<div class="detail-stat">' +
+      '<div class="value">' + (stats.total_messages ?? 0) + '</div>' +
+      '<div class="label">Messages</div>' +
+    '</div>' +
+    '<div class="detail-stat">' +
+      '<div class="value">' + (stats.sent_messages ?? 0) + '</div>' +
+      '<div class="label">Sent</div>' +
+    '</div>' +
+    '<div class="detail-stat">' +
+      '<div class="value">' + (stats.received_messages ?? 0) + '</div>' +
+      '<div class="label">Received</div>' +
+    '</div>' +
+    '<div class="detail-stat">' +
+      '<div class="value">' + (stats.initiation_ratio != null ? Math.round(stats.initiation_ratio) + "%" : "--") + '</div>' +
+      '<div class="label">My Initiation %</div>' +
+    '</div>' +
+    '<div class="detail-stat">' +
+      '<div class="value">' + myResp + '</div>' +
+      '<div class="label">My Avg Response</div>' +
+    '</div>' +
+    '<div class="detail-stat">' +
+      '<div class="value">' + theirResp + '</div>' +
+      '<div class="label">Their Avg Response</div>' +
+    '</div>';
+}
+
+function renderDetailVoice(voiceStats) {
+  const detailVoice = $("detail-voice-stats");
+  if (!detailVoice) return;
+  if (voiceStats && voiceStats.total_notes > 0) {
+    detailVoice.innerHTML =
+      '<div class="voice-stat-item"><div class="val">' + voiceStats.total_notes + '</div><div class="lbl">Voice Notes</div></div>' +
+      '<div class="voice-stat-item"><div class="val">' + voiceStats.total_minutes + '</div><div class="lbl">Minutes</div></div>' +
+      '<div class="voice-stat-item"><div class="val">' + voiceStats.sent_notes + '</div><div class="lbl">Sent</div></div>' +
+      '<div class="voice-stat-item"><div class="val">' + voiceStats.received_notes + '</div><div class="lbl">Received</div></div>';
+  } else {
+    detailVoice.innerHTML = '';
+  }
+}
+
+function rangeLabel(range) {
+  if (range === "7d") return "7 Days";
+  if (range === "30d") return "30 Days";
+  if (range === "90d") return "90 Days";
+  if (range === "1y") return "1 Year";
+  return "All Time";
+}
+
+async function refreshDetailRange(contactId, range) {
+  currentDetailRange = range;
+  // Update pill UI
+  document.querySelectorAll(".detail-range-pill").forEach(p =>
+    p.classList.toggle("active", p.dataset.range === range)
+  );
+  // Update chart title
+  const chartTitle = $("detail-chart-title");
+  if (chartTitle) chartTitle.textContent = "Activity — " + rangeLabel(range);
+
+  try {
+    const rangeParam = range === "all" ? "" : "?range=" + range;
+    const [detailRes, activityRes] = await Promise.all([
+      adminFetch("/api/friends/contacts/" + encodeURIComponent(contactId) + rangeParam),
+      adminFetch("/api/friends/contacts/" + encodeURIComponent(contactId) + "/activity?granularity=week" + (range === "all" ? "" : "&range=" + range)),
+    ]);
+    if (detailRes.ok) {
+      const data = await detailRes.json();
+      renderDetailStats(data.stats);
+      renderDetailVoice(data.voiceStats);
+    }
+    if (activityRes.ok) {
+      const activityData = await activityRes.json();
+      renderDetailChart(activityData);
+    }
+  } catch (err) {
+    console.error("Failed to refresh range:", err);
+  }
+}
+
 async function openContactDetail(contactId) {
   const panel = $("detail-panel");
   const overlay = $("detail-overlay");
@@ -1376,6 +1472,13 @@ async function openContactDetail(contactId) {
 
   panel.classList.add("open");
   overlay.classList.add("open");
+  currentDetailContactId = contactId;
+  currentDetailRange = "all";
+
+  // Reset range pills to "All Time"
+  document.querySelectorAll(".detail-range-pill").forEach(p =>
+    p.classList.toggle("active", p.dataset.range === "all")
+  );
 
   // Show loading state
   const nameEl = $("detail-name");
@@ -1392,7 +1495,6 @@ async function openContactDetail(contactId) {
     if (!detailRes.ok) throw new Error("Failed to load contact");
     const detailData = await detailRes.json();
     const contact = detailData.contact;
-    const stats = detailData.stats;
 
     // Populate detail panel with editable name
     const displayName = contact.name || "Unknown";
@@ -1434,36 +1536,9 @@ async function openContactDetail(contactId) {
       };
     }
 
-    const detailStats = $("detail-stats");
-    if (detailStats) {
-      const myResp = stats.my_avg_response_sec ? formatDuration(stats.my_avg_response_sec) : "--";
-      const theirResp = stats.their_avg_response_sec ? formatDuration(stats.their_avg_response_sec) : "--";
-      detailStats.innerHTML =
-        '<div class="detail-stat">' +
-          '<div class="value">' + (stats.total_messages ?? 0) + '</div>' +
-          '<div class="label">Total Messages</div>' +
-        '</div>' +
-        '<div class="detail-stat">' +
-          '<div class="value">' + (stats.sent_messages ?? 0) + '</div>' +
-          '<div class="label">Sent</div>' +
-        '</div>' +
-        '<div class="detail-stat">' +
-          '<div class="value">' + (stats.received_messages ?? 0) + '</div>' +
-          '<div class="label">Received</div>' +
-        '</div>' +
-        '<div class="detail-stat">' +
-          '<div class="value">' + (stats.initiation_ratio != null ? Math.round(stats.initiation_ratio) + "%" : "--") + '</div>' +
-          '<div class="label">My Initiation %</div>' +
-        '</div>' +
-        '<div class="detail-stat">' +
-          '<div class="value">' + myResp + '</div>' +
-          '<div class="label">My Avg Response</div>' +
-        '</div>' +
-        '<div class="detail-stat">' +
-          '<div class="value">' + theirResp + '</div>' +
-          '<div class="label">Their Avg Response</div>' +
-        '</div>';
-    }
+    // Stats + Voice (via extracted functions)
+    renderDetailStats(detailData.stats);
+    renderDetailVoice(detailData.voiceStats);
 
     // Groups list
     const detailGroups = $("detail-groups");
@@ -1481,26 +1556,15 @@ async function openContactDetail(contactId) {
     // Tags (editable)
     renderDetailTags(contactId, detailData.tags || []);
 
-    // Voice stats
-    const detailVoice = $("detail-voice-stats");
-    if (detailVoice && detailData.voiceStats) {
-      const vs = detailData.voiceStats;
-      if (vs.total_notes > 0) {
-        detailVoice.innerHTML =
-          '<div class="voice-stat-item"><div class="val">' + vs.total_notes + '</div><div class="lbl">Voice Notes</div></div>' +
-          '<div class="voice-stat-item"><div class="val">' + vs.total_minutes + '</div><div class="lbl">Minutes</div></div>' +
-          '<div class="voice-stat-item"><div class="val">' + vs.sent_notes + '</div><div class="lbl">Sent</div></div>' +
-          '<div class="voice-stat-item"><div class="val">' + vs.received_notes + '</div><div class="lbl">Received</div></div>';
-      } else {
-        detailVoice.innerHTML = '';
-      }
-    }
-
     // Notes
     const notesEl = $("contact-notes");
     if (notesEl) notesEl.value = contact.notes || "";
     const saveBtn = $("save-notes-btn");
     if (saveBtn) saveBtn.dataset.contactId = contactId;
+
+    // Chart title
+    const chartTitle = $("detail-chart-title");
+    if (chartTitle) chartTitle.textContent = "Activity — All Time";
 
     // Activity chart
     if (activityRes.ok) {

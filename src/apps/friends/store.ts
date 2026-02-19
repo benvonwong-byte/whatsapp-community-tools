@@ -814,28 +814,45 @@ export class FriendsStore extends SettingsStore {
     }));
   }
 
-  getInitiatorStatsForContact(contactId: string, startTs: number, endTs: number) {
+  /** Resolve all DM chat_ids for a contact (handles both sender_id and chat_id lookups for iMessage) */
+  private contactChatIds(contactId: string): string[] {
+    const bySender = this.db.prepare(`
+      SELECT DISTINCT m.chat_id FROM friends_messages m
+      JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0
+      WHERE m.sender_id = ?
+    `).all(contactId) as { chat_id: string }[];
+    const byChat = this.db.prepare(`
+      SELECT DISTINCT fm.chat_id FROM friends_messages fm
+      JOIN friends_chats ch ON ch.chat_id = fm.chat_id AND ch.is_group = 0
+      WHERE fm.chat_id = ?
+    `).all(contactId) as { chat_id: string }[];
+    const ids = new Set([...bySender.map(r => r.chat_id), ...byChat.map(r => r.chat_id)]);
+    return [...ids];
+  }
+
+  getInitiatorStatsForContact(contactId: string, startTs?: number, endTs?: number) {
+    const chatIds = this.contactChatIds(contactId);
+    if (chatIds.length === 0) return { my_initiations: 0, their_initiations: 0 };
+    const placeholders = chatIds.map(() => "?").join(",");
+    const timeClause = startTs != null ? `AND timestamp >= ? AND timestamp <= ?` : "";
+    const params: any[] = [...chatIds, ...(startTs != null ? [startTs, endTs] : [])];
+
     const result = this.db.prepare(`
-      WITH contact_chats AS (
-        SELECT DISTINCT m.chat_id FROM friends_messages m
-        JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0
-        WHERE m.sender_id = ?
-      ),
-      msgs AS (
+      WITH msgs AS (
         SELECT
           is_from_me,
           timestamp,
           LAG(timestamp) OVER (PARTITION BY chat_id ORDER BY timestamp) as prev_ts
         FROM friends_messages
-        WHERE chat_id IN (SELECT chat_id FROM contact_chats)
-          AND timestamp >= ? AND timestamp <= ?
+        WHERE chat_id IN (${placeholders})
+          ${timeClause}
       )
       SELECT
         COALESCE(SUM(CASE WHEN is_from_me = 1 THEN 1 ELSE 0 END), 0) as my_initiations,
         COALESCE(SUM(CASE WHEN is_from_me = 0 THEN 1 ELSE 0 END), 0) as their_initiations
       FROM msgs
       WHERE (timestamp - COALESCE(prev_ts, 0)) > 14400
-    `).get(contactId, startTs, endTs) as any;
+    `).get(...params) as any;
 
     return {
       my_initiations: result?.my_initiations || 0,
@@ -843,22 +860,23 @@ export class FriendsStore extends SettingsStore {
     };
   }
 
-  getResponseTimesForContact(contactId: string, startTs: number, endTs: number) {
+  getResponseTimesForContact(contactId: string, startTs?: number, endTs?: number) {
+    const chatIds = this.contactChatIds(contactId);
+    if (chatIds.length === 0) return { my_avg_response_sec: 3600, their_avg_response_sec: 3600 };
+    const placeholders = chatIds.map(() => "?").join(",");
+    const timeClause = startTs != null ? `AND timestamp >= ? AND timestamp <= ?` : "";
+    const params: any[] = [...chatIds, ...(startTs != null ? [startTs, endTs] : [])];
+
     const result = this.db.prepare(`
-      WITH contact_chats AS (
-        SELECT DISTINCT m.chat_id FROM friends_messages m
-        JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0
-        WHERE m.sender_id = ?
-      ),
-      ordered AS (
+      WITH ordered AS (
         SELECT
           is_from_me,
           timestamp,
           LAG(is_from_me) OVER (PARTITION BY chat_id ORDER BY timestamp) as prev_from_me,
           LAG(timestamp) OVER (PARTITION BY chat_id ORDER BY timestamp) as prev_ts
         FROM friends_messages
-        WHERE chat_id IN (SELECT chat_id FROM contact_chats)
-          AND timestamp >= ? AND timestamp <= ?
+        WHERE chat_id IN (${placeholders})
+          ${timeClause}
       )
       SELECT
         COALESCE(AVG(CASE WHEN is_from_me = 1 AND prev_from_me = 0 THEN timestamp - prev_ts END), 3600) as my_avg_response_sec,
@@ -867,7 +885,7 @@ export class FriendsStore extends SettingsStore {
       WHERE is_from_me != prev_from_me
         AND (timestamp - prev_ts) < 14400
         AND (timestamp - prev_ts) > 0
-    `).get(contactId, startTs, endTs) as any;
+    `).get(...params) as any;
 
     return {
       my_avg_response_sec: result?.my_avg_response_sec || 3600,
@@ -875,83 +893,61 @@ export class FriendsStore extends SettingsStore {
     };
   }
 
-  getContactActivity(contactId: string, granularity: "day" | "week" | "month"): ActivityPoint[] {
+  getContactActivity(contactId: string, granularity: "day" | "week" | "month", startTs?: number): ActivityPoint[] {
     const fmt = granularity === "day" ? "%Y-%m-%d"
       : granularity === "week" ? "%Y-W%W"
       : "%Y-%m";
 
-    const sixMonthsAgo = Math.floor(Date.now() / 1000) - 180 * 86400;
+    const chatIds = this.contactChatIds(contactId);
+    if (chatIds.length === 0) return [];
+    const placeholders = chatIds.map(() => "?").join(",");
+    const since = startTs ?? (Math.floor(Date.now() / 1000) - 730 * 86400); // default: 2 years
 
     return this.db.prepare(`
-      WITH contact_chats AS (
-        SELECT DISTINCT m.chat_id FROM friends_messages m
-        JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0
-        WHERE m.sender_id = ?
-      )
       SELECT
         strftime('${fmt}', datetime(timestamp, 'unixepoch', 'localtime')) as period,
         SUM(CASE WHEN is_from_me = 1 THEN 1 ELSE 0 END) as sent,
         SUM(CASE WHEN is_from_me = 0 THEN 1 ELSE 0 END) as received
       FROM friends_messages
-      WHERE chat_id IN (SELECT chat_id FROM contact_chats)
+      WHERE chat_id IN (${placeholders})
         AND timestamp >= ?
       GROUP BY period
       ORDER BY period ASC
-    `).all(contactId, sixMonthsAgo) as ActivityPoint[];
+    `).all(...chatIds, since) as ActivityPoint[];
   }
 
-  getContactStats(contactId: string, startTs: number, endTs: number) {
+  getContactStats(contactId: string, startTs?: number, endTs?: number) {
     const init = this.getInitiatorStatsForContact(contactId, startTs, endTs);
     const resp = this.getResponseTimesForContact(contactId, startTs, endTs);
 
-    // All-time message stats (no timestamp filter)
-    const allTimeStats = this.db.prepare(`
-      WITH contact_chats AS (
-        SELECT DISTINCT m.chat_id FROM friends_messages m
-        JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0
-        WHERE m.sender_id = ?
-      )
-      SELECT
-        COUNT(*) as total,
-        SUM(CASE WHEN is_from_me = 1 THEN 1 ELSE 0 END) as sent,
-        SUM(CASE WHEN is_from_me = 0 THEN 1 ELSE 0 END) as received
-      FROM friends_messages
-      WHERE chat_id IN (SELECT chat_id FROM contact_chats)
-    `).get(contactId) as any;
+    const chatIds = this.contactChatIds(contactId);
+    if (chatIds.length === 0) {
+      return {
+        total_messages: 0, sent_messages: 0, received_messages: 0,
+        initiation_ratio: 0, my_avg_response_sec: 3600, their_avg_response_sec: 3600,
+      };
+    }
+    const placeholders = chatIds.map(() => "?").join(",");
+    const timeClause = startTs != null ? `AND fm.timestamp >= ? AND fm.timestamp <= ?` : "";
+    const params: any[] = [...chatIds, ...(startTs != null ? [startTs, endTs] : [])];
 
-    // Also check using chat_id = contactId directly (for iMessage where chat_id IS the contact id)
-    const altStats = this.db.prepare(`
+    const msgStats = this.db.prepare(`
       SELECT
         COUNT(*) as total,
-        SUM(CASE WHEN is_from_me = 1 THEN 1 ELSE 0 END) as sent,
-        SUM(CASE WHEN is_from_me = 0 THEN 1 ELSE 0 END) as received
+        SUM(CASE WHEN fm.is_from_me = 1 THEN 1 ELSE 0 END) as sent,
+        SUM(CASE WHEN fm.is_from_me = 0 THEN 1 ELSE 0 END) as received
       FROM friends_messages fm
-      JOIN friends_chats ch ON ch.chat_id = fm.chat_id AND ch.is_group = 0
-      WHERE fm.chat_id = ?
-    `).get(contactId) as any;
-
-    // Use whichever found more messages (covers both sender_id and chat_id lookups)
-    const best = (altStats?.total || 0) > (allTimeStats?.total || 0) ? altStats : allTimeStats;
-
-    // Recent stats for the specified time window
-    const recentStats = this.db.prepare(`
-      SELECT
-        COUNT(*) as total,
-        SUM(CASE WHEN is_from_me = 1 THEN 1 ELSE 0 END) as sent,
-        SUM(CASE WHEN is_from_me = 0 THEN 1 ELSE 0 END) as received
-      FROM friends_messages fm
-      JOIN friends_chats ch ON ch.chat_id = fm.chat_id AND ch.is_group = 0
-      WHERE fm.chat_id = ? AND fm.timestamp >= ? AND fm.timestamp <= ?
-    `).get(contactId, startTs, endTs) as any;
+      WHERE fm.chat_id IN (${placeholders})
+        ${timeClause}
+    `).get(...params) as any;
 
     const totalInit = (init.my_initiations + init.their_initiations) || 1;
     const initiationRatio = Math.round((init.my_initiations / totalInit) * 100);
 
     return {
-      total_messages: best?.total || 0,
-      sent_messages: best?.sent || 0,
-      received_messages: best?.received || 0,
-      recent_messages: recentStats?.total || 0,
+      total_messages: msgStats?.total || 0,
+      sent_messages: msgStats?.sent || 0,
+      received_messages: msgStats?.received || 0,
       initiation_ratio: initiationRatio,
       my_avg_response_sec: Math.round(resp.my_avg_response_sec),
       their_avg_response_sec: Math.round(resp.their_avg_response_sec),
@@ -1038,7 +1034,9 @@ export class FriendsStore extends SettingsStore {
     `).all(contactId, limit) as FriendsVoiceNote[];
   }
 
-  getVoiceStatsByContact(contactId: string): { total_notes: number; total_minutes: number; sent_notes: number; received_notes: number; last_voice: number | null } {
+  getVoiceStatsByContact(contactId: string, startTs?: number, endTs?: number): { total_notes: number; total_minutes: number; sent_notes: number; received_notes: number; last_voice: number | null } {
+    const timeClause = startTs != null ? `AND timestamp >= ? AND timestamp <= ?` : "";
+    const params: any[] = [contactId, ...(startTs != null ? [startTs, endTs] : [])];
     const row = this.db.prepare(`
       SELECT
         COUNT(*) as total_notes,
@@ -1046,8 +1044,8 @@ export class FriendsStore extends SettingsStore {
         SUM(CASE WHEN is_from_me = 1 THEN 1 ELSE 0 END) as sent_notes,
         SUM(CASE WHEN is_from_me = 0 THEN 1 ELSE 0 END) as received_notes,
         MAX(timestamp) as last_voice
-      FROM friends_voice_notes WHERE contact_id = ?
-    `).get(contactId) as any;
+      FROM friends_voice_notes WHERE contact_id = ? ${timeClause}
+    `).get(...params) as any;
     return {
       total_notes: row?.total_notes || 0,
       total_minutes: Math.round((row?.total_minutes || 0) * 10) / 10,

@@ -752,6 +752,17 @@
       margin-bottom: 16px;
     }
 
+    .detail-range-pills {
+      display: flex; gap: 4px; margin-bottom: 12px; padding: 0 2px;
+    }
+    .detail-range-pill {
+      background: var(--surface2); color: var(--text-dim); border: 1px solid transparent;
+      border-radius: 12px; padding: 3px 10px; font-size: 10px; cursor: pointer;
+      transition: all .15s; white-space: nowrap; user-select: none;
+    }
+    .detail-range-pill:hover { color: var(--text); background: var(--surface); }
+    .detail-range-pill.active { color: #fff; background: var(--accent); border-color: var(--accent); }
+
     .detail-stats {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -2054,11 +2065,20 @@
       <div id="detail-tier-select" class="detail-tier-select"></div>
 
       <div id="detail-tags" class="detail-tags"></div>
+
+      <div class="detail-range-pills" id="detail-range-pills">
+        <span class="detail-range-pill active" data-range="all">All Time</span>
+        <span class="detail-range-pill" data-range="1y">1Y</span>
+        <span class="detail-range-pill" data-range="90d">90d</span>
+        <span class="detail-range-pill" data-range="30d">30d</span>
+        <span class="detail-range-pill" data-range="7d">7d</span>
+      </div>
+
       <div id="detail-stats" class="detail-stats"></div>
       <div id="detail-voice-stats" class="detail-voice-stats"></div>
 
       <div class="detail-chart-section">
-        <div class="section-title">Activity (30 days)</div>
+        <div class="section-title" id="detail-chart-title">Activity</div>
         <canvas id="detail-chart"></canvas>
       </div>
 
