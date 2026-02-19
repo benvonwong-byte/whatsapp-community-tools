@@ -1328,6 +1328,9 @@ async function openContactDetail(contactId) {
         : '<span class="empty-state">No groups</span>';
     }
 
+    // Tier selector
+    renderDetailTierSelect(contactId, contact.tier_id);
+
     // Tags (editable)
     renderDetailTags(contactId, detailData.tags || []);
 
@@ -1364,12 +1367,13 @@ async function openContactDetail(contactId) {
       var cachedMessages = msgData.messages || [];
       renderConversationLog(contactId, cachedMessages, false);
 
-      // Check if many messages lack body text — fetch fresh history from WhatsApp
+      // Check if many messages lack body text — fetch fresh history from WhatsApp (only for WA contacts)
+      var isWhatsApp = contactId.endsWith("@c.us") || contactId.endsWith("@s.whatsapp.net") || contactId.endsWith("@lid");
       var emptyCount = cachedMessages.filter(function(m) {
-        return (!m.body || !m.body.trim()) && m.message_type === "chat";
+        return (!m.body || !m.body.trim()) && m.message_type === "chat" && m.source === "whatsapp";
       }).length;
 
-      if (emptyCount > 0 || cachedMessages.length === 0) {
+      if (isWhatsApp && (emptyCount > 0 || cachedMessages.length === 0)) {
         // Show loading indicator
         var container = $("detail-messages");
         if (container && cachedMessages.length === 0) {
@@ -1420,7 +1424,11 @@ function renderConversationLog(contactId, messages, append) {
   }
 
   // Messages come in DESC order (newest first) — reverse for chronological display
-  const chronological = [...messages].reverse();
+  // Filter out text/chat messages with no body (body was not captured during sync)
+  const chronological = [...messages].reverse().filter(m => {
+    if ((!m.body || !m.body.trim()) && (m.message_type === "chat" || m.message_type === "text" || !m.message_type)) return false;
+    return true;
+  });
 
   let lastDate = "";
   const html = chronological.map(m => {
@@ -1474,8 +1482,10 @@ function renderConversationLog(contactId, messages, append) {
   }).join("");
 
   if (append) {
-    // Prepend older messages at the top
+    // Prepend older messages at the top, preserving scroll position
+    const prevHeight = container.scrollHeight;
     container.insertAdjacentHTML("afterbegin", html);
+    container.scrollTop = container.scrollHeight - prevHeight;
   } else {
     container.innerHTML = html;
     // Scroll to bottom for initial load
@@ -1577,15 +1587,51 @@ function parseTagCategory(name) {
   return { label: name, color: TAG_COLORS[""], category: "topic" };
 }
 
+async function renderDetailTierSelect(contactId, currentTierId) {
+  const container = $("detail-tier-select");
+  if (!container) return;
+  try {
+    const res = await adminFetch("/api/friends/tiers");
+    if (!res.ok) { container.innerHTML = ""; return; }
+    const tiers = await res.json();
+    let html = '<label>Tier:</label><select id="detail-tier-dropdown">';
+    html += '<option value="">Unassigned</option>';
+    for (const t of tiers) {
+      const sel = t.id === currentTierId ? " selected" : "";
+      html += '<option value="' + t.id + '"' + sel + '>' + esc(t.name) + '</option>';
+    }
+    html += '</select>';
+    container.innerHTML = html;
+    const dropdown = $("detail-tier-dropdown");
+    if (dropdown) {
+      dropdown.addEventListener("change", async () => {
+        const tierId = dropdown.value ? parseInt(dropdown.value) : null;
+        try {
+          await adminFetch("/api/friends/contacts/" + encodeURIComponent(contactId) + "/tier", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ tier_id: tierId }),
+          });
+        } catch (err) {
+          console.error("Failed to update tier:", err);
+        }
+      });
+    }
+  } catch (err) {
+    console.error("Failed to load tiers for select:", err);
+    container.innerHTML = "";
+  }
+}
+
 function renderDetailTags(contactId, tags) {
   const container = $("detail-tags");
   if (!container) return;
 
   let html = tags.map((t) => {
     const { label, color } = parseTagCategory(t.name);
-    return '<span class="detail-tag" data-tag-id="' + t.tag_id + '" style="background:' + color + '20;color:' + color + ';border:1px solid ' + color + '40;">' +
+    return '<span class="detail-tag" data-tag-name="' + esc(t.name) + '" data-tag-id="' + t.tag_id + '" style="background:' + color + '20;color:' + color + ';border:1px solid ' + color + '40;" title="Click to find contacts with this tag">' +
       esc(label) +
-      (t.mention_count > 1 ? ' <small>(' + t.mention_count + ')</small>' : '') +
+      (t.contact_count > 1 ? ' <span class="tag-count">' + t.contact_count + '</span>' : '') +
       ' <span class="tag-remove" data-contact="' + esc(contactId) + '" data-tag-id="' + t.tag_id + '">&times;</span>' +
     '</span>';
   }).join("");
@@ -1613,6 +1659,22 @@ function renderDetailTags(contactId, tags) {
       } catch (err) {
         console.error("Failed to remove tag:", err);
       }
+    });
+  });
+
+  // Clickable tags — navigate to contacts list filtered by tag
+  container.querySelectorAll(".detail-tag[data-tag-name]").forEach(chip => {
+    chip.addEventListener("click", (e) => {
+      if (e.target.closest(".tag-remove")) return; // don't trigger on X button
+      const tagName = chip.dataset.tagName;
+      if (!tagName) return;
+      // Close detail panel and switch to contacts tab filtered by this tag
+      $("detail-panel")?.classList.remove("open");
+      $("detail-overlay")?.classList.remove("open");
+      activeTagFilters.clear();
+      activeTagFilters.add(tagName);
+      switchTab("contacts");
+      loadContacts();
     });
   });
 

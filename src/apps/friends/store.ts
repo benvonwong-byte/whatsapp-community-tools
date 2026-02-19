@@ -1062,9 +1062,10 @@ export class FriendsStore extends SettingsStore {
     `).run(contactId, tagId, confidence, timestamp);
   }
 
-  getContactTags(contactId: string): Array<{ tag_id: number; name: string; confidence: number; mention_count: number }> {
+  getContactTags(contactId: string): Array<{ tag_id: number; name: string; confidence: number; mention_count: number; contact_count: number }> {
     return this.db.prepare(`
-      SELECT ct.tag_id, t.name, ct.confidence, ct.mention_count
+      SELECT ct.tag_id, t.name, ct.confidence, ct.mention_count,
+             (SELECT COUNT(*) FROM friends_contact_tags ct2 WHERE ct2.tag_id = ct.tag_id) as contact_count
       FROM friends_contact_tags ct
       JOIN friends_tags t ON t.id = ct.tag_id
       WHERE ct.contact_id = ?

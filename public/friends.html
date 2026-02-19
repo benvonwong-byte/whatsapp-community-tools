@@ -1135,6 +1135,18 @@
       line-height: 1;
     }
     .detail-tag .tag-remove:hover { opacity: 1; color: #f44; }
+    .detail-tag { cursor: pointer; transition: opacity 0.15s; }
+    .detail-tag:hover { opacity: 0.8; }
+    .detail-tag .tag-count { opacity: 0.6; font-size: 10px; margin-left: 2px; }
+    .detail-tier-select {
+      display: flex; align-items: center; gap: 6px; margin: 6px 0 10px;
+    }
+    .detail-tier-select label { font-size: 11px; color: var(--text-dim); }
+    .detail-tier-select select {
+      background: var(--surface2); color: var(--text); border: 1px solid var(--border);
+      border-radius: 4px; padding: 3px 8px; font-size: 12px; outline: none; cursor: pointer;
+    }
+    .detail-tier-select select:focus { border-color: var(--accent); }
     .tag-add-form {
       display: inline-flex;
       align-items: center;
@@ -1739,6 +1751,8 @@
       </div>
       <div id="detail-groups" class="detail-groups">No groups</div>
 
+      <div id="detail-tier-select" class="detail-tier-select"></div>
+
       <div id="detail-tags" class="detail-tags"></div>
       <div id="detail-stats" class="detail-stats"></div>
       <div id="detail-voice-stats" class="detail-voice-stats"></div>
@@ -1750,8 +1764,8 @@
 
       <div class="detail-conversation">
         <div class="section-title">Conversation</div>
-        <div id="detail-messages" class="detail-messages-container"></div>
         <button id="load-more-messages" class="load-more-btn" style="display:none;">Load More</button>
+        <div id="detail-messages" class="detail-messages-container"></div>
       </div>
 
       <div class="detail-notes">
