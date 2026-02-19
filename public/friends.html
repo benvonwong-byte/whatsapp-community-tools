@@ -928,6 +928,22 @@
       font-size: 11px; padding: 2px 8px; border-radius: 4px; cursor: pointer; float: right;
     }
 
+    /* Graph */
+    .graph-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; justify-content: space-between; }
+    .graph-filters { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+    .graph-filters select {
+      background: var(--surface2); color: var(--text); border: 1px solid var(--border);
+      border-radius: 4px; padding: 4px 8px; font-size: 12px;
+    }
+    .graph-legend { display: flex; gap: 10px; font-size: 11px; color: var(--text-dim); }
+    .graph-legend-item { display: flex; align-items: center; gap: 4px; }
+    .graph-legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+    .graph-tooltip {
+      position: absolute; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 6px; padding: 10px; font-size: 12px; pointer-events: none; z-index: 10;
+      max-width: 250px; box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    }
+
     /* Group Modal */
     .modal-overlay {
       position: fixed;
@@ -1439,6 +1455,7 @@
     <div class="tab" data-tab="contacts">Contacts</div>
     <div class="tab" data-tab="tiers">Tiers</div>
     <div class="tab" data-tab="groups">Groups</div>
+    <div class="tab" data-tab="graph">Graph</div>
     <div class="tab" data-tab="messaging">Messaging</div>
     <div class="tab" data-tab="chats">Manage Chats</div>
   </div>
@@ -1722,6 +1739,35 @@
 
     </div>
 
+    <!-- ==================== Graph Tab ==================== -->
+    <div id="tab-graph" class="tab-content">
+      <div class="graph-controls">
+        <div class="graph-filters">
+          <label style="font-size:11px;color:var(--text-dim);">Tier:</label>
+          <select id="graph-tier-filter">
+            <option value="all">All Tiers</option>
+          </select>
+          <label style="font-size:11px;color:var(--text-dim);margin-left:8px;">Layout:</label>
+          <select id="graph-layout">
+            <option value="force">Force-directed</option>
+            <option value="concentric">Concentric (by Tier)</option>
+          </select>
+          <label style="font-size:11px;color:var(--text-dim);margin-left:8px;">Show:</label>
+          <select id="graph-min-messages">
+            <option value="50">Active (50+ msgs)</option>
+            <option value="10">10+ messages</option>
+            <option value="1">All with messages</option>
+          </select>
+          <input type="text" id="graph-search" placeholder="Search graph..." style="margin-left:8px;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 8px;font-size:12px;width:150px;">
+        </div>
+        <div class="graph-legend" id="graph-legend"></div>
+      </div>
+      <div id="graph-container" style="width:100%;height:calc(100vh - 180px);background:var(--bg);border-radius:8px;border:1px solid var(--border);position:relative;">
+        <div id="graph-loading" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--text-dim);">Click to load graph...</div>
+        <div id="graph-tooltip" class="graph-tooltip" style="display:none;"></div>
+      </div>
+    </div>
+
     <!-- ==================== Messaging Tab ==================== -->
     <div id="tab-messaging" class="tab-content">
 
@@ -1868,6 +1914,9 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/graphology@0.25.4/dist/graphology.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/graphology-layout-forceatlas2@0.10.1/dist/graphology-layout-forceatlas2.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sigma@2.4.0/build/sigma.min.js"></script>
   <script src="shared.js"></script>
   <script src="friends.js"></script>
 </body>

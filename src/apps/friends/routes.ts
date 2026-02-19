@@ -534,6 +534,50 @@ export function createFriendsRouter(
     }
   });
 
+  // ── Graph data ──
+
+  router.get("/graph", (_req: Request, res: Response) => {
+    const minMessages = parseInt(_req.query.minMessages as string) || 10;
+    const allContacts = store.getContactsWithStats().filter(c => c.total_messages >= minMessages);
+
+    const nodes = allContacts.map(c => ({
+      id: c.id, name: c.name, messages: c.total_messages, messages30d: c.messages_30d,
+      sent: c.sent_messages, received: c.received_messages, lastSeen: c.last_seen,
+      tierId: c.tier_id, tierName: c.tier_name, tierColor: c.tier_color,
+      tags: c.tag_names ? c.tag_names.split(", ") : [],
+      groups: c.group_names ? c.group_names.split(", ") : [],
+      quality: c.quality_score
+    }));
+
+    // Edges based on shared groups
+    const edges: Array<{ source: string; target: string; weight: number }> = [];
+    const groupMembers: Record<string, string[]> = {};
+    for (const c of allContacts) {
+      if (c.group_names) {
+        for (const g of c.group_names.split(", ")) {
+          if (!groupMembers[g]) groupMembers[g] = [];
+          groupMembers[g].push(c.id);
+        }
+      }
+    }
+    const edgeMap = new Map<string, number>();
+    for (const members of Object.values(groupMembers)) {
+      if (members.length > 50) continue;
+      for (let i = 0; i < members.length; i++) {
+        for (let j = i + 1; j < members.length; j++) {
+          const key = members[i] < members[j] ? members[i] + "|" + members[j] : members[j] + "|" + members[i];
+          edgeMap.set(key, (edgeMap.get(key) || 0) + 1);
+        }
+      }
+    }
+    for (const [key, weight] of edgeMap) {
+      const [source, target] = key.split("|");
+      edges.push({ source, target, weight });
+    }
+
+    res.json({ nodes, edges });
+  });
+
   // ── Data Management ──
 
   router.post("/archive", (req: Request, res: Response) => {
