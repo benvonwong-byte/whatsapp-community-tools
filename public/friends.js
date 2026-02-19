@@ -1611,9 +1611,25 @@ async function openContactDetail(contactId) {
     p.classList.toggle("active", p.dataset.range === "all")
   );
 
-  // Show loading state
+  // Clear all panel sections to prevent stale data from previous contact
   const nameEl = $("detail-name");
   if (nameEl) nameEl.textContent = "Loading...";
+  const phoneEl = $("detail-phone");
+  if (phoneEl) phoneEl.style.display = "none";
+  const detailGroups = $("detail-groups");
+  if (detailGroups) detailGroups.innerHTML = "";
+  const detailTags = $("detail-tags");
+  if (detailTags) detailTags.innerHTML = "";
+  const detailNotes = $("detail-notes-list");
+  if (detailNotes) detailNotes.innerHTML = "";
+  const detailStats = $("detail-stats");
+  if (detailStats) detailStats.innerHTML = "";
+  const detailVoice = $("detail-voice");
+  if (detailVoice) detailVoice.innerHTML = "";
+  const detailMessages = $("detail-messages");
+  if (detailMessages) detailMessages.innerHTML = "";
+  const tierSelect = $("detail-tier-select");
+  if (tierSelect) tierSelect.innerHTML = "";
 
   try {
     // Fetch contact detail, activity, and messages in parallel
@@ -1734,8 +1750,9 @@ async function openContactDetail(contactId) {
       }
     }
   } catch (err) {
-    console.error("Failed to load contact detail:", err);
-    if (nameEl) nameEl.textContent = "Error loading contact";
+    console.error("Failed to load contact detail:", err, "ID:", contactId);
+    const nameDisplay = $("detail-name");
+    if (nameDisplay) nameDisplay.textContent = "Error loading contact";
   }
 }
 
@@ -3300,13 +3317,17 @@ const GX = {
   showLabels: true, showGroupLines: false, showTagLines: false,
   tierFilter: "all",
   searchQ: "",
-  xAxis: "messages", yAxis: "daysSince",
+  xAxis: "lastContactDate", // locked to time axis
+  yAxis: "messages",
   colorMode: "tier", sizeMode: "messages",
-  zoomMode: "dynamic", // "fixed" (optical) or "dynamic" (semantic re-spacing)
+  zoomMode: "dynamic",
   currentTransform: d3.zoomIdentity,
   filtersOpen: false,
-  filters: {}, // { metricKey: { min: number, max: number } }
-  axes: [
+  filters: {},
+  // Time window: controls the X-axis date range
+  timeWindow: "3m", // "1m" | "3m" | "6m" | "1y"
+  timeOffset: 0, // how many windows back from "now" (0 = most recent)
+  yAxes: [
     { key: "messages", label: "Messages", short: "Msgs", type: "num" },
     { key: "messages30d", label: "Recent (30d)", short: "30d", type: "num" },
     { key: "daysSince", label: "Days Since Contact", short: "Days", type: "num" },
@@ -3317,9 +3338,9 @@ const GX = {
     { key: "daysKnown", label: "Relationship Age", short: "Age", type: "num" },
     { key: "sent", label: "Sent", short: "Sent", type: "num" },
     { key: "received", label: "Received", short: "Recv", type: "num" },
-    { key: "lastContactDate", label: "Last Contact Date", short: "LastDate", type: "time" },
-    { key: "firstSeenDate", label: "First Seen Date", short: "1stDate", type: "time" }
   ],
+  // X axis is always lastContactDate (kept for scale building)
+  xDef: { key: "lastContactDate", label: "Last Contact", short: "Last Contact", type: "time" },
   colors: [
     { key: "tier", label: "Tier" },
     { key: "recency", label: "Recency" },
@@ -3359,13 +3380,40 @@ async function loadGraph() {
   }
 }
 
+// Compute time window start/end dates based on window size and offset
+function gxTimeWindow() {
+  const windowDays = { "1m": 30, "3m": 90, "6m": 180, "1y": 365 };
+  const days = windowDays[GX.timeWindow] || 90;
+  const now = new Date();
+  const endMs = now.getTime() - GX.timeOffset * days * 86400000;
+  const startMs = endMs - days * 86400000;
+  return { start: new Date(startMs), end: new Date(endMs), days };
+}
+
+function gxTimeWindowLabel() {
+  const { start, end } = gxTimeWindow();
+  const fmt = d => d.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+  return `${fmt(start)} — ${fmt(end)}`;
+}
+
 function gxBuildToolbar() {
+  // X axis is locked to "Last Contact" — show time window controls instead
   const xC = $("gx-x-pills");
-  if (xC) xC.innerHTML = GX.axes.map(a =>
-    `<span class="gx-pill${a.key === GX.xAxis ? ' active' : ''}" data-axis="x" data-key="${a.key}">${a.short}</span>`
-  ).join("");
+  if (xC) {
+    const wins = ["1m", "3m", "6m", "1y"];
+    const labels = { "1m": "1 Mo", "3m": "3 Mo", "6m": "6 Mo", "1y": "1 Yr" };
+    xC.innerHTML =
+      `<button class="gx-pill gx-nav-btn" data-nav="left" title="Earlier">&larr;</button>` +
+      wins.map(w =>
+        `<span class="gx-pill${w === GX.timeWindow ? ' active' : ''}" data-window="${w}">${labels[w]}</span>`
+      ).join("") +
+      `<button class="gx-pill gx-nav-btn" data-nav="right" title="Later">&rarr;</button>` +
+      `<span style="font-size:10px;color:var(--text-dim);margin-left:4px;" id="gx-window-label">${gxTimeWindowLabel()}</span>`;
+  }
+
+  // Y axis pills (only numeric axes now)
   const yC = $("gx-y-pills");
-  if (yC) yC.innerHTML = GX.axes.map(a =>
+  if (yC) yC.innerHTML = GX.yAxes.map(a =>
     `<span class="gx-pill${a.key === GX.yAxis ? ' active' : ''}" data-axis="y" data-key="${a.key}">${a.short}</span>`
   ).join("");
   const cC = $("gx-color-pills");
@@ -3414,12 +3462,20 @@ function gxGetRadius(n) {
 function gxFilteredNodes() {
   if (!GX.data) return [];
   let nodes = GX.data.nodes;
+
+  // Filter by time window (X axis = lastContactDate)
+  const tw = gxTimeWindow();
+  nodes = nodes.filter(n => {
+    const d = n.lastContactDate;
+    return d && d >= tw.start && d <= tw.end;
+  });
+
   if (GX.tierFilter !== "all") {
     nodes = nodes.filter(n => GX.tierFilter === "none" ? !n.tierId : String(n.tierId) === GX.tierFilter);
   }
   // Apply range filters
   for (const [key, range] of Object.entries(GX.filters)) {
-    const axisDef = GX.axes.find(a => a.key === key);
+    const axisDef = GX.yAxes.find(a => a.key === key) || (key === "lastContactDate" ? GX.xDef : null);
     if (!axisDef) continue;
     nodes = nodes.filter(n => {
       let val;
@@ -3528,17 +3584,15 @@ function gxRender() {
 
   const xKey = GX.xAxis;
   const yKey = GX.yAxis;
-  const xDef = GX.axes.find(a => a.key === xKey);
-  const yDef = GX.axes.find(a => a.key === yKey);
+  const xDef = GX.xDef; // locked time axis
+  const yDef = GX.yAxes.find(a => a.key === yKey);
 
-  // Dynamic margins: wider left for time Y-axis, taller bottom for time X-axis
-  const margin = {
-    top: 20, right: 20,
-    bottom: (xDef && xDef.type === "time") ? 44 : 36,
-    left: (yDef && yDef.type === "time") ? 80 : 60
-  };
+  // Dynamic margins: wider bottom for time X-axis labels
+  const margin = { top: 20, right: 20, bottom: 44, left: 60 };
 
-  GX.xScale = gxMakeScale(xDef, nodes, xKey, [margin.left, W - margin.right]);
+  // X scale: use time window bounds as domain
+  const tw = gxTimeWindow();
+  GX.xScale = d3.scaleTime().domain([tw.start, tw.end]).range([margin.left, W - margin.right]);
   GX.yScale = gxMakeScale(yDef, nodes, yKey, [H - margin.bottom, margin.top]);
 
   const svg = d3.select("#gx-svg");
@@ -3559,17 +3613,16 @@ function gxRender() {
     svg.append("text").attr("class", "gx-axis-label gx-y-label")
       .attr("transform", "rotate(-90)");
 
-    GX.zoom = d3.zoom().scaleExtent([0.3, 20]).on("zoom", (e) => {
-      GX.currentTransform = e.transform;
-      if (GX.zoomMode === "fixed") {
-        // Optical zoom: just transform the group
-        GX.g.attr("transform", e.transform);
-      } else {
-        // Dynamic zoom: rescale axes so data spreads out
-        GX.g.attr("transform", d3.zoomIdentity); // keep group at identity
-        gxDynamicRescale(e.transform);
-      }
-    });
+    // Y-axis drag zoom: drag up/down to zoom Y, centered on selected point
+    GX.zoom = d3.zoom().scaleExtent([0.3, 20])
+      .filter(e => e.type === "wheel" || e.type === "mousedown" || e.type === "touchstart")
+      .on("zoom", (e) => {
+        // Only apply Y scaling — X is locked to time window
+        const yOnly = d3.zoomIdentity.translate(0, e.transform.y).scale(e.transform.k);
+        GX.currentTransform = yOnly;
+        GX.g.attr("transform", d3.zoomIdentity);
+        gxDynamicRescale(yOnly);
+      });
     svg.call(GX.zoom);
     svg.on("click", (e) => {
       if (e.target.classList.contains("gx-bg") || e.target.tagName === "svg") gxSelect(null);
@@ -3577,12 +3630,11 @@ function gxRender() {
   }
 
   const t = d3.transition().duration(500).ease(d3.easeCubicOut);
-  let xs = GX.xScale;
+  let xs = GX.xScale; // X stays fixed to time window
   let ys = GX.yScale;
 
-  // In dynamic zoom mode, apply current transform to scale domains
-  if (GX.zoomMode === "dynamic" && GX.currentTransform.k !== 1) {
-    xs = GX.currentTransform.rescaleX(xs);
+  // Apply Y-axis zoom if active
+  if (GX.currentTransform.k !== 1 || GX.currentTransform.y !== 0) {
     ys = GX.currentTransform.rescaleY(ys);
     GX.g.attr("transform", d3.zoomIdentity);
   }
@@ -3590,23 +3642,18 @@ function gxRender() {
   GX._xs = xs;
   GX._ys = ys;
 
-  const xAxisGen = xDef && xDef.type === "time"
-    ? d3.axisBottom(xs).ticks(8).tickFormat(d3.timeFormat("%b '%y"))
-    : d3.axisBottom(xs).ticks(8);
-  const yAxisGen = yDef && yDef.type === "time"
-    ? d3.axisLeft(ys).ticks(8).tickFormat(d3.timeFormat("%b '%y"))
-    : d3.axisLeft(ys).ticks(6);
+  // X axis is always time; Y is always numeric
+  const xAxisGen = d3.axisBottom(xs).ticks(8).tickFormat(d3.timeFormat("%b '%y"));
+  const yAxisGen = d3.axisLeft(ys).ticks(6);
 
-  // Update axis positions (margins may change between renders)
+  // Update axis positions
   svg.select(".gx-x-axis").attr("transform", `translate(0,${H - margin.bottom})`).transition(t).call(xAxisGen.tickSize(-H + margin.top + margin.bottom));
   svg.select(".gx-y-axis").attr("transform", `translate(${margin.left},0)`).transition(t).call(yAxisGen.tickSize(-W + margin.left + margin.right));
   svg.selectAll(".gx-axis line").attr("stroke", "rgba(255,255,255,0.04)");
   svg.selectAll(".gx-axis path").attr("stroke", "rgba(255,255,255,0.08)");
-  // Rotate X-axis tick labels for time axes to prevent overlap
-  if (xDef && xDef.type === "time") {
-    svg.select(".gx-x-axis").selectAll("text").attr("transform", "rotate(-35)").attr("text-anchor", "end").attr("dx", "-4px").attr("dy", "4px");
-  }
-  const xLabel = xDef?.label || xKey;
+  // Rotate X-axis tick labels to prevent overlap
+  svg.select(".gx-x-axis").selectAll("text").attr("transform", "rotate(-35)").attr("text-anchor", "end").attr("dx", "-4px").attr("dy", "4px");
+  const xLabel = xDef.label;
   const yLabel = yDef?.label || yKey;
   svg.select(".gx-x-label").attr("x", W / 2).attr("y", H - 4).text(xLabel);
   svg.select(".gx-y-label").attr("x", -H / 2).attr("y", 12).text(yLabel);
@@ -3652,6 +3699,7 @@ function gxRender() {
     .attr("cx", d => xs(xv(d))).attr("cy", d => ys(yv(d)))
     .attr("r", 0).attr("opacity", 0).attr("cursor", "pointer")
     .on("click", (e, d) => { e.stopPropagation(); gxSelect(d); })
+    .on("dblclick", (e, d) => { e.stopPropagation(); openContactDetail(d.id); })
     .on("mouseenter", (e, d) => gxShowTooltip(d, e))
     .on("mouseleave", () => gxHideTooltip());
   const dotMerge = dotSel.merge(dotEnter);
@@ -3669,7 +3717,8 @@ function gxRender() {
     const lblEnter = lblSel.enter().append("text").attr("class", "gx-label")
       .attr("text-anchor", "middle").attr("font-size", "9px").attr("fill", "rgba(220,220,230,0.6)")
       .attr("pointer-events", "auto").attr("cursor", "pointer")
-      .on("click", (e, d) => { e.stopPropagation(); gxSelect(d); });
+      .on("click", (e, d) => { e.stopPropagation(); gxSelect(d); })
+      .on("dblclick", (e, d) => { e.stopPropagation(); openContactDetail(d.id); });
     const lblMerge = lblSel.merge(lblEnter);
     lblMerge.text(d => d.name.length > 16 ? d.name.substring(0, 14) + ".." : d.name);
 
@@ -3693,8 +3742,7 @@ function gxRender() {
 
   const status = $("gx-status");
   if (status) {
-    status.textContent = `${nodes.length} contacts · X: ${xLabel} · Y: ${yLabel}` +
-      ` · Zoom: ${GX.zoomMode === "dynamic" ? "Dynamic" : "Fixed"}` + filterLabel +
+    status.textContent = `${nodes.length} contacts · Last Contact · ${yLabel}` + filterLabel +
       (GX.selected ? ` · Selected: ${GX.selected.name}` : "") +
       ` · Press ? for shortcuts`;
   }
@@ -3703,19 +3751,12 @@ function gxRender() {
 function gxSelect(node) {
   GX.selected = node;
   d3.selectAll(".gx-dot").classed("selected", d => node && d.id === node.id);
-  if (node) {
-    // Open full profile instead of partial graph detail panel
-    openContactDetail(node.id);
-  } else {
-    const detail = $("gx-detail");
-    if (detail) detail.classList.remove("open");
-  }
+  // Highlight only — double-click opens profile
   const status = $("gx-status");
   if (status) {
-    const xL = GX.axes.find(a => a.key === GX.xAxis)?.label || GX.xAxis;
-    const yL = GX.axes.find(a => a.key === GX.yAxis)?.label || GX.yAxis;
-    status.textContent = `${GX.nodes.length} contacts · X: ${xL} · Y: ${yL} · ` +
-      (node ? `Selected: ${node.name}` : "Click a contact or use arrow keys") + ` · Press ? for shortcuts`;
+    const yL = GX.yAxes.find(a => a.key === GX.yAxis)?.label || GX.yAxis;
+    status.textContent = `${GX.nodes.length} contacts · Last Contact · ${yL}` +
+      (node ? ` · Selected: ${node.name} (dbl-click to open)` : "") + ` · Press ? for shortcuts`;
   }
 }
 
@@ -3771,44 +3812,32 @@ function gxHideTooltip() {
 }
 
 function gxDynamicRescale(transform) {
-  // In dynamic zoom: rescale the axes using D3's rescaleX/Y,
-  // then reposition all elements without the transform on <g>
+  // Y-axis only zoom: X stays at time window, Y rescales
   if (!GX.xScale || !GX.yScale || !GX.data) return;
-  const xs = transform.rescaleX(GX.xScale);
+  const xs = GX.xScale; // X stays fixed to time window
   const ys = transform.rescaleY(GX.yScale);
   GX._xs = xs;
   GX._ys = ys;
 
   const xKey = GX.xAxis, yKey = GX.yAxis;
-  const xDef = GX.axes.find(a => a.key === xKey);
-  const yDef = GX.axes.find(a => a.key === yKey);
   const xv = d => { const v = d[xKey]; return v instanceof Date ? v : (v || 0); };
   const yv = d => { const v = d[yKey]; return v instanceof Date ? v : (v || 0); };
 
   const wrap = $("gx-canvas-wrap");
   const W = wrap ? wrap.clientWidth : 800;
   const H = wrap ? wrap.clientHeight : 600;
-  const margin = {
-    top: 20, right: 20,
-    bottom: (xDef && xDef.type === "time") ? 44 : 36,
-    left: (yDef && yDef.type === "time") ? 80 : 60
-  };
+  const margin = { top: 20, right: 20, bottom: 44, left: 60 };
 
-  const xAxisGen = xDef && xDef.type === "time"
-    ? d3.axisBottom(xs).ticks(8).tickFormat(d3.timeFormat("%b '%y"))
-    : d3.axisBottom(xs).ticks(8);
-  const yAxisGen = yDef && yDef.type === "time"
-    ? d3.axisLeft(ys).ticks(8).tickFormat(d3.timeFormat("%b '%y"))
-    : d3.axisLeft(ys).ticks(6);
+  // X is always time, Y is always numeric
+  const xAxisGen = d3.axisBottom(xs).ticks(8).tickFormat(d3.timeFormat("%b '%y"));
+  const yAxisGen = d3.axisLeft(ys).ticks(6);
 
   const svg = d3.select("#gx-svg");
   svg.select(".gx-x-axis").call(xAxisGen.tickSize(-H + margin.top + margin.bottom));
   svg.select(".gx-y-axis").call(yAxisGen.tickSize(-W + margin.left + margin.right));
   svg.selectAll(".gx-axis line").attr("stroke", "rgba(255,255,255,0.04)");
   svg.selectAll(".gx-axis path").attr("stroke", "rgba(255,255,255,0.08)");
-  if (xDef && xDef.type === "time") {
-    svg.select(".gx-x-axis").selectAll("text").attr("transform", "rotate(-35)").attr("text-anchor", "end").attr("dx", "-4px").attr("dy", "4px");
-  }
+  svg.select(".gx-x-axis").selectAll("text").attr("transform", "rotate(-35)").attr("text-anchor", "end").attr("dx", "-4px").attr("dy", "4px");
 
   // Reposition dots
   GX.g.select(".gx-dots-layer").selectAll("circle.gx-dot")
@@ -3839,21 +3868,16 @@ function gxBuildFilters() {
   const panel = $("gx-filter-panel");
   if (!panel || !GX.data) return;
 
-  // Compute min/max for each numeric axis
+  // Compute min/max for each numeric Y-axis
   const allNodes = GX.data.nodes;
-  const rows = GX.axes.filter(a => a.type === "num").map(a => {
+  const rows = GX.yAxes.filter(a => a.type === "num").map(a => {
     const vals = allNodes.map(n => n[a.key] || 0);
     const min = Math.min(...vals);
     const max = Math.max(...vals);
     return { key: a.key, label: a.label, short: a.short, min, max };
   });
-  // Time axes
-  const timeRows = GX.axes.filter(a => a.type === "time").map(a => {
-    const vals = allNodes.map(n => n[a.key] ? n[a.key].getTime() : 0).filter(v => v > 0);
-    const min = vals.length ? Math.min(...vals) : 0;
-    const max = vals.length ? Math.max(...vals) : Date.now();
-    return { key: a.key, label: a.label, short: a.short, min, max, isTime: true };
-  });
+  // No time filter rows needed — X axis is controlled by time window
+  const timeRows = [];
 
   let html = "";
   for (const r of [...rows, ...timeRows]) {
@@ -3915,11 +3939,31 @@ function gxCyclePill(current, options) {
 
 function setupGraphHandlers() {
   document.addEventListener("click", (e) => {
+    // Time window pills
+    const winPill = e.target.closest("[data-window]");
+    if (winPill) {
+      GX.timeWindow = winPill.dataset.window;
+      GX.timeOffset = 0; // reset to most recent
+      GX.currentTransform = d3.zoomIdentity;
+      if (GX.zoom) d3.select("#gx-svg").call(GX.zoom.transform, d3.zoomIdentity);
+      GX.g = null; // force rebuild for new domain
+      gxBuildToolbar(); gxRender(); return;
+    }
+    // Time window nav buttons (left/right)
+    const navBtn = e.target.closest(".gx-nav-btn");
+    if (navBtn) {
+      const dir = navBtn.dataset.nav;
+      if (dir === "left") GX.timeOffset++;
+      else if (dir === "right" && GX.timeOffset > 0) GX.timeOffset--;
+      GX.currentTransform = d3.zoomIdentity;
+      if (GX.zoom) d3.select("#gx-svg").call(GX.zoom.transform, d3.zoomIdentity);
+      GX.g = null;
+      gxBuildToolbar(); gxRender(); return;
+    }
     const pill = e.target.closest(".gx-pill");
     if (pill) {
       const axis = pill.dataset.axis, mode = pill.dataset.mode, key = pill.dataset.key;
-      if (axis === "x") GX.xAxis = key;
-      else if (axis === "y") GX.yAxis = key;
+      if (axis === "y") GX.yAxis = key;
       else if (mode === "color") GX.colorMode = key;
       else if (mode === "size") GX.sizeMode = key;
       // Reset zoom when axes change
@@ -4003,16 +4047,21 @@ function setupGraphHandlers() {
         $("gx-help-overlay")?.classList.remove("open");
         if (GX.filtersOpen) { GX.filtersOpen = false; $("gx-filter-panel")?.classList.remove("open"); $("gx-btn-filter")?.classList.remove("active"); }
         break;
-      case "x": case "X":
-        GX.xAxis = gxCyclePill(GX.xAxis, GX.axes);
-        GX.currentTransform = d3.zoomIdentity;
-        if (GX.zoom) d3.select("#gx-svg").call(GX.zoom.transform, d3.zoomIdentity);
-        gxBuildToolbar(); gxRender(); break;
       case "y": case "Y":
-        GX.yAxis = gxCyclePill(GX.yAxis, GX.axes);
+        GX.yAxis = gxCyclePill(GX.yAxis, GX.yAxes);
         GX.currentTransform = d3.zoomIdentity;
         if (GX.zoom) d3.select("#gx-svg").call(GX.zoom.transform, d3.zoomIdentity);
         gxBuildToolbar(); gxRender(); break;
+      case "[":
+        GX.timeOffset++;
+        GX.currentTransform = d3.zoomIdentity;
+        if (GX.zoom) d3.select("#gx-svg").call(GX.zoom.transform, d3.zoomIdentity);
+        GX.g = null; gxBuildToolbar(); gxRender(); break;
+      case "]":
+        if (GX.timeOffset > 0) GX.timeOffset--;
+        GX.currentTransform = d3.zoomIdentity;
+        if (GX.zoom) d3.select("#gx-svg").call(GX.zoom.transform, d3.zoomIdentity);
+        GX.g = null; gxBuildToolbar(); gxRender(); break;
       case "c": case "C": GX.colorMode = gxCyclePill(GX.colorMode, GX.colors); gxBuildToolbar(); gxRender(); break;
       case "s": case "S": GX.sizeMode = gxCyclePill(GX.sizeMode, GX.sizes); gxBuildToolbar(); gxRender(); break;
       case "g": GX.showGroupLines = !GX.showGroupLines; $("gx-btn-lines")?.classList.toggle("active"); gxRender(); break;
