@@ -936,52 +936,129 @@
       font-size: 11px; padding: 2px 8px; border-radius: 4px; cursor: pointer; float: right;
     }
 
-    /* Graph */
-    .graph-toolbar { display:flex; flex-wrap:wrap; gap:6px; align-items:center; justify-content:space-between; margin-bottom:6px; }
-    .graph-toolbar-left, .graph-toolbar-right { display:flex; flex-wrap:wrap; gap:5px; align-items:center; }
-    .graph-select {
+    /* ── Contact Explorer (Graph Tab) ── */
+    .gx-toolbar {
+      display:flex; flex-wrap:wrap; gap:6px 12px; align-items:center; padding:6px 0;
+      border-bottom:1px solid var(--border); margin-bottom:0;
+    }
+    .gx-toolbar-section { display:flex; align-items:center; gap:4px; }
+    .gx-toolbar-right { margin-left:auto; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+    .gx-label { font-size:10px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:.5px; min-width:14px; }
+    .gx-pill-group { display:flex; gap:2px; }
+    .gx-pill {
+      background:var(--surface2); color:var(--text-dim); border:1px solid transparent;
+      border-radius:12px; padding:3px 10px; font-size:10px; cursor:pointer;
+      transition: all .15s; white-space:nowrap; user-select:none;
+    }
+    .gx-pill:hover { color:var(--text); background:var(--surface); }
+    .gx-pill.active { color:#fff; background:var(--accent); border-color:var(--accent); }
+    .gx-tier-pills { display:flex; gap:2px; }
+    .gx-tier-pill {
+      width:18px; height:18px; border-radius:50%; border:2px solid transparent;
+      cursor:pointer; transition: all .15s; opacity:.5;
+    }
+    .gx-tier-pill:hover { opacity:.8; transform:scale(1.15); }
+    .gx-tier-pill.active { opacity:1; border-color:#fff; transform:scale(1.2); }
+    .gx-search {
       background:var(--surface2); color:var(--text); border:1px solid var(--border);
-      border-radius:5px; padding:5px 8px; font-size:11px; cursor:pointer; outline:none;
-      transition: border-color 0.15s;
+      border-radius:12px; padding:4px 12px; font-size:11px; width:120px; outline:none;
+      transition: border-color .15s, width .2s;
     }
-    .graph-select:focus { border-color:var(--accent); }
-    .graph-btn {
-      background:var(--surface2); color:var(--text-dim); border:1px solid var(--border);
-      border-radius:5px; padding:4px 10px; font-size:11px; cursor:pointer;
-      transition: all 0.15s;
+    .gx-search:focus { border-color:var(--accent); width:180px; }
+    .gx-icon-btn {
+      width:26px; height:26px; border-radius:50%; border:1px solid var(--border);
+      background:var(--surface2); color:var(--text-dim); font-size:10px; font-weight:700;
+      cursor:pointer; transition: all .15s; display:flex; align-items:center; justify-content:center;
     }
-    .graph-btn:hover { background:var(--surface); color:var(--text); border-color:var(--accent); }
-    .graph-btn.active { background:var(--accent); color:#000; border-color:var(--accent); }
-    .graph-legend { display:flex; gap:8px; font-size:10px; color:var(--text-dim); }
-    .graph-legend-item { display:flex; align-items:center; gap:3px; }
-    .graph-legend-dot { width:8px; height:8px; border-radius:50%; }
-    .graph-tooltip {
-      position:absolute; display:none; background:rgba(20,20,30,0.95); border:1px solid var(--border);
-      border-radius:8px; padding:12px 14px; font-size:12px; pointer-events:none; z-index:20;
-      max-width:280px; box-shadow:0 8px 32px rgba(0,0,0,0.6); backdrop-filter:blur(8px);
-      line-height:1.5;
+    .gx-icon-btn:hover { color:var(--text); border-color:var(--accent); }
+    .gx-icon-btn.active { background:var(--accent); color:#000; border-color:var(--accent); }
+
+    /* Split layout */
+    .gx-split { display:flex; height:calc(100vh - 180px); gap:0; }
+    .gx-canvas-wrap {
+      flex:1; position:relative; background:#08080d; border-radius:8px 0 0 8px;
+      border:1px solid var(--border); overflow:hidden;
     }
-    .graph-tooltip .tt-name { font-weight:700; font-size:13px; margin-bottom:4px; }
-    .graph-tooltip .tt-tier { font-size:10px; padding:1px 6px; border-radius:3px; margin-left:4px; }
-    .graph-tooltip .tt-stats { color:var(--text-dim); font-size:11px; }
-    .graph-tooltip .tt-tags { color:var(--accent); font-size:10px; margin-top:4px; }
-    .graph-tooltip .tt-groups { color:var(--text-dim); font-size:10px; }
-    .graph-status {
-      font-size:10px; color:var(--text-dim); padding:4px 0; text-align:center; opacity:0.6;
+    .gx-canvas-wrap svg { width:100%; height:100%; }
+    .gx-detail {
+      width:0; overflow:hidden; background:var(--surface); border-radius:0 8px 8px 0;
+      border:1px solid var(--border); border-left:0; transition: width .3s ease;
+      display:flex; flex-direction:column;
     }
-    .graph-help-overlay {
-      position:absolute; inset:0; background:rgba(0,0,0,0.7); z-index:30;
-      display:flex; align-items:center; justify-content:center; backdrop-filter:blur(4px);
+    .gx-detail.open { width:380px; }
+    .gx-detail-header {
+      display:flex; justify-content:space-between; align-items:center;
+      padding:12px 14px; border-bottom:1px solid var(--border); min-height:44px;
     }
-    .graph-help-card {
+    .gx-detail-name { font-weight:700; font-size:15px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .gx-detail-close {
+      background:none; border:none; color:var(--text-dim); font-size:20px; cursor:pointer;
+      width:28px; height:28px; display:flex; align-items:center; justify-content:center;
+      border-radius:50%; transition: all .15s;
+    }
+    .gx-detail-close:hover { background:var(--surface2); color:var(--text); }
+    .gx-detail-body { flex:1; overflow-y:auto; padding:14px; font-size:12px; line-height:1.6; }
+    .gx-detail-body .gxd-section { margin-bottom:14px; }
+    .gx-detail-body .gxd-label { font-size:9px; text-transform:uppercase; letter-spacing:.5px; color:var(--text-dim); margin-bottom:4px; }
+    .gx-detail-body .gxd-stat-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+    .gx-detail-body .gxd-stat { background:var(--surface2); border-radius:6px; padding:8px; text-align:center; }
+    .gx-detail-body .gxd-stat-val { font-size:18px; font-weight:700; color:var(--accent); }
+    .gx-detail-body .gxd-stat-lbl { font-size:9px; color:var(--text-dim); text-transform:uppercase; }
+    .gx-detail-body .gxd-tags { display:flex; flex-wrap:wrap; gap:4px; }
+    .gx-detail-body .gxd-tag {
+      background:var(--surface2); color:var(--accent); border-radius:10px; padding:2px 8px;
+      font-size:10px; cursor:pointer; transition: background .15s;
+    }
+    .gx-detail-body .gxd-tag:hover { background:var(--accent); color:#000; }
+    .gx-detail-body .gxd-group { color:var(--text-dim); font-size:11px; padding:2px 0; }
+    .gx-detail-body .gxd-btn {
+      display:block; width:100%; padding:8px; margin-top:6px; border-radius:6px;
+      background:var(--accent); color:#000; border:none; font-weight:600; font-size:12px;
+      cursor:pointer; text-align:center; transition: opacity .15s;
+    }
+    .gx-detail-body .gxd-btn:hover { opacity:.85; }
+
+    /* Tooltip */
+    .gx-tooltip {
+      position:absolute; display:none; background:rgba(16,16,24,.95); border:1px solid var(--border);
+      border-radius:8px; padding:10px 12px; font-size:11px; pointer-events:none; z-index:20;
+      max-width:260px; box-shadow:0 8px 32px rgba(0,0,0,.6); backdrop-filter:blur(8px); line-height:1.5;
+    }
+    .gx-loading {
+      position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+      color:var(--text-dim); font-size:13px; z-index:5;
+    }
+    .gx-status { font-size:10px; color:var(--text-dim); padding:4px 8px; opacity:.7; }
+
+    /* Help overlay */
+    .gx-help-overlay {
+      position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:50;
+      display:none; align-items:center; justify-content:center; backdrop-filter:blur(4px);
+    }
+    .gx-help-overlay.open { display:flex; }
+    .gx-help-card {
       background:var(--surface); border:1px solid var(--border); border-radius:10px;
-      padding:20px 28px; max-width:360px; color:var(--text);
+      padding:20px 28px; max-width:380px; color:var(--text);
     }
-    .graph-help-grid { display:grid; grid-template-columns:auto 1fr; gap:6px 14px; font-size:12px; }
-    .graph-help-grid kbd {
+    .gx-help-card h3 { margin:0 0 12px; font-size:14px; }
+    .gx-help-grid { display:grid; grid-template-columns:auto 1fr; gap:5px 14px; font-size:12px; }
+    .gx-help-grid kbd {
       background:var(--surface2); border:1px solid var(--border); border-radius:3px;
       padding:1px 6px; font-family:monospace; font-size:11px; text-align:center; min-width:36px;
     }
+
+    /* D3 scatter plot styles */
+    .gx-dot { transition: r .3s ease, opacity .3s ease; }
+    .gx-dot.selected { stroke:#fff; stroke-width:2; }
+    .gx-dot.dimmed { opacity:.12; }
+    .gx-dot.highlighted { stroke:var(--accent); stroke-width:2; }
+    @keyframes gx-pulse { 0%,100%{stroke-opacity:1} 50%{stroke-opacity:.3} }
+    .gx-dot.selected { animation: gx-pulse 1.5s ease infinite; }
+    .gx-edge { stroke-opacity:.12; }
+    .gx-edge.highlighted { stroke-opacity:.5; }
+    .gx-axis text { fill:var(--text-dim); font-size:10px; }
+    .gx-axis line, .gx-axis path { stroke:var(--border); }
+    .gx-axis-label { fill:var(--text-dim); font-size:10px; text-anchor:middle; }
 
     /* Group Modal */
     .modal-overlay {
@@ -1778,76 +1855,76 @@
 
     </div>
 
-    <!-- ==================== Graph Tab ==================== -->
+    <!-- ==================== Graph Tab — Contact Explorer ==================== -->
     <div id="tab-graph" class="tab-content">
-      <div class="graph-toolbar">
-        <div class="graph-toolbar-left">
-          <select id="graph-view-mode" class="graph-select" title="View mode (V)">
-            <option value="force">Force</option>
-            <option value="radial-out">Radial Out</option>
-            <option value="radial-in">Radial In</option>
-            <option value="td">Top → Down</option>
-            <option value="bu">Bottom → Up</option>
-            <option value="lr">Left → Right</option>
-            <option value="rl">Right → Left</option>
-          </select>
-          <select id="graph-tier-filter" class="graph-select" title="Filter by tier (T)">
-            <option value="all">All Tiers</option>
-          </select>
-          <select id="graph-color-by" class="graph-select" title="Color by (C)">
-            <option value="tier">Color: Tier</option>
-            <option value="activity">Color: Activity</option>
-            <option value="recency">Color: Recency</option>
-          </select>
-          <select id="graph-size-by" class="graph-select" title="Size by (S)">
-            <option value="messages">Size: Messages</option>
-            <option value="quality">Size: Quality</option>
-            <option value="recent">Size: Recent Activity</option>
-            <option value="equal">Size: Equal</option>
-          </select>
-          <select id="graph-min-messages" class="graph-select" title="Min messages">
-            <option value="50">50+ msgs</option>
-            <option value="20">20+ msgs</option>
-            <option value="10">10+ msgs</option>
-            <option value="1">All</option>
-          </select>
-          <div class="graph-search-wrap">
-            <input type="text" id="graph-search" class="graph-select" placeholder="Search... (F)" style="width:140px;">
-          </div>
+      <!-- Toolbar -->
+      <div class="gx-toolbar">
+        <div class="gx-toolbar-section">
+          <span class="gx-label">X</span>
+          <div class="gx-pill-group" id="gx-x-pills"></div>
         </div>
-        <div class="graph-toolbar-right">
-          <div class="graph-legend" id="graph-legend"></div>
-          <button class="graph-btn" id="graph-btn-fit" title="Fit to screen (0)">Fit</button>
-          <button class="graph-btn" id="graph-btn-pause" title="Pause/resume simulation (Space)">Pause</button>
-          <button class="graph-btn" id="graph-btn-help" title="Keyboard shortcuts (?)">?</button>
+        <div class="gx-toolbar-section">
+          <span class="gx-label">Y</span>
+          <div class="gx-pill-group" id="gx-y-pills"></div>
+        </div>
+        <div class="gx-toolbar-section">
+          <span class="gx-label">Color</span>
+          <div class="gx-pill-group" id="gx-color-pills"></div>
+        </div>
+        <div class="gx-toolbar-section">
+          <span class="gx-label">Size</span>
+          <div class="gx-pill-group" id="gx-size-pills"></div>
+        </div>
+        <div class="gx-toolbar-section gx-toolbar-right">
+          <div class="gx-tier-pills" id="gx-tier-pills"></div>
+          <input type="text" id="gx-search" class="gx-search" placeholder="Search (F)">
+          <button class="gx-icon-btn" id="gx-btn-lines" title="Group connections (G)">G</button>
+          <button class="gx-icon-btn" id="gx-btn-tags" title="Tag connections (T)">T</button>
+          <button class="gx-icon-btn" id="gx-btn-labels" title="Labels (L)">L</button>
+          <button class="gx-icon-btn" id="gx-btn-help" title="Help (?)">?</button>
         </div>
       </div>
-      <div id="graph-container" style="width:100%;height:calc(100vh - 160px);background:#0a0a0f;border-radius:8px;border:1px solid var(--border);position:relative;overflow:hidden;">
-        <div id="graph-loading" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--text-dim);z-index:5;">Loading graph...</div>
-        <div id="graph-tooltip" class="graph-tooltip"></div>
-        <div id="graph-help-overlay" class="graph-help-overlay" style="display:none;">
-          <div class="graph-help-card">
-            <h3 style="margin:0 0 12px 0;font-size:14px;">Keyboard Shortcuts</h3>
-            <div class="graph-help-grid">
-              <kbd>Space</kbd><span>Pause / Resume</span>
-              <kbd>0</kbd><span>Fit to screen</span>
-              <kbd>+</kbd><span>Zoom in</span>
-              <kbd>-</kbd><span>Zoom out</span>
-              <kbd>V</kbd><span>Cycle view mode</span>
-              <kbd>T</kbd><span>Cycle tier filter</span>
-              <kbd>C</kbd><span>Cycle color mode</span>
-              <kbd>S</kbd><span>Cycle size mode</span>
-              <kbd>F</kbd><span>Focus search</span>
-              <kbd>Esc</kbd><span>Clear search / close</span>
-              <kbd>L</kbd><span>Toggle labels</span>
-              <kbd>E</kbd><span>Toggle edges</span>
-              <kbd>?</kbd><span>Toggle this help</span>
-            </div>
-            <p style="margin:10px 0 0;font-size:11px;color:var(--text-dim);">Click node to open contact. Hover for details. Drag to rearrange.</p>
+      <!-- Split view -->
+      <div class="gx-split" id="gx-split">
+        <div class="gx-canvas-wrap" id="gx-canvas-wrap">
+          <svg id="gx-svg"></svg>
+          <div id="gx-tooltip" class="gx-tooltip"></div>
+          <div id="gx-loading" class="gx-loading">Loading contacts...</div>
+        </div>
+        <div class="gx-detail" id="gx-detail">
+          <div class="gx-detail-header">
+            <div class="gx-detail-name" id="gx-detail-name"></div>
+            <button class="gx-detail-close" id="gx-detail-close">&times;</button>
+          </div>
+          <div class="gx-detail-body" id="gx-detail-body"></div>
+        </div>
+      </div>
+      <!-- Status bar -->
+      <div class="gx-status" id="gx-status"></div>
+      <!-- Help overlay -->
+      <div class="gx-help-overlay" id="gx-help-overlay">
+        <div class="gx-help-card">
+          <h3>Keyboard Shortcuts</h3>
+          <div class="gx-help-grid">
+            <kbd>&uarr;&darr;&larr;&rarr;</kbd><span>Navigate contacts</span>
+            <kbd>Enter</kbd><span>Open contact detail</span>
+            <kbd>Esc</kbd><span>Close detail / deselect</span>
+            <kbd>X</kbd><span>Cycle X axis</span>
+            <kbd>Y</kbd><span>Cycle Y axis</span>
+            <kbd>C</kbd><span>Cycle color</span>
+            <kbd>S</kbd><span>Cycle size</span>
+            <kbd>G</kbd><span>Toggle group connections</span>
+            <kbd>T</kbd><span>Toggle tag connections</span>
+            <kbd>L</kbd><span>Toggle labels</span>
+            <kbd>F</kbd><span>Search</span>
+            <kbd>1-5</kbd><span>Filter by tier</span>
+            <kbd>0</kbd><span>All tiers</span>
+            <kbd>+/-</kbd><span>Zoom in/out</span>
+            <kbd>R</kbd><span>Reset zoom</span>
+            <kbd>?</kbd><span>This help</span>
           </div>
         </div>
       </div>
-      <div class="graph-status" id="graph-status"></div>
     </div>
 
     <!-- ==================== Messaging Tab ==================== -->
@@ -1996,7 +2073,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-  <script src="//cdn.jsdelivr.net/npm/force-graph"></script>
+  <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
   <script src="shared.js"></script>
   <script src="friends.js"></script>
 </body>

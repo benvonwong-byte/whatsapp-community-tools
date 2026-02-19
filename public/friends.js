@@ -2951,413 +2951,428 @@ async function toggleMonitor(chatId, enabled) {
   }
 }
 
-// ── Graph Visualization (force-graph) ──
+// ── Contact Explorer (D3 Scatter Plot) ──
 
-let graphInstance = null;
-let graphData = null;
-let graphPaused = false;
-let graphShowLabels = true;
-let graphShowEdges = true;
-let graphHighlightNode = null;
-let graphNeighborSet = new Set();
-
-function graphNodeLabel(n) {
-  if (n.name && n.name.trim() && n.name !== "Unknown") return n.name;
-  const ph = (n.id || "").split("@")[0];
-  if (ph && /^\d{7,15}$/.test(ph)) return "+" + ph;
-  return n.name || n.id || "?";
-}
+const GX = {
+  data: null, nodes: [], edges: [], tagEdges: [],
+  svg: null, g: null, zoom: null,
+  xScale: null, yScale: null,
+  selected: null,
+  showLabels: true, showGroupLines: false, showTagLines: false,
+  tierFilter: "all",
+  searchQ: "",
+  xAxis: "messages", yAxis: "daysSince",
+  colorMode: "tier", sizeMode: "messages",
+  axes: [
+    { key: "messages", label: "Messages", short: "Msgs" },
+    { key: "messages30d", label: "Recent (30d)", short: "30d" },
+    { key: "daysSince", label: "Days Since Contact", short: "Days" },
+    { key: "quality", label: "Quality Score", short: "Quality" },
+    { key: "ratio", label: "Sent/Recv Ratio", short: "Ratio" },
+    { key: "groupCount", label: "Groups", short: "Groups" },
+    { key: "tagCount", label: "Tags", short: "Tags" },
+    { key: "daysKnown", label: "Relationship Age", short: "Age" },
+    { key: "sent", label: "Sent", short: "Sent" },
+    { key: "received", label: "Received", short: "Recv" }
+  ],
+  colors: [
+    { key: "tier", label: "Tier" },
+    { key: "recency", label: "Recency" },
+    { key: "activity", label: "Activity" }
+  ],
+  sizes: [
+    { key: "messages", label: "Msgs" },
+    { key: "quality", label: "Quality" },
+    { key: "messages30d", label: "30d" },
+    { key: "equal", label: "Equal" }
+  ],
+  minMessages: 50,
+  tiers: []
+};
 
 async function loadGraph() {
-  const container = $("graph-container");
-  const loading = $("graph-loading");
-  if (!container) return;
-  if (loading) { loading.style.display = "flex"; loading.textContent = "Loading graph data..."; }
-
+  const loading = $("gx-loading");
+  if (loading) loading.style.display = "flex";
   try {
-    const minMsgs = $("graph-min-messages")?.value || "50";
-    const res = await cachedFetch("/api/friends/graph?minMessages=" + minMsgs);
-    if (!res.ok) throw new Error("Failed to load graph");
-    graphData = await res.json();
+    const res = await cachedFetch("/api/friends/graph?minMessages=" + GX.minMessages);
+    if (!res.ok) throw new Error("Failed");
+    const data = await res.json();
+    GX.data = data;
+    GX.tiers = data.tiers || [];
     if (loading) loading.style.display = "none";
-    renderGraph(graphData);
+    gxBuildToolbar();
+    gxRender();
   } catch (err) {
-    console.error("Failed to load graph:", err);
-    if (loading) loading.textContent = "Failed to load graph: " + err.message;
+    console.error("Graph load error:", err);
+    if (loading) loading.textContent = "Failed to load: " + err.message;
   }
 }
 
-function getNodeColor(n, mode) {
-  if (mode === "activity") {
-    const m = Math.min(n.messages30d || 0, 100);
-    const r = Math.round(40 + m * 2.1);
-    const g = Math.round(60 + m * 1.8);
-    const b = Math.round(80 + m * 1.7);
-    return `rgb(${r},${g},${b})`;
+function gxBuildToolbar() {
+  const xC = $("gx-x-pills");
+  if (xC) xC.innerHTML = GX.axes.map(a =>
+    `<span class="gx-pill${a.key === GX.xAxis ? ' active' : ''}" data-axis="x" data-key="${a.key}">${a.short}</span>`
+  ).join("");
+  const yC = $("gx-y-pills");
+  if (yC) yC.innerHTML = GX.axes.map(a =>
+    `<span class="gx-pill${a.key === GX.yAxis ? ' active' : ''}" data-axis="y" data-key="${a.key}">${a.short}</span>`
+  ).join("");
+  const cC = $("gx-color-pills");
+  if (cC) cC.innerHTML = GX.colors.map(c =>
+    `<span class="gx-pill${c.key === GX.colorMode ? ' active' : ''}" data-mode="color" data-key="${c.key}">${c.label}</span>`
+  ).join("");
+  const sC = $("gx-size-pills");
+  if (sC) sC.innerHTML = GX.sizes.map(s =>
+    `<span class="gx-pill${s.key === GX.sizeMode ? ' active' : ''}" data-mode="size" data-key="${s.key}">${s.label}</span>`
+  ).join("");
+  const tC = $("gx-tier-pills");
+  if (tC && GX.tiers.length > 0) {
+    let html = `<span class="gx-tier-pill active" data-tier="all" style="background:#888;" title="All"></span>`;
+    for (const t of GX.tiers) {
+      html += `<span class="gx-tier-pill" data-tier="${t.id}" style="background:${t.color};" title="${esc(t.name)}"></span>`;
+    }
+    html += `<span class="gx-tier-pill" data-tier="none" style="background:#444;" title="Unassigned"></span>`;
+    tC.innerHTML = html;
   }
-  if (mode === "recency") {
-    const now = Date.now() / 1000;
-    const days = (now - (n.lastSeen || 0)) / 86400;
-    if (days < 7) return "#4fc3f7";
-    if (days < 30) return "#81c784";
-    if (days < 90) return "#ffb74d";
-    if (days < 365) return "#f06292";
-    return "#555";
-  }
-  // tier (default)
-  return n.tierColor || "#555";
 }
 
-function getNodeSize(n, mode) {
-  if (mode === "quality") return Math.max(2, Math.min(14, (n.quality || 0) / 8));
-  if (mode === "recent") return Math.max(2, Math.min(14, Math.sqrt(n.messages30d || 0) * 1.5));
-  if (mode === "equal") return 4;
-  // messages (default)
-  return Math.max(2, Math.min(14, Math.sqrt(n.messages || 0) / 3));
+function gxGetColor(n) {
+  if (GX.colorMode === "activity") {
+    const m = Math.min(n.messages30d || 0, 80);
+    return d3.interpolateViridis(m / 80);
+  }
+  if (GX.colorMode === "recency") {
+    const d = n.daysSince || 0;
+    if (d < 7) return "#4fc3f7";
+    if (d < 30) return "#81c784";
+    if (d < 90) return "#ffb74d";
+    if (d < 365) return "#f06292";
+    return "#636e72";
+  }
+  return n.tierColor || "#636e72";
 }
 
-function renderGraph(data) {
-  const container = $("graph-container");
-  if (!container || !data || !data.nodes.length) return;
+function gxGetRadius(n) {
+  const m = GX.sizeMode;
+  if (m === "equal") return 5;
+  if (m === "quality") return Math.max(3, Math.min(16, (n.quality || 0) / 7));
+  if (m === "messages30d") return Math.max(3, Math.min(16, Math.sqrt(n.messages30d || 0) * 1.2));
+  return Math.max(3, Math.min(16, Math.sqrt(n.messages || 0) / 2.5));
+}
 
-  // Clean up previous
-  if (graphInstance) { graphInstance._destructor(); graphInstance = null; }
+function gxFilteredNodes() {
+  if (!GX.data) return [];
+  let nodes = GX.data.nodes;
+  if (GX.tierFilter !== "all") {
+    nodes = nodes.filter(n => GX.tierFilter === "none" ? !n.tierId : String(n.tierId) === GX.tierFilter);
+  }
+  return nodes;
+}
 
-  const tierFilter = $("graph-tier-filter")?.value || "all";
-  const viewMode = $("graph-view-mode")?.value || "force";
-  const colorBy = $("graph-color-by")?.value || "tier";
-  const sizeBy = $("graph-size-by")?.value || "messages";
+function gxRender() {
+  const wrap = $("gx-canvas-wrap");
+  if (!wrap || !GX.data) return;
 
-  // Filter nodes
-  const filteredNodes = tierFilter === "all"
-    ? data.nodes
-    : data.nodes.filter(n => tierFilter === "none" ? !n.tierId : String(n.tierId) === tierFilter);
-  const nodeIds = new Set(filteredNodes.map(n => n.id));
+  const nodes = gxFilteredNodes();
+  GX.nodes = nodes;
+  const nodeIds = new Set(nodes.map(n => n.id));
+  GX.edges = (GX.data.edges || []).filter(e => nodeIds.has(e.source) && nodeIds.has(e.target));
+  GX.tagEdges = (GX.data.tagEdges || []).filter(e => nodeIds.has(e.source) && nodeIds.has(e.target));
 
-  // Filter edges
-  const filteredEdges = data.edges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target));
+  const W = wrap.clientWidth;
+  const H = wrap.clientHeight;
+  const margin = { top: 20, right: 20, bottom: 36, left: 50 };
 
-  // Build neighbor map for highlight on hover
-  const neighborMap = {};
-  filteredEdges.forEach(e => {
-    if (!neighborMap[e.source]) neighborMap[e.source] = new Set();
-    if (!neighborMap[e.target]) neighborMap[e.target] = new Set();
-    neighborMap[e.source].add(e.target);
-    neighborMap[e.target].add(e.source);
-  });
+  const xKey = GX.xAxis;
+  const yKey = GX.yAxis;
+  const xExt = d3.extent(nodes, d => d[xKey] || 0);
+  const yExt = d3.extent(nodes, d => d[yKey] || 0);
+  const xPad = (xExt[1] - xExt[0]) * 0.05 || 1;
+  const yPad = (yExt[1] - yExt[0]) * 0.05 || 1;
 
-  // Search state
-  const searchQ = ($("graph-search")?.value || "").toLowerCase().trim();
+  GX.xScale = d3.scaleLinear().domain([xExt[0] - xPad, xExt[1] + xPad]).range([margin.left, W - margin.right]);
+  GX.yScale = d3.scaleLinear().domain([yExt[0] - yPad, yExt[1] + yPad]).range([H - margin.bottom, margin.top]);
 
-  // DAG mode mapping
-  const dagModes = { "force": null, "radial-out": "radialout", "radial-in": "radialin", "td": "td", "bu": "bu", "lr": "lr", "rl": "rl" };
-  const dagMode = dagModes[viewMode] || null;
+  const svg = d3.select("#gx-svg");
+  svg.attr("width", W).attr("height", H);
 
-  // Build graph data — force-graph expects { nodes: [{id, ...}], links: [{source, target, ...}] }
-  const gData = {
-    nodes: filteredNodes.map(n => ({
-      id: n.id, name: n.name, label: graphNodeLabel(n),
-      messages: n.messages, messages30d: n.messages30d,
-      sent: n.sent, received: n.received, lastSeen: n.lastSeen,
-      tierId: n.tierId, tierName: n.tierName, tierColor: n.tierColor,
-      tags: n.tags || [], groups: n.groups || [],
-      quality: n.quality,
-      _color: getNodeColor(n, colorBy),
-      _size: getNodeSize(n, sizeBy)
-    })),
-    links: filteredEdges.map(e => ({ source: e.source, target: e.target, weight: e.weight }))
-  };
-
-  graphHighlightNode = null;
-  graphNeighborSet = new Set();
-
-  graphInstance = ForceGraph()(container)
-    .graphData(gData)
-    .backgroundColor("#0a0a0f")
-    .nodeId("id")
-    .nodeLabel("")  // we draw custom tooltip
-    .nodeVal(n => n._size * n._size)
-    .nodeColor(n => {
-      if (searchQ && !n.label.toLowerCase().includes(searchQ)) return "rgba(60,60,70,0.3)";
-      if (graphHighlightNode) {
-        if (n.id === graphHighlightNode) return "#fff";
-        if (graphNeighborSet.has(n.id)) return n._color;
-        return "rgba(60,60,70,0.25)";
-      }
-      return n._color;
-    })
-    .nodeCanvasObjectMode(() => "after")
-    .nodeCanvasObject((node, ctx, globalScale) => {
-      if (!graphShowLabels) return;
-      const sz = node._size || 4;
-      // Only show labels at sufficient zoom or for highlighted nodes
-      const showLabel = globalScale > 1.2 || (graphHighlightNode && (node.id === graphHighlightNode || graphNeighborSet.has(node.id)));
-      if (!showLabel && globalScale <= 2.5) return;
-      const label = node.label;
-      const fontSize = Math.max(10, 12 / globalScale);
-      ctx.font = `${fontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "top";
-      // Highlighted nodes get brighter text
-      if (graphHighlightNode && node.id === graphHighlightNode) {
-        ctx.fillStyle = "#fff";
-      } else if (graphHighlightNode && !graphNeighborSet.has(node.id)) {
-        ctx.fillStyle = "rgba(180,180,180,0.15)";
-      } else if (searchQ && !node.label.toLowerCase().includes(searchQ)) {
-        ctx.fillStyle = "rgba(180,180,180,0.15)";
-      } else {
-        ctx.fillStyle = "rgba(220,220,230,0.7)";
-      }
-      ctx.fillText(label, node.x, node.y + sz + 2);
-    })
-    .linkColor(link => {
-      if (!graphShowEdges) return "rgba(0,0,0,0)";
-      if (graphHighlightNode) {
-        const s = typeof link.source === "object" ? link.source.id : link.source;
-        const t = typeof link.target === "object" ? link.target.id : link.target;
-        if (s === graphHighlightNode || t === graphHighlightNode) return "rgba(79,195,247,0.4)";
-        return "rgba(255,255,255,0.02)";
-      }
-      return "rgba(255,255,255,0.06)";
-    })
-    .linkWidth(link => {
-      if (!graphShowEdges) return 0;
-      if (graphHighlightNode) {
-        const s = typeof link.source === "object" ? link.source.id : link.source;
-        const t = typeof link.target === "object" ? link.target.id : link.target;
-        if (s === graphHighlightNode || t === graphHighlightNode) return 1.5;
-      }
-      return 0.3;
-    })
-    .linkDirectionalParticles(link => {
-      if (!graphHighlightNode) return 0;
-      const s = typeof link.source === "object" ? link.source.id : link.source;
-      const t = typeof link.target === "object" ? link.target.id : link.target;
-      return (s === graphHighlightNode || t === graphHighlightNode) ? 2 : 0;
-    })
-    .linkDirectionalParticleWidth(1.5)
-    .linkDirectionalParticleColor(() => "rgba(79,195,247,0.6)")
-    .dagMode(dagMode)
-    .dagLevelDistance(dagMode ? 50 : undefined)
-    .d3AlphaDecay(0.02)
-    .d3VelocityDecay(0.3)
-    .warmupTicks(dagMode ? 150 : 80)
-    .cooldownTime(dagMode ? 0 : 5000)
-    .onNodeHover(node => {
-      container.style.cursor = node ? "pointer" : "default";
-      graphHighlightNode = node ? node.id : null;
-      graphNeighborSet = node && neighborMap[node.id] ? neighborMap[node.id] : new Set();
-      // Update tooltip
-      const tooltip = $("graph-tooltip");
-      if (!tooltip) return;
-      if (!node) { tooltip.style.display = "none"; return; }
-      const tierBadge = node.tierName
-        ? `<span class="tt-tier" style="background:${node.tierColor || "#555"}22;color:${node.tierColor || "#555"};">${esc(node.tierName)}</span>`
-        : "";
-      tooltip.innerHTML =
-        `<div class="tt-name">${esc(node.label)} ${tierBadge}</div>` +
-        `<div class="tt-stats">${node.messages} msgs total &middot; ${node.messages30d} last 30d</div>` +
-        `<div class="tt-stats">Sent ${node.sent} &middot; Received ${node.received}</div>` +
-        (node.tags.length > 0 ? `<div class="tt-tags">${node.tags.slice(0, 6).join(", ")}</div>` : "") +
-        (node.groups.length > 0 ? `<div class="tt-groups">Groups: ${node.groups.slice(0, 4).join(", ")}</div>` : "");
-      tooltip.style.display = "block";
-    })
-    .onNodeClick(node => {
-      if (node) openContactDetail(node.id);
-    })
-    .onBackgroundClick(() => {
-      graphHighlightNode = null;
-      graphNeighborSet = new Set();
+  if (!GX.g) {
+    svg.selectAll("*").remove();
+    GX.g = svg.append("g").attr("class", "gx-main");
+    GX.g.append("rect").attr("class", "gx-bg").attr("width", W * 3).attr("height", H * 3)
+      .attr("x", -W).attr("y", -H).attr("fill", "transparent");
+    GX.g.append("g").attr("class", "gx-edges-layer");
+    GX.g.append("g").attr("class", "gx-tag-edges-layer");
+    GX.g.append("g").attr("class", "gx-dots-layer");
+    GX.g.append("g").attr("class", "gx-labels-layer");
+    svg.append("g").attr("class", "gx-axis gx-x-axis").attr("transform", `translate(0,${H - margin.bottom})`);
+    svg.append("g").attr("class", "gx-axis gx-y-axis").attr("transform", `translate(${margin.left},0)`);
+    svg.append("text").attr("class", "gx-axis-label gx-x-label").attr("x", W / 2).attr("y", H - 4);
+    svg.append("text").attr("class", "gx-axis-label gx-y-label")
+      .attr("transform", "rotate(-90)").attr("x", -H / 2).attr("y", 12);
+    GX.zoom = d3.zoom().scaleExtent([0.3, 20]).on("zoom", (e) => { GX.g.attr("transform", e.transform); });
+    svg.call(GX.zoom);
+    svg.on("click", (e) => {
+      if (e.target.classList.contains("gx-bg") || e.target.tagName === "svg") gxSelect(null);
     });
+  }
 
-  // Move tooltip with mouse
-  container.addEventListener("mousemove", (e) => {
-    const tooltip = $("graph-tooltip");
-    if (tooltip && tooltip.style.display !== "none") {
-      const rect = container.getBoundingClientRect();
-      let tx = e.clientX - rect.left + 16;
-      let ty = e.clientY - rect.top + 16;
-      if (tx + 280 > rect.width) tx = e.clientX - rect.left - 290;
-      if (ty + 200 > rect.height) ty = e.clientY - rect.top - 200;
-      tooltip.style.left = tx + "px";
-      tooltip.style.top = ty + "px";
-    }
-  });
+  const t = d3.transition().duration(500).ease(d3.easeCubicOut);
+  const xs = GX.xScale;
+  const ys = GX.yScale;
 
-  // Fit to view after warmup
-  setTimeout(() => {
-    if (graphInstance) graphInstance.zoomToFit(400, 40);
-  }, dagMode ? 200 : 2000);
+  svg.select(".gx-x-axis").transition(t).call(d3.axisBottom(xs).ticks(8).tickSize(-H + margin.top + margin.bottom));
+  svg.select(".gx-y-axis").transition(t).call(d3.axisLeft(ys).ticks(6).tickSize(-W + margin.left + margin.right));
+  svg.selectAll(".gx-axis line").attr("stroke", "rgba(255,255,255,0.04)");
+  svg.selectAll(".gx-axis path").attr("stroke", "rgba(255,255,255,0.08)");
+  const xLabel = GX.axes.find(a => a.key === xKey)?.label || xKey;
+  const yLabel = GX.axes.find(a => a.key === yKey)?.label || yKey;
+  svg.select(".gx-x-label").text(xLabel);
+  svg.select(".gx-y-label").text(yLabel);
 
-  // Update status bar
-  const status = $("graph-status");
+  // Edges (group connections)
+  const nodeMap = {};
+  nodes.forEach(n => { nodeMap[n.id] = n; });
+  const edgeData = GX.showGroupLines ? GX.edges : [];
+  const edgeSel = GX.g.select(".gx-edges-layer").selectAll("line.gx-edge").data(edgeData, d => d.source + "|" + d.target);
+  edgeSel.exit().transition(t).attr("stroke-opacity", 0).remove();
+  const edgeEnter = edgeSel.enter().append("line").attr("class", "gx-edge")
+    .attr("stroke", "rgba(79,195,247,0.15)").attr("stroke-opacity", 0);
+  edgeSel.merge(edgeEnter).transition(t)
+    .attr("x1", d => xs(nodeMap[d.source]?.[xKey] || 0)).attr("y1", d => ys(nodeMap[d.source]?.[yKey] || 0))
+    .attr("x2", d => xs(nodeMap[d.target]?.[xKey] || 0)).attr("y2", d => ys(nodeMap[d.target]?.[yKey] || 0))
+    .attr("stroke-width", d => Math.min(2, d.weight * 0.6)).attr("stroke-opacity", 0.15);
+
+  // Tag edges
+  const tagEdgeData = GX.showTagLines ? GX.tagEdges : [];
+  const tagSel = GX.g.select(".gx-tag-edges-layer").selectAll("line.gx-tag-edge").data(tagEdgeData, d => d.source + "|" + d.target);
+  tagSel.exit().transition(t).attr("stroke-opacity", 0).remove();
+  const tagEnter = tagSel.enter().append("line").attr("class", "gx-tag-edge")
+    .attr("stroke", "rgba(253,203,110,0.15)").attr("stroke-opacity", 0).attr("stroke-dasharray", "3,3");
+  tagSel.merge(tagEnter).transition(t)
+    .attr("x1", d => xs(nodeMap[d.source]?.[xKey] || 0)).attr("y1", d => ys(nodeMap[d.source]?.[yKey] || 0))
+    .attr("x2", d => xs(nodeMap[d.target]?.[xKey] || 0)).attr("y2", d => ys(nodeMap[d.target]?.[yKey] || 0))
+    .attr("stroke-opacity", 0.2);
+
+  // Dots
+  const dotSel = GX.g.select(".gx-dots-layer").selectAll("circle.gx-dot").data(nodes, d => d.id);
+  dotSel.exit().transition(t).attr("r", 0).attr("opacity", 0).remove();
+  const dotEnter = dotSel.enter().append("circle").attr("class", "gx-dot")
+    .attr("cx", d => xs(d[xKey] || 0)).attr("cy", d => ys(d[yKey] || 0))
+    .attr("r", 0).attr("opacity", 0).attr("cursor", "pointer")
+    .on("click", (e, d) => { e.stopPropagation(); gxSelect(d); })
+    .on("mouseenter", (e, d) => gxShowTooltip(d, e))
+    .on("mouseleave", () => gxHideTooltip());
+  const dotMerge = dotSel.merge(dotEnter);
+  dotMerge.transition(t)
+    .attr("cx", d => xs(d[xKey] || 0)).attr("cy", d => ys(d[yKey] || 0))
+    .attr("r", d => gxGetRadius(d)).attr("fill", d => gxGetColor(d))
+    .attr("opacity", d => (GX.searchQ && !d.name.toLowerCase().includes(GX.searchQ)) ? 0.08 : 0.85);
+  dotMerge.classed("selected", d => GX.selected && d.id === GX.selected.id)
+    .classed("dimmed", d => GX.searchQ && !d.name.toLowerCase().includes(GX.searchQ));
+
+  // Labels
+  if (GX.showLabels) {
+    const lblSel = GX.g.select(".gx-labels-layer").selectAll("text.gx-label").data(nodes, d => d.id);
+    lblSel.exit().transition(t).attr("opacity", 0).remove();
+    const lblEnter = lblSel.enter().append("text").attr("class", "gx-label")
+      .attr("text-anchor", "middle").attr("font-size", "9px").attr("fill", "rgba(220,220,230,0.6)")
+      .attr("pointer-events", "none");
+    lblSel.merge(lblEnter).transition(t)
+      .attr("x", d => xs(d[xKey] || 0)).attr("y", d => ys(d[yKey] || 0))
+      .attr("dy", d => gxGetRadius(d) + 12)
+      .attr("opacity", d => (GX.searchQ && !d.name.toLowerCase().includes(GX.searchQ)) ? 0.05 : 0.6)
+      .text(d => d.name.length > 16 ? d.name.substring(0, 14) + ".." : d.name);
+  } else {
+    GX.g.select(".gx-labels-layer").selectAll("text.gx-label").transition(t).attr("opacity", 0).remove();
+  }
+
+  if (GX.selected) dotMerge.filter(d => d.id === GX.selected.id).raise();
+
+  const status = $("gx-status");
   if (status) {
-    status.textContent = `${filteredNodes.length} contacts \u00B7 ${filteredEdges.length} connections \u00B7 View: ${viewMode} \u00B7 Hover for details, click to open`;
-  }
-
-  // Legend
-  const legend = $("graph-legend");
-  if (legend) {
-    if (colorBy === "tier") {
-      const tierColors = {};
-      filteredNodes.forEach(n => { if (n.tierName && n.tierColor) tierColors[n.tierName] = n.tierColor; });
-      legend.innerHTML = Object.entries(tierColors).map(([name, color]) =>
-        `<span class="graph-legend-item"><span class="graph-legend-dot" style="background:${color};"></span>${name}</span>`
-      ).join("") + '<span class="graph-legend-item"><span class="graph-legend-dot" style="background:#555;"></span>None</span>';
-    } else if (colorBy === "recency") {
-      legend.innerHTML = [
-        ["#4fc3f7","<7d"], ["#81c784","<30d"], ["#ffb74d","<90d"], ["#f06292","<1y"], ["#555",">1y"]
-      ].map(([c,l]) => `<span class="graph-legend-item"><span class="graph-legend-dot" style="background:${c};"></span>${l}</span>`).join("");
-    } else {
-      legend.innerHTML = '<span class="graph-legend-item">Brighter = more active (30d)</span>';
-    }
-  }
-
-  // Populate tier filter (once)
-  const tierSelect = $("graph-tier-filter");
-  if (tierSelect && tierSelect.options.length <= 1) {
-    const tiers = {};
-    data.nodes.forEach(n => { if (n.tierName) tiers[n.tierId] = n.tierName; });
-    for (const [id, name] of Object.entries(tiers)) {
-      const opt = document.createElement("option");
-      opt.value = id;
-      opt.textContent = name;
-      tierSelect.appendChild(opt);
-    }
-    const noneOpt = document.createElement("option");
-    noneOpt.value = "none";
-    noneOpt.textContent = "Unassigned";
-    tierSelect.appendChild(noneOpt);
-  }
-
-  graphPaused = false;
-  updatePauseBtn();
-}
-
-function updatePauseBtn() {
-  const btn = $("graph-btn-pause");
-  if (btn) {
-    btn.textContent = graphPaused ? "Resume" : "Pause";
-    btn.classList.toggle("active", graphPaused);
+    status.textContent = `${nodes.length} contacts · X: ${xLabel} · Y: ${yLabel} · ` +
+      (GX.selected ? `Selected: ${GX.selected.name}` : "Click a contact or use arrow keys") +
+      ` · Press ? for shortcuts`;
   }
 }
 
-function cycleSelect(id) {
-  const sel = $(id);
-  if (!sel) return;
-  sel.selectedIndex = (sel.selectedIndex + 1) % sel.options.length;
-  sel.dispatchEvent(new Event("change"));
+function gxSelect(node) {
+  GX.selected = node;
+  d3.selectAll(".gx-dot").classed("selected", d => node && d.id === node.id);
+  const detail = $("gx-detail");
+  if (node) { detail?.classList.add("open"); gxRenderDetail(node); }
+  else { detail?.classList.remove("open"); }
+  const status = $("gx-status");
+  if (status) {
+    const xL = GX.axes.find(a => a.key === GX.xAxis)?.label || GX.xAxis;
+    const yL = GX.axes.find(a => a.key === GX.yAxis)?.label || GX.yAxis;
+    status.textContent = `${GX.nodes.length} contacts · X: ${xL} · Y: ${yL} · ` +
+      (node ? `Selected: ${node.name}` : "Click a contact or use arrow keys") + ` · Press ? for shortcuts`;
+  }
+}
+
+function gxRenderDetail(n) {
+  const nameEl = $("gx-detail-name");
+  const body = $("gx-detail-body");
+  if (!nameEl || !body) return;
+  const tierBadge = n.tierName
+    ? `<span style="background:${n.tierColor || '#555'}22;color:${n.tierColor || '#555'};font-size:10px;padding:2px 8px;border-radius:10px;margin-left:6px;">${esc(n.tierName)}</span>` : "";
+  nameEl.innerHTML = esc(n.name) + tierBadge;
+  const daysAgo = n.daysSince || 0;
+  const recency = daysAgo === 0 ? "Today" : daysAgo === 1 ? "Yesterday" : daysAgo + "d ago";
+  body.innerHTML = `
+    <div class="gxd-section"><div class="gxd-stat-grid">
+      <div class="gxd-stat"><div class="gxd-stat-val">${n.messages}</div><div class="gxd-stat-lbl">Messages</div></div>
+      <div class="gxd-stat"><div class="gxd-stat-val">${n.messages30d}</div><div class="gxd-stat-lbl">Last 30d</div></div>
+      <div class="gxd-stat"><div class="gxd-stat-val">${n.sent}</div><div class="gxd-stat-lbl">Sent</div></div>
+      <div class="gxd-stat"><div class="gxd-stat-val">${n.received}</div><div class="gxd-stat-lbl">Received</div></div>
+      <div class="gxd-stat"><div class="gxd-stat-val">${n.quality}</div><div class="gxd-stat-lbl">Quality</div></div>
+      <div class="gxd-stat"><div class="gxd-stat-val">${recency}</div><div class="gxd-stat-lbl">Last Contact</div></div>
+    </div></div>
+    ${n.tags.length > 0 ? `<div class="gxd-section"><div class="gxd-label">Tags (${n.tags.length})</div>
+      <div class="gxd-tags">${n.tags.map(t => `<span class="gxd-tag">${esc(t)}</span>`).join("")}</div></div>` : ""}
+    ${n.groups.length > 0 ? `<div class="gxd-section"><div class="gxd-label">Groups (${n.groups.length})</div>
+      ${n.groups.map(g => `<div class="gxd-group">· ${esc(g)}</div>`).join("")}</div>` : ""}
+    <div class="gxd-section"><button class="gxd-btn" onclick="openContactDetail('${esc(n.id)}')">Open Full Profile</button></div>`;
+}
+
+function gxShowTooltip(n, event) {
+  const tip = $("gx-tooltip");
+  if (!tip) return;
+  const tierBadge = n.tierName
+    ? ` <span style="background:${n.tierColor || '#555'}22;color:${n.tierColor || '#555'};font-size:9px;padding:1px 6px;border-radius:3px;">${esc(n.tierName)}</span>` : "";
+  tip.innerHTML = `<strong>${esc(n.name)}</strong>${tierBadge}<br>` +
+    `<span style="color:var(--text-dim);">${n.messages} msgs · ${n.messages30d} last 30d · Q:${n.quality}</span>` +
+    (n.tags.length > 0 ? `<br><span style="color:var(--accent);font-size:10px;">${n.tags.slice(0, 5).join(", ")}</span>` : "") +
+    (n.groups.length > 0 ? `<br><span style="color:var(--text-dim);font-size:10px;">${n.groups.slice(0, 3).join(", ")}</span>` : "");
+  tip.style.display = "block";
+  const wrap = $("gx-canvas-wrap");
+  if (!wrap) return;
+  const rect = wrap.getBoundingClientRect();
+  let tx = event.clientX - rect.left + 14;
+  let ty = event.clientY - rect.top + 14;
+  if (tx + 260 > rect.width) tx -= 280;
+  if (ty + 120 > rect.height) ty -= 130;
+  tip.style.left = tx + "px";
+  tip.style.top = ty + "px";
+}
+
+function gxHideTooltip() {
+  const tip = $("gx-tooltip");
+  if (tip) tip.style.display = "none";
+}
+
+function gxNavigate(dir) {
+  if (!GX.nodes.length) return;
+  if (!GX.selected) { gxSelect(GX.nodes[0]); return; }
+  const xs = GX.xScale, ys = GX.yScale;
+  const cx = xs(GX.selected[GX.xAxis] || 0), cy = ys(GX.selected[GX.yAxis] || 0);
+  let best = null, bestDist = Infinity;
+  for (const n of GX.nodes) {
+    if (n.id === GX.selected.id) continue;
+    if (GX.searchQ && !n.name.toLowerCase().includes(GX.searchQ)) continue;
+    const nx = xs(n[GX.xAxis] || 0), ny = ys(n[GX.yAxis] || 0);
+    const dx = nx - cx, dy = ny - cy;
+    let ok = false;
+    if (dir === "right" && dx > 5) ok = true;
+    if (dir === "left" && dx < -5) ok = true;
+    if (dir === "up" && dy < -5) ok = true;
+    if (dir === "down" && dy > 5) ok = true;
+    if (!ok) continue;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < bestDist) { bestDist = dist; best = n; }
+  }
+  if (best) gxSelect(best);
+}
+
+function gxCyclePill(current, options) {
+  const idx = options.findIndex(o => o.key === current);
+  return options[(idx + 1) % options.length].key;
 }
 
 function setupGraphHandlers() {
-  const rerender = () => { if (graphData) renderGraph(graphData); };
-  const reload = () => { invalidateCache("/api/friends/graph"); loadGraph(); };
-
-  ["graph-view-mode", "graph-tier-filter", "graph-color-by", "graph-size-by"].forEach(id => {
-    const el = $(id);
-    if (el) el.addEventListener("change", rerender);
-  });
-  const minSel = $("graph-min-messages");
-  if (minSel) minSel.addEventListener("change", reload);
-
-  // Search
-  const searchInput = $("graph-search");
-  if (searchInput) {
-    searchInput.addEventListener("input", () => {
-      if (graphInstance) graphInstance.nodeColor(graphInstance.nodeColor());  // trigger re-render
-    });
-  }
-
-  // Buttons
-  const fitBtn = $("graph-btn-fit");
-  if (fitBtn) fitBtn.addEventListener("click", () => { if (graphInstance) graphInstance.zoomToFit(400, 40); });
-
-  const pauseBtn = $("graph-btn-pause");
-  if (pauseBtn) pauseBtn.addEventListener("click", () => {
-    if (!graphInstance) return;
-    graphPaused = !graphPaused;
-    if (graphPaused) graphInstance.pauseAnimation(); else graphInstance.resumeAnimation();
-    updatePauseBtn();
+  document.addEventListener("click", (e) => {
+    const pill = e.target.closest(".gx-pill");
+    if (pill) {
+      const axis = pill.dataset.axis, mode = pill.dataset.mode, key = pill.dataset.key;
+      if (axis === "x") GX.xAxis = key;
+      else if (axis === "y") GX.yAxis = key;
+      else if (mode === "color") GX.colorMode = key;
+      else if (mode === "size") GX.sizeMode = key;
+      gxBuildToolbar(); gxRender(); return;
+    }
+    const tierPill = e.target.closest(".gx-tier-pill");
+    if (tierPill) {
+      GX.tierFilter = tierPill.dataset.tier;
+      document.querySelectorAll(".gx-tier-pill").forEach(p => p.classList.toggle("active", p.dataset.tier === GX.tierFilter));
+      gxRender(); return;
+    }
   });
 
-  const helpBtn = $("graph-btn-help");
-  if (helpBtn) helpBtn.addEventListener("click", () => {
-    const overlay = $("graph-help-overlay");
-    if (overlay) overlay.style.display = overlay.style.display === "none" ? "flex" : "none";
-  });
+  const btnG = $("gx-btn-lines");
+  if (btnG) btnG.addEventListener("click", () => { GX.showGroupLines = !GX.showGroupLines; btnG.classList.toggle("active"); gxRender(); });
+  const btnT = $("gx-btn-tags");
+  if (btnT) btnT.addEventListener("click", () => { GX.showTagLines = !GX.showTagLines; btnT.classList.toggle("active"); gxRender(); });
+  const btnL = $("gx-btn-labels");
+  if (btnL) btnL.addEventListener("click", () => { GX.showLabels = !GX.showLabels; btnL.classList.toggle("active"); gxRender(); });
+  const btnH = $("gx-btn-help");
+  if (btnH) btnH.addEventListener("click", () => $("gx-help-overlay")?.classList.toggle("open"));
+  const helpOv = $("gx-help-overlay");
+  if (helpOv) helpOv.addEventListener("click", (e) => { if (e.target === helpOv) helpOv.classList.remove("open"); });
+  const closeBtn = $("gx-detail-close");
+  if (closeBtn) closeBtn.addEventListener("click", () => gxSelect(null));
 
-  // Help overlay dismiss on click
-  const helpOverlay = $("graph-help-overlay");
-  if (helpOverlay) helpOverlay.addEventListener("click", (e) => {
-    if (e.target === helpOverlay) helpOverlay.style.display = "none";
-  });
+  const searchInput = $("gx-search");
+  if (searchInput) searchInput.addEventListener("input", () => { GX.searchQ = searchInput.value.toLowerCase().trim(); gxRender(); });
 
-  // ── Keyboard shortcuts ──
+  let resizeTimer;
+  window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { GX.g = null; gxRender(); }, 200); });
+
+  // Keyboard shortcuts
   document.addEventListener("keydown", (e) => {
-    // Only handle if graph tab is active
     const graphTab = $("tab-graph");
-    if (!graphTab || graphTab.style.display === "none") return;
-    // Skip if typing in input
-    if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.tagName === "SELECT") {
-      if (e.key === "Escape") { e.target.blur(); e.target.value = ""; if (graphInstance) graphInstance.nodeColor(graphInstance.nodeColor()); }
+    if (!graphTab || !graphTab.classList.contains("active")) return;
+    if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") {
+      if (e.key === "Escape") { e.target.blur(); e.target.value = ""; GX.searchQ = ""; gxRender(); }
       return;
     }
-
     switch (e.key) {
-      case " ":
-        e.preventDefault();
-        if (!graphInstance) return;
-        graphPaused = !graphPaused;
-        if (graphPaused) graphInstance.pauseAnimation(); else graphInstance.resumeAnimation();
-        updatePauseBtn();
-        break;
-      case "0":
-        if (graphInstance) graphInstance.zoomToFit(400, 40);
+      case "ArrowRight": e.preventDefault(); gxNavigate("right"); break;
+      case "ArrowLeft": e.preventDefault(); gxNavigate("left"); break;
+      case "ArrowUp": e.preventDefault(); gxNavigate("up"); break;
+      case "ArrowDown": e.preventDefault(); gxNavigate("down"); break;
+      case "Enter": if (GX.selected) openContactDetail(GX.selected.id); break;
+      case "Escape": gxSelect(null); $("gx-help-overlay")?.classList.remove("open"); break;
+      case "x": case "X": GX.xAxis = gxCyclePill(GX.xAxis, GX.axes); gxBuildToolbar(); gxRender(); break;
+      case "y": case "Y": GX.yAxis = gxCyclePill(GX.yAxis, GX.axes); gxBuildToolbar(); gxRender(); break;
+      case "c": case "C": GX.colorMode = gxCyclePill(GX.colorMode, GX.colors); gxBuildToolbar(); gxRender(); break;
+      case "s": case "S": GX.sizeMode = gxCyclePill(GX.sizeMode, GX.sizes); gxBuildToolbar(); gxRender(); break;
+      case "g": GX.showGroupLines = !GX.showGroupLines; $("gx-btn-lines")?.classList.toggle("active"); gxRender(); break;
+      case "t": GX.showTagLines = !GX.showTagLines; $("gx-btn-tags")?.classList.toggle("active"); gxRender(); break;
+      case "l": case "L": GX.showLabels = !GX.showLabels; $("gx-btn-labels")?.classList.toggle("active"); gxRender(); break;
+      case "f": case "F": e.preventDefault(); $("gx-search")?.focus(); break;
+      case "?": $("gx-help-overlay")?.classList.toggle("open"); break;
+      case "r": case "R":
+        if (GX.zoom) d3.select("#gx-svg").transition().duration(500).call(GX.zoom.transform, d3.zoomIdentity);
         break;
       case "+": case "=":
-        if (graphInstance) graphInstance.zoom(graphInstance.zoom() * 1.5, 300);
-        break;
+        if (GX.zoom) d3.select("#gx-svg").transition().duration(300).call(GX.zoom.scaleBy, 1.5); break;
       case "-": case "_":
-        if (graphInstance) graphInstance.zoom(graphInstance.zoom() / 1.5, 300);
-        break;
-      case "v": case "V":
-        cycleSelect("graph-view-mode");
-        break;
-      case "t": case "T":
-        cycleSelect("graph-tier-filter");
-        break;
-      case "c": case "C":
-        cycleSelect("graph-color-by");
-        break;
-      case "s": case "S":
-        cycleSelect("graph-size-by");
-        break;
-      case "f": case "F":
-        e.preventDefault();
-        const si = $("graph-search");
-        if (si) si.focus();
-        break;
-      case "l": case "L":
-        graphShowLabels = !graphShowLabels;
-        if (graphInstance) graphInstance.nodeCanvasObject(graphInstance.nodeCanvasObject());
-        break;
-      case "e": case "E":
-        graphShowEdges = !graphShowEdges;
-        if (graphInstance) {
-          graphInstance.linkColor(graphInstance.linkColor());
-          graphInstance.linkWidth(graphInstance.linkWidth());
+        if (GX.zoom) d3.select("#gx-svg").transition().duration(300).call(GX.zoom.scaleBy, 0.67); break;
+      case "0":
+        GX.tierFilter = "all";
+        document.querySelectorAll(".gx-tier-pill").forEach(p => p.classList.toggle("active", p.dataset.tier === "all"));
+        gxRender(); break;
+      case "1": case "2": case "3": case "4": case "5": {
+        const idx = parseInt(e.key) - 1;
+        if (idx < GX.tiers.length) {
+          GX.tierFilter = String(GX.tiers[idx].id);
+          document.querySelectorAll(".gx-tier-pill").forEach(p => p.classList.toggle("active", p.dataset.tier === GX.tierFilter));
+          gxRender();
         }
         break;
-      case "?":
-        const ov = $("graph-help-overlay");
-        if (ov) ov.style.display = ov.style.display === "none" ? "flex" : "none";
-        break;
-      case "Escape":
-        const ovl = $("graph-help-overlay");
-        if (ovl) ovl.style.display = "none";
-        graphHighlightNode = null;
-        graphNeighborSet = new Set();
-        break;
+      }
     }
   });
 }

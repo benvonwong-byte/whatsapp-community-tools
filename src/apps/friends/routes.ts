@@ -539,15 +539,38 @@ export function createFriendsRouter(
   router.get("/graph", (_req: Request, res: Response) => {
     const minMessages = parseInt(_req.query.minMessages as string) || 10;
     const allContacts = store.getContactsWithStats().filter(c => c.total_messages >= minMessages);
+    const now = Math.floor(Date.now() / 1000);
 
-    const nodes = allContacts.map(c => ({
-      id: c.id, name: c.name, messages: c.total_messages, messages30d: c.messages_30d,
-      sent: c.sent_messages, received: c.received_messages, lastSeen: c.last_seen,
-      tierId: c.tier_id, tierName: c.tier_name, tierColor: c.tier_color,
-      tags: c.tag_names ? c.tag_names.split(", ") : [],
-      groups: c.group_names ? c.group_names.split(", ") : [],
-      quality: c.quality_score
-    }));
+    // Build tier list for frontend
+    const tiers = store.getTiers();
+
+    const nodes = allContacts.map(c => {
+      const groupArr = c.group_names ? c.group_names.split(", ") : [];
+      const tagArr = c.tag_names ? c.tag_names.split(", ") : [];
+      const daysSince = Math.max(0, Math.round((now - (c.last_seen || now)) / 86400));
+      const daysKnown = Math.max(1, Math.round(((c.last_seen || now) - (c.first_seen || c.last_seen || now)) / 86400));
+      const ratio = c.received_messages > 0 ? Math.round((c.sent_messages / c.received_messages) * 100) / 100 : 0;
+      // Phone fallback for name
+      let displayName = c.name;
+      if (!displayName || !displayName.trim() || displayName === "Unknown") {
+        const ph = (c.id || "").split("@")[0];
+        if (ph && /^\d{7,15}$/.test(ph)) displayName = "+" + ph;
+        else displayName = c.name || c.id || "?";
+      }
+      return {
+        id: c.id, name: displayName,
+        // Raw metrics
+        messages: c.total_messages, messages30d: c.messages_30d,
+        sent: c.sent_messages, received: c.received_messages,
+        lastSeen: c.last_seen, firstSeen: c.first_seen,
+        // Computed metrics for axes
+        daysSince, daysKnown, ratio, quality: c.quality_score || 0,
+        groupCount: groupArr.length, tagCount: tagArr.length,
+        // Metadata
+        tierId: c.tier_id, tierName: c.tier_name, tierColor: c.tier_color,
+        tags: tagArr, groups: groupArr
+      };
+    });
 
     // Edges based on shared groups (with group names)
     const edges: Array<{ source: string; target: string; weight: number; groups: string[] }> = [];
@@ -577,7 +600,26 @@ export function createFriendsRouter(
       edges.push({ source, target, weight: val.weight, groups: val.groups });
     }
 
-    res.json({ nodes, edges });
+    // Shared tag edges (contacts sharing 3+ tags = likely connected)
+    const tagEdges: Array<{ source: string; target: string; sharedTags: string[] }> = [];
+    const contactTagMap: Record<string, Set<string>> = {};
+    for (const n of nodes) {
+      if (n.tags.length > 0) contactTagMap[n.id] = new Set(n.tags);
+    }
+    const contactIds = Object.keys(contactTagMap);
+    for (let i = 0; i < contactIds.length; i++) {
+      for (let j = i + 1; j < contactIds.length; j++) {
+        const shared: string[] = [];
+        for (const t of contactTagMap[contactIds[i]]) {
+          if (contactTagMap[contactIds[j]].has(t)) shared.push(t);
+        }
+        if (shared.length >= 3) {
+          tagEdges.push({ source: contactIds[i], target: contactIds[j], sharedTags: shared });
+        }
+      }
+    }
+
+    res.json({ nodes, edges, tagEdges, tiers });
   });
 
   // ── Data Management ──
