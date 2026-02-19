@@ -1031,13 +1031,15 @@
 
     /* ── Contact Explorer (Graph Tab) ── */
     .gx-toolbar {
-      display:flex; flex-wrap:wrap; gap:6px 12px; align-items:center; padding:6px 0;
+      display:flex; flex-direction:column; gap:3px; padding:6px 0;
       border-bottom:1px solid var(--border); margin-bottom:0;
     }
+    .gx-toolbar-row { display:flex; align-items:center; gap:6px 12px; flex-wrap:wrap; }
     .gx-toolbar-section { display:flex; align-items:center; gap:4px; }
     .gx-toolbar-right { margin-left:auto; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
     .gx-label { font-size:10px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:.5px; min-width:14px; }
     .gx-pill-group { display:flex; gap:2px; }
+    .gx-pill-group-wrap { flex-wrap:wrap; }
     .gx-pill {
       background:var(--surface2); color:var(--text-dim); border:1px solid transparent;
       border-radius:12px; padding:3px 10px; font-size:10px; cursor:pointer;
@@ -1991,31 +1993,39 @@
     <div id="tab-graph" class="tab-content">
       <!-- Toolbar -->
       <div class="gx-toolbar">
-        <div class="gx-toolbar-section">
-          <span class="gx-label">Time</span>
-          <div class="gx-pill-group" id="gx-x-pills"></div>
+        <div class="gx-toolbar-row">
+          <div class="gx-toolbar-section">
+            <span class="gx-label">Time</span>
+            <div class="gx-pill-group" id="gx-x-pills"></div>
+          </div>
+          <div class="gx-toolbar-section gx-toolbar-right">
+            <div class="gx-tier-pills" id="gx-tier-pills"></div>
+            <input type="text" id="gx-search" class="gx-search" placeholder="Search (F)">
+            <button class="gx-icon-btn" id="gx-btn-help" title="Help (?)">?</button>
+          </div>
         </div>
-        <div class="gx-toolbar-section">
-          <span class="gx-label">Y</span>
-          <div class="gx-pill-group" id="gx-y-pills"></div>
+        <div class="gx-toolbar-row">
+          <div class="gx-toolbar-section">
+            <span class="gx-label">Y</span>
+            <div class="gx-pill-group gx-pill-group-wrap" id="gx-y-pills"></div>
+            <button class="gx-icon-btn" id="gx-btn-log" title="Logarithmic Y scale (W)">LOG</button>
+          </div>
         </div>
-        <div class="gx-toolbar-section">
-          <span class="gx-label">Color</span>
-          <div class="gx-pill-group" id="gx-color-pills"></div>
-        </div>
-        <div class="gx-toolbar-section">
-          <span class="gx-label">Size</span>
-          <div class="gx-pill-group" id="gx-size-pills"></div>
-        </div>
-        <div class="gx-toolbar-section gx-toolbar-right">
-          <div class="gx-tier-pills" id="gx-tier-pills"></div>
-          <input type="text" id="gx-search" class="gx-search" placeholder="Search (F)">
-          <button class="gx-icon-btn" id="gx-btn-log" title="Logarithmic Y scale (W)">LOG</button>
-          <button class="gx-icon-btn" id="gx-btn-filter" title="Filters (/)">&#9776;</button>
-          <button class="gx-icon-btn" id="gx-btn-lines" title="Group connections (G)">G</button>
-          <button class="gx-icon-btn" id="gx-btn-tags" title="Tag connections (T)">T</button>
-          <button class="gx-icon-btn" id="gx-btn-labels" title="Labels (L)">L</button>
-          <button class="gx-icon-btn" id="gx-btn-help" title="Help (?)">?</button>
+        <div class="gx-toolbar-row">
+          <div class="gx-toolbar-section">
+            <span class="gx-label">Color</span>
+            <div class="gx-pill-group" id="gx-color-pills"></div>
+          </div>
+          <div class="gx-toolbar-section">
+            <span class="gx-label">Size</span>
+            <div class="gx-pill-group" id="gx-size-pills"></div>
+          </div>
+          <div class="gx-toolbar-section" style="margin-left:auto;gap:4px;">
+            <button class="gx-icon-btn" id="gx-btn-filter" title="Filters (/)">&#9776;</button>
+            <button class="gx-icon-btn" id="gx-btn-lines" title="Group connections (G)">G</button>
+            <button class="gx-icon-btn" id="gx-btn-tags" title="Tag connections (T)">T</button>
+            <button class="gx-icon-btn" id="gx-btn-labels" title="Labels (L)">L</button>
+          </div>
         </div>
       </div>
       <!-- Filter panel (collapsible) -->

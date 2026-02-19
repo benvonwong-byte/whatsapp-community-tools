@@ -3329,16 +3329,18 @@ const GX = {
   timeWindow: "3m", // "1m" | "3m" | "6m" | "1y"
   timeOffset: 0, // how many windows back from "now" (0 = most recent)
   yAxes: [
-    { key: "messages", label: "Messages", short: "Msgs", type: "num" },
+    { key: "messages", label: "Total Messages", short: "Total", type: "num" },
+    { key: "msgsPerDay", label: "Avg Msgs/Day", short: "Msgs/Day", type: "num" },
+    { key: "recentPerDay", label: "Recent Msgs/Day (30d)", short: "Recent/Day", type: "num" },
     { key: "messages30d", label: "Recent (30d)", short: "30d", type: "num" },
     { key: "daysSince", label: "Days Since Contact", short: "Days", type: "num" },
     { key: "quality", label: "Quality Score", short: "Quality", type: "num" },
     { key: "ratio", label: "Sent/Recv Ratio", short: "Ratio", type: "num" },
-    { key: "groupCount", label: "Groups", short: "Groups", type: "num" },
-    { key: "tagCount", label: "Tags", short: "Tags", type: "num" },
     { key: "daysKnown", label: "Relationship Age", short: "Age", type: "num" },
     { key: "sent", label: "Sent", short: "Sent", type: "num" },
     { key: "received", label: "Received", short: "Recv", type: "num" },
+    { key: "groupCount", label: "Groups", short: "Groups", type: "num" },
+    { key: "tagCount", label: "Tags", short: "Tags", type: "num" },
   ],
   // X axis is always lastContactDate (kept for scale building)
   xDef: { key: "lastContactDate", label: "Last Contact", short: "Last Contact", type: "time" },
