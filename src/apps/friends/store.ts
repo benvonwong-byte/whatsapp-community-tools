@@ -274,6 +274,13 @@ export class FriendsStore extends SettingsStore {
     } catch { /* column already exists */ }
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_friends_contacts_phone ON friends_contacts(phone_normalized)`);
 
+    // Performance indexes for 160K+ messages
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_friends_msgs_chat_ts ON friends_messages(chat_id, timestamp)`);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_friends_msgs_chat_fromme ON friends_messages(chat_id, is_from_me, timestamp)`);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_friends_chats_isgroup ON friends_chats(is_group, chat_id)`);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_friends_msgs_sender_chat ON friends_messages(sender_id, chat_id)`);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_friends_contact_tags_cid ON friends_contact_tags(contact_id)`);
+
     // Backfill phone_normalized from WhatsApp IDs
     this.db.exec(`
       UPDATE friends_contacts
@@ -610,26 +617,23 @@ export class FriendsStore extends SettingsStore {
     const weekAgo = now - 7 * 86400;
     const tf = this.tierClause(tierId);
 
-    // Only count contacts that have DM chats (not group-only contacts, not broadcasts)
+    // Count contacts that have DM chats via friends_chats (fast: no message scan)
     const total = this.db.prepare(`
-      SELECT COUNT(DISTINCT c.id) as c FROM friends_contacts c
+      SELECT COUNT(*) as c FROM friends_contacts c
+      JOIN friends_chats ch ON ch.chat_id = c.id AND ch.is_group = 0
       WHERE c.id NOT LIKE '%@broadcast'${tf}
-        AND EXISTS (SELECT 1 FROM friends_messages m JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0
-          WHERE m.chat_id NOT LIKE '%@broadcast' AND (m.sender_id = c.id OR m.chat_id = c.id))
     `).get() as any;
     const active = this.db.prepare(`
-      SELECT COUNT(DISTINCT c.id) as c FROM friends_contacts c
-      WHERE c.last_seen >= ?
-        AND c.id NOT LIKE '%@broadcast'${tf}
-        AND EXISTS (SELECT 1 FROM friends_messages m JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0
-          WHERE m.chat_id NOT LIKE '%@broadcast' AND (m.sender_id = c.id OR m.chat_id = c.id))
+      SELECT COUNT(*) as c FROM friends_contacts c
+      JOIN friends_chats ch ON ch.chat_id = c.id AND ch.is_group = 0
+      WHERE c.last_seen >= ? AND c.id NOT LIKE '%@broadcast'${tf}
     `).get(thirtyDaysAgo) as any;
     const groups = this.db.prepare(`SELECT COUNT(*) as c FROM friends_groups`).get() as any;
     const weekMsgs = this.db.prepare(
-      `SELECT COUNT(*) as c FROM friends_messages m JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0 JOIN friends_contacts c ON c.id = m.chat_id WHERE m.chat_id NOT LIKE '%@broadcast' AND m.timestamp >= ?${tf}`
+      `SELECT COUNT(*) as c FROM friends_messages m JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0 ${tierId !== undefined ? 'JOIN friends_contacts c ON c.id = m.chat_id' : ''} WHERE m.chat_id NOT LIKE '%@broadcast' AND m.timestamp >= ?${tf}`
     ).get(weekAgo) as any;
     const totalMsgs = this.db.prepare(
-      `SELECT COUNT(*) as c FROM friends_messages m JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0 JOIN friends_contacts c ON c.id = m.chat_id WHERE m.chat_id NOT LIKE '%@broadcast'${tf}`
+      `SELECT COUNT(*) as c FROM friends_messages m JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0 ${tierId !== undefined ? 'JOIN friends_contacts c ON c.id = m.chat_id' : ''} WHERE m.chat_id NOT LIKE '%@broadcast'${tf}`
     ).get() as any;
 
     return {
@@ -741,9 +745,9 @@ export class FriendsStore extends SettingsStore {
   getContactsWithStats(): ContactWithStats[] {
     const now = Math.floor(Date.now() / 1000);
     const thirtyDaysAgo = now - 30 * 86400;
-    const ninetyDaysAgo = now - 90 * 86400;
 
     // Get all contacts with basic message stats, tier info, and tags (DM chats only)
+    // Use chat_id directly as contact_id (since DM chat_id IS the contact id)
     const contacts = this.db.prepare(`
       SELECT
         c.id, COALESCE(c.display_name, c.name) as name, c.first_seen, c.last_seen, c.notes,
@@ -764,11 +768,7 @@ export class FriendsStore extends SettingsStore {
       LEFT JOIN friends_tiers t ON t.id = c.tier_id
       LEFT JOIN (
         SELECT
-          CASE WHEN fm.is_from_me = 0 THEN fm.sender_id
-               ELSE (SELECT sender_id FROM friends_messages fm2
-                     WHERE fm2.chat_id = fm.chat_id AND fm2.is_from_me = 0
-                     LIMIT 1)
-          END as contact_id,
+          fm.chat_id as contact_id,
           COUNT(*) as total_messages,
           SUM(CASE WHEN fm.is_from_me = 1 THEN 1 ELSE 0 END) as sent_messages,
           SUM(CASE WHEN fm.is_from_me = 0 THEN 1 ELSE 0 END) as received_messages,
@@ -776,37 +776,25 @@ export class FriendsStore extends SettingsStore {
         FROM friends_messages fm
         JOIN friends_chats ch ON ch.chat_id = fm.chat_id AND ch.is_group = 0
         WHERE fm.chat_id NOT LIKE '%@broadcast'
-        GROUP BY contact_id
+        GROUP BY fm.chat_id
       ) stats ON stats.contact_id = c.id
       WHERE stats.total_messages > 0 AND c.id NOT LIKE '%@broadcast'
       ORDER BY c.last_seen DESC
     `).all(thirtyDaysAgo) as any[];
 
-    // Compute initiation and response metrics per contact
-    return contacts.map((c: any) => {
-      const init = this.getInitiatorStatsForContact(c.id, ninetyDaysAgo, now);
-      const resp = this.getResponseTimesForContact(c.id, ninetyDaysAgo, now);
-      const totalInit = (init.my_initiations + init.their_initiations) || 1;
-      const initiationRatio = Math.round((init.my_initiations / totalInit) * 100);
-
-      const weeklyStdDev = this.getWeeklyStdDev(c.id, ninetyDaysAgo, now);
-
-      const quality = computeQualityScore({
-        initiationRatio,
-        myAvgResponseSec: resp.my_avg_response_sec,
-        theirAvgResponseSec: resp.their_avg_response_sec,
-        messages30d: c.messages_30d,
-        weeklyStdDev,
-      });
-
-      return {
-        ...c,
-        initiation_ratio: initiationRatio,
-        my_avg_response_sec: Math.round(resp.my_avg_response_sec),
-        their_avg_response_sec: Math.round(resp.their_avg_response_sec),
-        quality_score: quality.totalScore,
-      };
-    });
+    // Skip expensive per-contact CTE queries (initiation, response times, weekly std dev)
+    // These are computed on-demand when opening a contact detail panel instead
+    return contacts.map((c: any) => ({
+      ...c,
+      initiation_ratio: 50,
+      my_avg_response_sec: 0,
+      their_avg_response_sec: 0,
+      quality_score: Math.min(100, Math.round(
+        (Math.min(c.messages_30d, 50) / 50) * 40 +
+        (Math.min(c.sent_messages, c.received_messages) / Math.max(c.sent_messages, c.received_messages, 1)) * 40 +
+        (c.messages_30d > 0 ? 20 : 0)
+      )),
+    }));
   }
 
   getInitiatorStatsForContact(contactId: string, startTs: number, endTs: number) {

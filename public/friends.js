@@ -298,6 +298,9 @@ async function loadDashboardTags() {
   }
 }
 
+let dashTagsExpanded = false;
+let dashTagSort = "popular"; // "popular" or "alpha"
+
 function renderDashboardTagCloud(tags) {
   const container = $("dash-tag-cloud");
   if (!container) return;
@@ -306,26 +309,93 @@ function renderDashboardTagCloud(tags) {
     return;
   }
 
-  container.innerHTML = tags.slice(0, 40).map(t => {
+  // Group tags by category
+  const CATEGORY_NAMES = { topic: "Topics", loc: "Location", ctx: "Context", tone: "Tone", emo: "Emotion" };
+  const groups = {};
+  for (const t of tags) {
     const p = parseTagCategory(t.name);
-    const active = dashTagFilter === t.name ? ' active' : '';
-    return '<span class="dash-tag' + active + '" data-tag="' + esc(t.name) + '" ' +
-      'style="background:' + p.color + '18;color:' + p.color + ';border-color:' + (dashTagFilter === t.name ? p.color : 'transparent') + ';">' +
-      esc(p.label) +
-      ' <span class="tag-count">' + t.contact_count + '</span>' +
-    '</span>';
-  }).join("");
+    if (!groups[p.category]) groups[p.category] = [];
+    groups[p.category].push({ ...t, parsed: p });
+  }
 
+  // Sort within each group
+  for (const cat of Object.keys(groups)) {
+    if (dashTagSort === "alpha") {
+      groups[cat].sort((a, b) => a.parsed.label.localeCompare(b.parsed.label));
+    } else {
+      groups[cat].sort((a, b) => b.contact_count - a.contact_count);
+    }
+  }
+
+  const PREVIEW_COUNT = 20; // tags shown when collapsed
+  const allTagsSorted = dashTagSort === "alpha"
+    ? tags.slice().sort((a, b) => parseTagCategory(a.name).label.localeCompare(parseTagCategory(b.name).label))
+    : tags.slice().sort((a, b) => b.contact_count - a.contact_count);
+
+  let html = '';
+
+  // Sort toggle + expand button
+  html += '<div class="tag-cloud-controls">';
+  html += '<select id="dash-tag-sort" class="tag-sort-select"><option value="popular"' + (dashTagSort === "popular" ? " selected" : "") + '>Most Popular</option><option value="alpha"' + (dashTagSort === "alpha" ? " selected" : "") + '>A-Z</option></select>';
+  html += '<button id="dash-tag-expand" class="tag-expand-btn">' + (dashTagsExpanded ? 'Show Less' : 'Show All ' + tags.length) + '</button>';
+  html += '</div>';
+
+  if (dashTagsExpanded) {
+    // Expanded: show all tags grouped by category
+    const catOrder = ["topic", "emo", "tone", "ctx", "loc"];
+    for (const cat of catOrder) {
+      if (!groups[cat] || groups[cat].length === 0) continue;
+      html += '<div class="tag-category-group">';
+      html += '<div class="tag-category-label">' + (CATEGORY_NAMES[cat] || cat) + ' <span class="tag-count">' + groups[cat].length + '</span></div>';
+      html += '<div class="tag-category-chips">';
+      html += groups[cat].map(t => {
+        const active = dashTagFilter === t.name ? ' active' : '';
+        return '<span class="dash-tag' + active + '" data-tag="' + esc(t.name) + '" ' +
+          'style="background:' + t.parsed.color + '18;color:' + t.parsed.color + ';border-color:' + (dashTagFilter === t.name ? t.parsed.color : 'transparent') + ';">' +
+          esc(t.parsed.label) +
+          ' <span class="tag-count">' + t.contact_count + '</span>' +
+        '</span>';
+      }).join("");
+      html += '</div></div>';
+    }
+  } else {
+    // Collapsed: show top N tags flat
+    html += '<div class="tag-category-chips">';
+    html += allTagsSorted.slice(0, PREVIEW_COUNT).map(t => {
+      const p = parseTagCategory(t.name);
+      const active = dashTagFilter === t.name ? ' active' : '';
+      return '<span class="dash-tag' + active + '" data-tag="' + esc(t.name) + '" ' +
+        'style="background:' + p.color + '18;color:' + p.color + ';border-color:' + (dashTagFilter === t.name ? p.color : 'transparent') + ';">' +
+        esc(p.label) +
+        ' <span class="tag-count">' + t.contact_count + '</span>' +
+      '</span>';
+    }).join("");
+    if (tags.length > PREVIEW_COUNT) {
+      html += '<span class="tag-more-hint">+' + (tags.length - PREVIEW_COUNT) + ' more</span>';
+    }
+    html += '</div>';
+  }
+
+  container.innerHTML = html;
+
+  // Sort dropdown handler
+  const sortSel = container.querySelector("#dash-tag-sort");
+  if (sortSel) sortSel.addEventListener("change", () => { dashTagSort = sortSel.value; renderDashboardTagCloud(tags); });
+
+  // Expand/collapse handler
+  const expandBtn = container.querySelector("#dash-tag-expand");
+  if (expandBtn) expandBtn.addEventListener("click", () => { dashTagsExpanded = !dashTagsExpanded; renderDashboardTagCloud(tags); });
+
+  // Tag click handlers
   container.querySelectorAll(".dash-tag").forEach(chip => {
     chip.addEventListener("click", () => {
       const tag = chip.dataset.tag;
       if (dashTagFilter === tag) {
-        dashTagFilter = null; // deselect
+        dashTagFilter = null;
       } else {
         dashTagFilter = tag;
       }
       renderDashboardTagCloud(tags);
-      // Switch to contacts tab with tag filter applied
       if (dashTagFilter) {
         activeTagFilters.clear();
         activeTagFilters.add(dashTagFilter);
