@@ -5,6 +5,24 @@ let groups = [];
 let chats = [];
 let selectedRecipients = new Set();
 let currentSort = { field: "last_seen", dir: "desc" };
+
+// ── Data cache for faster tab switching ──
+const _cache = {};
+const CACHE_TTL = 60000; // 1 minute
+function cachedFetch(url, opts) {
+  const key = url + (opts ? JSON.stringify(opts) : "");
+  const cached = _cache[key];
+  if (cached && Date.now() - cached.time < CACHE_TTL) return Promise.resolve(cached.response.clone());
+  return adminFetch(url, opts).then(res => {
+    if (res.ok) _cache[key] = { time: Date.now(), response: res.clone() };
+    return res;
+  });
+}
+function invalidateCache(prefix) {
+  for (const key of Object.keys(_cache)) {
+    if (!prefix || key.includes(prefix)) delete _cache[key];
+  }
+}
 let weeklyChart = null;
 let hourlyChart = null;
 let detailChart = null;
@@ -61,10 +79,18 @@ document.addEventListener("DOMContentLoaded", () => {
   setupTierHandlers();
   setupGroupHandlers();
   setupCalendarHandlers();
+  setupAISearch();
   _initNameEditHandlers();
 
   // Load initial tab
   loadDashboard();
+
+  // Prefetch other tabs' data in background after initial load
+  setTimeout(() => {
+    cachedFetch("/api/friends/contacts?sort=last_seen&dir=desc");
+    cachedFetch("/api/friends/tiers");
+    cachedFetch("/api/friends/groups");
+  }, 2000);
 });
 
 // ── Scan & Backfill Buttons ──
@@ -253,10 +279,70 @@ function setupContactFilters() {
 
 // ── Dashboard Tab ──
 
+function setupAISearch() {
+  const input = $("ai-search-input");
+  const btn = $("ai-search-btn");
+  const results = $("ai-search-results");
+  if (!input || !btn || !results) return;
+
+  const doSearch = async () => {
+    const query = input.value.trim();
+    if (!query) return;
+    btn.disabled = true;
+    btn.textContent = "Searching...";
+    results.style.display = "block";
+    results.innerHTML = '<div class="ai-search-explanation">Searching...</div>';
+    try {
+      const res = await adminFetch("/api/friends/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query })
+      });
+      if (!res.ok) throw new Error("Search failed");
+      const data = await res.json();
+      let html = '<button class="ai-search-close" id="ai-search-close">Close</button>';
+      html += '<div class="ai-search-explanation">' + esc(data.parsed?.explanation || query) +
+        ' (' + data.results.length + ' results)</div>';
+      if (data.results.length === 0) {
+        html += '<div style="color:var(--text-dim);font-size:12px;">No contacts found matching your query.</div>';
+      }
+      html += data.results.map(r => {
+        const tierBadge = r.tier_color && r.tier_name
+          ? '<span class="ai-search-result-tier" style="background:' + esc(r.tier_color) + '22;color:' + esc(r.tier_color) + ';border:1px solid ' + esc(r.tier_color) + '44;">' + esc(r.tier_name) + '</span>'
+          : '';
+        return '<div class="ai-search-result" data-contact-id="' + esc(r.id) + '">' +
+          '<div><span class="ai-search-result-name">' + esc(r.name || r.id) + '</span>' + tierBadge +
+          (r.snippet ? '<div class="ai-search-result-meta">"...' + esc(r.snippet.substring(0, 100)) + '..."</div>' : '') +
+          '</div>' +
+          '<div class="ai-search-result-reason">' + esc(r.match_reason || r.match_source || "") + '</div>' +
+        '</div>';
+      }).join("");
+      results.innerHTML = html;
+      // Click handlers
+      results.querySelectorAll(".ai-search-result").forEach(row => {
+        row.addEventListener("click", () => {
+          const id = row.dataset.contactId;
+          if (id) openContactDetail(id);
+        });
+      });
+      const closeBtn = $("ai-search-close");
+      if (closeBtn) closeBtn.addEventListener("click", () => { results.style.display = "none"; });
+    } catch (err) {
+      results.innerHTML = '<div class="ai-search-explanation" style="color:#f44;">Search failed: ' + esc(err.message) + '</div>';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Search";
+    }
+  };
+
+  btn.addEventListener("click", doSearch);
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") doSearch(); });
+}
+
 async function loadDashboard() {
   try {
     const tierParam = dashboardTierFilter !== null ? "?tier=" + encodeURIComponent(dashboardTierFilter) : "";
-    const res = await adminFetch("/api/friends/dashboard" + tierParam);
+    const res = await cachedFetch("/api/friends/dashboard" + tierParam);
     if (!res.ok) throw new Error("Server returned " + res.status);
     const data = await res.json();
     renderSummaryCards(data.stats, data.voiceTotal);
@@ -289,7 +375,7 @@ let dashTagFilter = null; // currently selected tag name or null
 async function loadDashboardTags() {
   try {
     const tagTierParam = dashboardTierFilter !== null ? "?tier=" + encodeURIComponent(dashboardTierFilter) : "";
-    const res = await adminFetch("/api/friends/tags" + tagTierParam);
+    const res = await cachedFetch("/api/friends/tags" + tagTierParam);
     if (!res.ok) return;
     const tags = await res.json();
     renderDashboardTagCloud(tags);
@@ -768,7 +854,7 @@ async function loadTopFriends() {
 
   try {
     const tfTierParam = dashboardTierFilter !== null ? "&tier=" + encodeURIComponent(dashboardTierFilter) : "";
-    const res = await adminFetch("/api/friends/top-friends?days=" + tfWindowDays + "&offset=" + tfOffsetDays + "&limit=10" + tfTierParam);
+    const res = await cachedFetch("/api/friends/top-friends?days=" + tfWindowDays + "&offset=" + tfOffsetDays + "&limit=10" + tfTierParam);
     if (!res.ok) throw new Error("Failed");
     const data = await res.json();
 
@@ -808,9 +894,12 @@ function renderTopFriends(data) {
         return '<span class="top-friend-tag" data-tag="' + esc(t) + '" style="background:' + p.color + '18;color:' + p.color + ';">' + esc(p.label) + '</span>';
       }).join('') + '</div>';
     }
+    const tierBadge = f.tier_color && f.tier_name
+      ? '<span class="top-friend-tier" style="background:' + esc(f.tier_color) + '22;color:' + esc(f.tier_color) + ';border:1px solid ' + esc(f.tier_color) + '44;font-size:9px;padding:1px 6px;border-radius:3px;margin-left:6px;">' + esc(f.tier_name) + '</span>'
+      : '';
     return '<div class="top-friend-row" data-contact-id="' + esc(String(f.id)) + '" style="cursor:pointer;">' +
       '<div class="top-friend-rank ' + rankClass + '">' + (i + 1) + '</div>' +
-      '<div class="top-friend-name">' + esc(f.name) + '</div>' +
+      '<div class="top-friend-name">' + esc(contactDisplayName(f)) + tierBadge + '</div>' +
       tagsHtml +
       '<div class="top-friend-score">' +
         '<span class="top-friend-count">' + (f.messages || 0) + '</span>' +
@@ -1054,11 +1143,11 @@ function renderHourlyChart(data) {
 
 async function loadContacts() {
   try {
-    // Load groups, tiers, and tags for filter dropdowns
+    // Load groups, tiers, and tags for filter dropdowns (cached)
     const [groupsRes, tiersRes, tagsRes] = await Promise.all([
-      adminFetch("/api/friends/groups"),
-      adminFetch("/api/friends/tiers"),
-      adminFetch("/api/friends/tags"),
+      cachedFetch("/api/friends/groups"),
+      cachedFetch("/api/friends/tiers"),
+      cachedFetch("/api/friends/tags"),
     ]);
     if (groupsRes.ok) {
       groups = await groupsRes.json();
@@ -1187,8 +1276,9 @@ function renderContactsTable(data) {
     const tagChips = c.tag_names
       ? c.tag_names.split(', ').slice(0, 3).map(t => { const p = parseTagCategory(t); return '<span class="detail-tag" style="font-size:9px;padding:1px 5px;background:' + p.color + '20;color:' + p.color + ';border:1px solid ' + p.color + '40;">' + esc(p.label) + '</span>'; }).join('')
       : '';
+    const displayName = contactDisplayName(c);
     return '<tr class="contact-row" data-id="' + esc(String(c.id)) + '">' +
-      '<td class="contact-name-cell"><strong>' + esc(c.name) + '</strong>' + (tagChips ? '<div style="margin-top:2px;">' + tagChips + '</div>' : '') + '</td>' +
+      '<td class="contact-name-cell"><strong>' + esc(displayName) + '</strong>' + (tagChips ? '<div style="margin-top:2px;">' + tagChips + '</div>' : '') + '</td>' +
       '<td>' + tierDot + esc(c.tier_name || "") + '</td>' +
       '<td>' + (c.last_seen ? timeAgo(c.last_seen) : "--") + '</td>' +
       '<td>' + (c.messages_30d ?? 0) + '</td>' +
@@ -1286,6 +1376,20 @@ async function openContactDetail(contactId) {
     }
 
     setupNameEditing(contactId, displayName);
+
+    // Hide/ignore button
+    const hideBtn = $("detail-hide-btn");
+    if (hideBtn) {
+      hideBtn.textContent = "Hide";
+      hideBtn.onclick = async () => {
+        if (!confirm("Hide this contact from all views? You can unhide from Settings.")) return;
+        try {
+          await adminFetch("/api/friends/contacts/" + encodeURIComponent(contactId) + "/hide", { method: "POST" });
+          closeDetailPanel();
+          loadContacts();
+        } catch (err) { console.error("Failed to hide contact:", err); }
+      };
+    }
 
     const detailStats = $("detail-stats");
     if (detailStats) {
@@ -2811,6 +2915,18 @@ function esc(str) {
   const div = document.createElement("div");
   div.textContent = str;
   return div.innerHTML;
+}
+
+/** Display name for a contact — falls back to formatted phone number if no name */
+function contactDisplayName(c) {
+  if (c.name && c.name.trim() && c.name !== "Unknown") return c.name;
+  // Extract phone from contact ID (format: "15551234567@c.us" or "+1234@imessage")
+  const id = c.id || "";
+  const phonePart = id.split("@")[0];
+  if (phonePart && /^\d{7,15}$/.test(phonePart)) {
+    return "+" + phonePart;
+  }
+  return c.name || "Unknown";
 }
 
 function timeAgo(unixTs) {

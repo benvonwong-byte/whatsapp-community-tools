@@ -215,6 +215,21 @@ export function createFriendsRouter(
     res.json({ ok: true });
   });
 
+  // Hide/unhide contacts
+  router.post("/contacts/:id/hide", (req: Request, res: Response) => {
+    store.hideContact(decodeURIComponent(req.params.id as string));
+    res.json({ ok: true });
+  });
+
+  router.post("/contacts/:id/unhide", (req: Request, res: Response) => {
+    store.unhideContact(decodeURIComponent(req.params.id as string));
+    res.json({ ok: true });
+  });
+
+  router.get("/contacts/hidden", (_req: Request, res: Response) => {
+    res.json(store.getHiddenContacts());
+  });
+
   router.get("/contacts/:id/voice", (req: Request, res: Response) => {
     const contactId = decodeURIComponent(req.params.id as string);
     const notes = store.getVoiceNotesByContact(contactId);
@@ -516,6 +531,113 @@ export function createFriendsRouter(
       res.json({ ok: true, ...result });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || "Consolidation failed" });
+    }
+  });
+
+  // ── Data Management ──
+
+  router.post("/archive", (req: Request, res: Response) => {
+    const days = parseInt(req.body.olderThanDays as string) || 1095; // default 3 years
+    const result = store.archiveOldMessages(days);
+    res.json({ ok: true, ...result, freedMB: Math.round(result.freedChars / 1024 / 1024 * 10) / 10 });
+  });
+
+  // ── AI Search ──
+
+  router.post("/search", async (req: Request, res: Response) => {
+    const { query } = req.body;
+    if (!query || typeof query !== "string") {
+      res.status(400).json({ error: "Query string required" });
+      return;
+    }
+
+    try {
+      // Step 1: Extract search keywords from natural language using Gemini
+      const { GoogleGenerativeAI } = await import("@google/generative-ai");
+      const { config } = await import("../../config");
+      if (!config.geminiApiKey) {
+        res.status(503).json({ error: "AI search requires GEMINI_API_KEY" });
+        return;
+      }
+      const genAI = new GoogleGenerativeAI(config.geminiApiKey);
+      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+
+      // Get all available tags for context
+      const allTags = store.getAllTags().slice(0, 200).map(t => t.name);
+
+      const parseResult = await model.generateContent(`You are a search assistant for a personal contacts CRM. Parse the user's natural language search query into structured search parameters.
+
+Available tags in the system: ${allTags.join(", ")}
+
+Return ONLY a JSON object:
+{
+  "keywords": ["keyword1", "keyword2"],     // Words to search in message content
+  "tags": ["matching_tag1", "matching_tag2"], // Exact tag names from the available tags list that match the intent
+  "name": "name to search",                  // If searching for a specific person
+  "explanation": "What the user is looking for"
+}
+
+User query: "${query}"`);
+
+      const parseText = parseResult.response.text();
+      const jsonMatch = parseText.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        res.status(500).json({ error: "Failed to parse search query" });
+        return;
+      }
+      const parsed = JSON.parse(jsonMatch[0]);
+
+      // Step 2: Search using extracted parameters
+      let results: any[] = [];
+
+      // Search by tags
+      if (parsed.tags && parsed.tags.length > 0) {
+        const tagContacts = store.getContactsWithTags(parsed.tags, "OR");
+        const allContacts = store.getContactsWithStats();
+        const tagResults = allContacts.filter(c => tagContacts.includes(c.id)).map(c => ({
+          ...c, match_source: "tag", match_reason: "Has tags: " + parsed.tags.filter((t: string) =>
+            (c as any).tag_names && (c as any).tag_names.includes(t)
+          ).join(", ")
+        }));
+        results.push(...tagResults);
+      }
+
+      // Search by message content keywords
+      if (parsed.keywords && parsed.keywords.length > 0) {
+        const msgResults = store.searchMessageContent(parsed.keywords, 30);
+        for (const r of msgResults) {
+          if (!results.find(x => x.id === r.contact_id)) {
+            results.push({
+              id: r.contact_id, name: r.name, tier_name: r.tier_name, tier_color: r.tier_color,
+              tag_names: r.tag_names, match_source: "message",
+              match_reason: `${r.match_count} message matches`,
+              snippet: r.snippet?.substring(0, 200)
+            });
+          }
+        }
+      }
+
+      // Search by name
+      if (parsed.name) {
+        const allContacts = store.getContactsWithStats();
+        const nameResults = allContacts.filter(c =>
+          c.name.toLowerCase().includes(parsed.name.toLowerCase())
+        ).map(c => ({
+          ...c, match_source: "name", match_reason: "Name match"
+        }));
+        for (const r of nameResults) {
+          if (!results.find(x => x.id === r.id)) results.push(r);
+        }
+      }
+
+      res.json({
+        query,
+        parsed: { keywords: parsed.keywords, tags: parsed.tags, name: parsed.name, explanation: parsed.explanation },
+        results: results.slice(0, 50)
+      });
+    } catch (err: any) {
+      console.error("[ai-search] Error:", err?.message || err);
+      res.status(500).json({ error: err?.message || "Search failed" });
     }
   });
 

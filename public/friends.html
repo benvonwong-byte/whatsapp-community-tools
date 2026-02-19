@@ -714,6 +714,11 @@
       transition: color 0.15s;
     }
     .detail-header .close-btn:hover { color: var(--text); }
+    .hide-contact-btn {
+      background: none; border: 1px solid var(--border); color: var(--text-dim);
+      font-size: 11px; padding: 3px 8px; border-radius: 4px; cursor: pointer;
+    }
+    .hide-contact-btn:hover { border-color: #f44; color: #f44; }
 
     .detail-body { padding: 20px; flex: 1; }
 
@@ -885,6 +890,42 @@
       font-size: 10px;
       color: var(--text-dim);
       margin: 8px 0 4px;
+    }
+
+    /* AI Search */
+    .ai-search-section { margin-bottom: 16px; }
+    .ai-search-bar { display: flex; gap: 8px; }
+    .ai-search-bar input {
+      flex: 1; background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+      border-radius: 6px; padding: 10px 14px; font-size: 14px; outline: none;
+    }
+    .ai-search-bar input:focus { border-color: var(--accent); }
+    .ai-search-bar input::placeholder { color: var(--text-dim); }
+    .ai-search-go {
+      background: var(--accent); color: #fff; border: none; border-radius: 6px;
+      padding: 10px 18px; font-size: 13px; font-weight: 600; cursor: pointer;
+    }
+    .ai-search-go:hover { opacity: 0.9; }
+    .ai-search-go:disabled { opacity: 0.5; cursor: not-allowed; }
+    .ai-search-results {
+      margin-top: 10px; background: var(--surface2); border-radius: 6px; padding: 12px;
+      max-height: 400px; overflow-y: auto;
+    }
+    .ai-search-explanation { font-size: 12px; color: var(--text-dim); margin-bottom: 10px; }
+    .ai-search-result {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 10px; border-radius: 4px; cursor: pointer; gap: 8px;
+    }
+    .ai-search-result:hover { background: var(--surface); }
+    .ai-search-result-name { font-weight: 600; font-size: 13px; }
+    .ai-search-result-meta { font-size: 11px; color: var(--text-dim); }
+    .ai-search-result-reason { font-size: 11px; color: var(--accent); }
+    .ai-search-result-tier {
+      font-size: 9px; padding: 1px 6px; border-radius: 3px; margin-left: 4px;
+    }
+    .ai-search-close {
+      background: none; border: 1px solid var(--border); color: var(--text-dim);
+      font-size: 11px; padding: 2px 8px; border-radius: 4px; cursor: pointer; float: right;
     }
 
     /* Group Modal */
@@ -1414,6 +1455,15 @@
     <!-- ==================== Dashboard Tab ==================== -->
     <div id="tab-dashboard" class="tab-content active">
 
+      <!-- AI Search -->
+      <div class="ai-search-section">
+        <div class="ai-search-bar">
+          <input type="text" id="ai-search-input" placeholder="Ask anything... e.g. 'friends who live in San Francisco' or 'people interested in climate'" />
+          <button id="ai-search-btn" class="ai-search-go">Search</button>
+        </div>
+        <div id="ai-search-results" class="ai-search-results" style="display:none;"></div>
+      </div>
+
       <!-- Summary cards -->
       <div id="summary-cards" class="stats-grid"></div>
 
@@ -1736,7 +1786,10 @@
   <div id="detail-panel" class="contact-detail">
     <div class="detail-header">
       <span style="font-size:14px;font-weight:600;">Contact Details</span>
-      <button class="close-btn" id="detail-close">&times;</button>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <button id="detail-hide-btn" class="hide-contact-btn" title="Hide this contact from all views">Hide</button>
+        <button class="close-btn" id="detail-close">&times;</button>
+      </div>
     </div>
     <div class="detail-body">
       <div id="detail-name" class="detail-name" style="cursor:pointer;" title="Click to edit display name">--</div>

@@ -258,6 +258,11 @@ export class FriendsStore extends SettingsStore {
       this.db.exec(`ALTER TABLE friends_contacts ADD COLUMN hidden_from_neglected INTEGER DEFAULT 0`);
     } catch { /* column already exists */ }
 
+    // Migration: add hidden column (hide/ignore contacts from all views)
+    try {
+      this.db.exec(`ALTER TABLE friends_contacts ADD COLUMN hidden INTEGER DEFAULT 0`);
+    } catch { /* column already exists */ }
+
     // Migration: add body column to friends_messages
     try {
       this.db.exec(`ALTER TABLE friends_messages ADD COLUMN body TEXT DEFAULT ''`);
@@ -407,6 +412,18 @@ export class FriendsStore extends SettingsStore {
 
   updateDisplayName(id: string, displayName: string | null) {
     this.db.prepare(`UPDATE friends_contacts SET display_name = ? WHERE id = ?`).run(displayName || null, id);
+  }
+
+  hideContact(id: string) {
+    this.db.prepare(`UPDATE friends_contacts SET hidden = 1 WHERE id = ?`).run(id);
+  }
+
+  unhideContact(id: string) {
+    this.db.prepare(`UPDATE friends_contacts SET hidden = 0 WHERE id = ?`).run(id);
+  }
+
+  getHiddenContacts(): Array<{ id: string; name: string }> {
+    return this.db.prepare(`SELECT id, COALESCE(display_name, name) as name FROM friends_contacts WHERE hidden = 1 ORDER BY name`).all() as any[];
   }
 
   // ── Message methods ──
@@ -778,7 +795,7 @@ export class FriendsStore extends SettingsStore {
         WHERE fm.chat_id NOT LIKE '%@broadcast'
         GROUP BY fm.chat_id
       ) stats ON stats.contact_id = c.id
-      WHERE stats.total_messages > 0 AND c.id NOT LIKE '%@broadcast'
+      WHERE stats.total_messages > 0 AND c.id NOT LIKE '%@broadcast' AND COALESCE(c.hidden, 0) = 0
       ORDER BY c.last_seen DESC
     `).all(thirtyDaysAgo) as any[];
 
@@ -1176,6 +1193,46 @@ export class FriendsStore extends SettingsStore {
     this.db.prepare(`INSERT INTO friends_tag_buffer (contact_id, message_body, timestamp) VALUES (?, ?, ?)`).run(contactId, body, timestamp);
   }
 
+  /** Archive messages older than a given number of days. Deletes message bodies but keeps metadata. */
+  archiveOldMessages(olderThanDays = 1095): { archived: number; freedChars: number } {
+    const cutoff = Math.floor(Date.now() / 1000) - olderThanDays * 86400;
+    // Get stats first
+    const stats = this.db.prepare(`
+      SELECT COUNT(*) as count, SUM(LENGTH(body)) as chars
+      FROM friends_messages WHERE timestamp < ? AND body != '' AND body IS NOT NULL
+    `).get(cutoff) as any;
+    // Clear body text but keep the message row (for count/stats tracking)
+    this.db.prepare(`
+      UPDATE friends_messages SET body = '' WHERE timestamp < ? AND body != '' AND body IS NOT NULL
+    `).run(cutoff);
+    return { archived: stats?.count || 0, freedChars: stats?.chars || 0 };
+  }
+
+  /** Search contacts by message content. Returns contacts with matching message snippets. */
+  searchMessageContent(keywords: string[], limit = 50): Array<{ contact_id: string; name: string; tier_name: string | null; tier_color: string | null; tag_names: string | null; snippet: string; match_count: number }> {
+    if (keywords.length === 0) return [];
+    // Build SQL with LIKE conditions for each keyword
+    const conditions = keywords.map(() => `m.body LIKE ?`).join(" OR ");
+    const params = keywords.map(k => `%${k}%`);
+    return this.db.prepare(`
+      SELECT c.id as contact_id, COALESCE(c.display_name, c.name) as name,
+             t.name as tier_name, t.color as tier_color,
+             (SELECT GROUP_CONCAT(tg.name, ', ')
+              FROM friends_contact_tags ct JOIN friends_tags tg ON tg.id = ct.tag_id
+              WHERE ct.contact_id = c.id) as tag_names,
+             (SELECT m2.body FROM friends_messages m2 WHERE m2.chat_id = c.id AND (${conditions.replace(/m\.body/g, 'm2.body')}) AND m2.body != '' LIMIT 1) as snippet,
+             COUNT(*) as match_count
+      FROM friends_messages m
+      JOIN friends_contacts c ON c.id = m.chat_id
+      JOIN friends_chats ch ON ch.chat_id = c.id AND ch.is_group = 0
+      LEFT JOIN friends_tiers t ON t.id = c.tier_id
+      WHERE (${conditions}) AND m.body != '' AND COALESCE(c.hidden, 0) = 0
+      GROUP BY c.id
+      ORDER BY match_count DESC
+      LIMIT ?
+    `).all(...params, ...params, limit) as any[];
+  }
+
   getTagBufferContacts(minMessages = 20): Array<{ contact_id: string; message_count: number }> {
     return this.db.prepare(`
       SELECT contact_id, COUNT(*) as message_count
@@ -1260,7 +1317,7 @@ export class FriendsStore extends SettingsStore {
         c.id, COALESCE(c.display_name, c.name) as name,
         SUM(CASE WHEN m.timestamp >= ? AND m.timestamp < ? THEN 1 ELSE 0 END) as messages,
         SUM(CASE WHEN m.timestamp >= ? AND m.timestamp < ? THEN 1 ELSE 0 END) as messages_prev,
-        t.color as tier_color,
+        t.color as tier_color, t.name as tier_name,
         (SELECT GROUP_CONCAT(tg.name, ', ')
          FROM friends_contact_tags ct JOIN friends_tags tg ON tg.id = ct.tag_id
          WHERE ct.contact_id = c.id) as tag_names
