@@ -279,6 +279,44 @@ export class FriendsStore extends SettingsStore {
     } catch { /* column already exists */ }
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_friends_contacts_phone ON friends_contacts(phone_normalized)`);
 
+    // Migration: create friends_contact_notes table for timestamped notes
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS friends_contact_notes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        contact_id TEXT NOT NULL,
+        content TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_friends_contact_notes_cid ON friends_contact_notes(contact_id);
+    `);
+
+    // Migrate existing notes from friends_contacts.notes to friends_contact_notes
+    const legacyNotes = this.db.prepare(`
+      SELECT id, notes FROM friends_contacts WHERE notes IS NOT NULL AND notes != ''
+    `).all() as Array<{ id: string; notes: string }>;
+    if (legacyNotes.length > 0) {
+      const existingNoteContacts = new Set(
+        (this.db.prepare(`SELECT DISTINCT contact_id FROM friends_contact_notes`).all() as Array<{ contact_id: string }>)
+          .map(r => r.contact_id)
+      );
+      const insertNote = this.db.prepare(`
+        INSERT INTO friends_contact_notes (contact_id, content, created_at, updated_at)
+        VALUES (?, ?, datetime('now'), datetime('now'))
+      `);
+      let migrated = 0;
+      for (const row of legacyNotes) {
+        if (!existingNoteContacts.has(row.id)) {
+          insertNote.run(row.id, row.notes);
+          migrated++;
+        }
+      }
+      if (migrated > 0) {
+        console.log(`[friends] Migrated ${migrated} legacy notes to friends_contact_notes`);
+        this.db.exec(`UPDATE friends_contacts SET notes = '' WHERE notes IS NOT NULL AND notes != ''`);
+      }
+    }
+
     // Performance indexes for 160K+ messages
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_friends_msgs_chat_ts ON friends_messages(chat_id, timestamp)`);
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_friends_msgs_chat_fromme ON friends_messages(chat_id, is_from_me, timestamp)`);
@@ -408,6 +446,33 @@ export class FriendsStore extends SettingsStore {
 
   updateContactNotes(id: string, notes: string) {
     this.stmts.updateContactNotes.run(notes, id);
+  }
+
+  // ── Timestamped contact notes ──
+
+  getContactNotes(contactId: string): Array<{ id: number; content: string; created_at: string; updated_at: string }> {
+    return this.db.prepare(`
+      SELECT id, content, created_at, updated_at
+      FROM friends_contact_notes WHERE contact_id = ?
+      ORDER BY created_at DESC
+    `).all(contactId) as any[];
+  }
+
+  addContactNote(contactId: string, content: string): number {
+    const result = this.db.prepare(`
+      INSERT INTO friends_contact_notes (contact_id, content) VALUES (?, ?)
+    `).run(contactId, content);
+    return Number(result.lastInsertRowid);
+  }
+
+  updateContactNote(noteId: number, content: string) {
+    this.db.prepare(`
+      UPDATE friends_contact_notes SET content = ?, updated_at = datetime('now') WHERE id = ?
+    `).run(content, noteId);
+  }
+
+  deleteContactNote(noteId: number) {
+    this.db.prepare(`DELETE FROM friends_contact_notes WHERE id = ?`).run(noteId);
   }
 
   updateDisplayName(id: string, displayName: string | null) {

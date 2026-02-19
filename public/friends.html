@@ -788,7 +788,7 @@
 
     .detail-notes textarea {
       width: 100%;
-      min-height: 80px;
+      min-height: 60px;
       background: var(--surface2);
       color: var(--text);
       border: 1px solid var(--border);
@@ -801,7 +801,7 @@
     }
     .detail-notes textarea:focus { border-color: var(--accent); }
 
-    .detail-notes .save-notes-btn {
+    .detail-notes .add-note-btn {
       margin-top: 8px;
       background: var(--accent);
       color: #000;
@@ -813,7 +813,89 @@
       cursor: pointer;
       transition: opacity 0.15s;
     }
-    .detail-notes .save-notes-btn:hover { opacity: 0.85; }
+    .detail-notes .add-note-btn:hover { opacity: 0.85; }
+    .detail-notes .add-note-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .note-item {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      position: relative;
+    }
+    .note-item .note-timestamp {
+      font-size: 10px;
+      color: var(--text-dim);
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .note-item .note-timestamp .note-edited {
+      font-style: italic;
+      opacity: 0.7;
+    }
+    .note-item .note-content {
+      font-size: 12px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .note-item .note-actions {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      display: flex;
+      gap: 4px;
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+    .note-item:hover .note-actions { opacity: 1; }
+    .note-item .note-action-btn {
+      background: var(--surface);
+      color: var(--text-dim);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-size: 10px;
+      padding: 2px 8px;
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .note-item .note-action-btn:hover { color: var(--accent); border-color: var(--accent); }
+    .note-item .note-action-btn.delete:hover { color: var(--red); border-color: var(--red); }
+
+    .note-item.editing .note-content { display: none; }
+    .note-item.editing .note-edit-area { display: block; }
+    .note-edit-area { display: none; }
+    .note-edit-area textarea {
+      width: 100%;
+      min-height: 60px;
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--accent);
+      border-radius: 6px;
+      padding: 8px;
+      font-size: 12px;
+      font-family: inherit;
+      outline: none;
+      resize: vertical;
+    }
+    .note-edit-actions {
+      display: flex;
+      gap: 6px;
+      margin-top: 6px;
+    }
+    .note-edit-actions button {
+      font-size: 10px;
+      padding: 3px 10px;
+      border-radius: 999px;
+      border: none;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .note-edit-actions .save-edit { background: var(--accent); color: #000; }
+    .note-edit-actions .cancel-edit { background: var(--surface); color: var(--text-dim); border: 1px solid var(--border); }
 
     /* Conversation log */
     .detail-conversation { margin-top: 16px; }
@@ -1103,6 +1185,8 @@
     .gx-dot.selected { animation: gx-pulse 1.5s ease infinite; }
     .gx-edge { stroke-opacity:.12; }
     .gx-edge.highlighted { stroke-opacity:.5; }
+    .gx-label { cursor:pointer; transition:fill .15s; }
+    .gx-label:hover { fill:var(--accent) !important; opacity:1 !important; }
     .gx-axis text { fill:var(--text-dim); font-size:10px; }
     .gx-axis line, .gx-axis path { stroke:var(--border); }
     .gx-axis-label { fill:var(--text-dim); font-size:10px; text-anchor:middle; }
@@ -2090,8 +2174,9 @@
 
       <div class="detail-notes">
         <div class="section-title">Notes</div>
-        <textarea id="contact-notes" placeholder="Add notes about this contact..."></textarea>
-        <button id="save-notes-btn" class="save-notes-btn">Save Notes</button>
+        <textarea id="new-note-input" placeholder="Write a note..."></textarea>
+        <button id="add-note-btn" class="add-note-btn">Add Note</button>
+        <div id="notes-list" style="margin-top:12px;"></div>
       </div>
     </div>
   </div>

@@ -166,7 +166,8 @@ export function createFriendsRouter(
     const groups = store.getContactGroups(contact.id);
     const tags = store.getContactTags(contact.id);
     const voiceStats = store.getVoiceStatsByContact(contact.id, startTs, endTs);
-    res.json({ contact, stats, groups, tags, voiceStats, range: req.query.range || "all" });
+    const notes = store.getContactNotes(contact.id);
+    res.json({ contact, stats, groups, tags, voiceStats, notes, range: req.query.range || "all" });
   });
 
   router.get("/contacts/:id/activity", (req: Request, res: Response) => {
@@ -202,8 +203,34 @@ export function createFriendsRouter(
     }
   });
 
+  // Legacy single-note endpoint (kept for backwards compat)
   router.put("/contacts/:id/notes", (req: Request, res: Response) => {
     store.updateContactNotes(decodeURIComponent(req.params.id as string), req.body.notes || "");
+    res.json({ ok: true });
+  });
+
+  // Timestamped notes CRUD
+  router.get("/contacts/:id/notes", (req: Request, res: Response) => {
+    const notes = store.getContactNotes(decodeURIComponent(req.params.id as string));
+    res.json({ notes });
+  });
+
+  router.post("/contacts/:id/notes", (req: Request, res: Response) => {
+    const content = (req.body.content || "").trim();
+    if (!content) { res.status(400).json({ error: "Content required" }); return; }
+    const noteId = store.addContactNote(decodeURIComponent(req.params.id as string), content);
+    res.json({ ok: true, id: noteId });
+  });
+
+  router.put("/contacts/:id/notes/:noteId", (req: Request, res: Response) => {
+    const content = (req.body.content || "").trim();
+    if (!content) { res.status(400).json({ error: "Content required" }); return; }
+    store.updateContactNote(parseInt(req.params.noteId as string), content);
+    res.json({ ok: true });
+  });
+
+  router.delete("/contacts/:id/notes/:noteId", (req: Request, res: Response) => {
+    store.deleteContactNote(parseInt(req.params.noteId as string));
     res.json({ ok: true });
   });
 

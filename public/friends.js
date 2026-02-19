@@ -192,23 +192,43 @@ function setupDetailPanel() {
     });
   });
 
-  const saveNotesBtn = $("save-notes-btn");
-  if (saveNotesBtn) {
-    saveNotesBtn.addEventListener("click", async () => {
-      const contactId = saveNotesBtn.dataset.contactId;
-      const notes = $("contact-notes")?.value || "";
-      if (!contactId) return;
+  // Add note with Ctrl/Cmd+Enter
+  const noteInput = $("new-note-input");
+  if (noteInput) {
+    noteInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        $("add-note-btn")?.click();
+      }
+    });
+  }
+
+  // Add note button
+  const addNoteBtn = $("add-note-btn");
+  if (addNoteBtn) {
+    addNoteBtn.addEventListener("click", async () => {
+      const input = $("new-note-input");
+      const content = (input?.value || "").trim();
+      if (!content || !currentDetailContactId) return;
+      addNoteBtn.disabled = true;
       try {
-        const res = await adminFetch("/api/friends/contacts/" + encodeURIComponent(contactId) + "/notes", {
-          method: "PUT",
+        const res = await adminFetch("/api/friends/contacts/" + encodeURIComponent(currentDetailContactId) + "/notes", {
+          method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ notes }),
+          body: JSON.stringify({ content }),
         });
-        if (!res.ok) throw new Error("Failed to save notes");
-        saveNotesBtn.textContent = "Saved!";
-        setTimeout(() => { saveNotesBtn.textContent = "Save Notes"; }, 2000);
+        if (!res.ok) throw new Error("Failed to add note");
+        input.value = "";
+        // Refresh notes
+        const notesRes = await adminFetch("/api/friends/contacts/" + encodeURIComponent(currentDetailContactId) + "/notes");
+        if (notesRes.ok) {
+          const data = await notesRes.json();
+          renderContactNotes(currentDetailContactId, data.notes);
+        }
       } catch (err) {
-        alert("Failed to save notes: " + err.message);
+        alert("Failed to add note: " + err.message);
+      } finally {
+        addNoteBtn.disabled = false;
       }
     });
   }
@@ -220,6 +240,115 @@ function closeDetailPanel() {
   if (detailChart) {
     detailChart.destroy();
     detailChart = null;
+  }
+}
+
+let _notesContactId = null; // track which contact notes are displayed for
+
+function renderContactNotes(contactId, notes) {
+  const list = $("notes-list");
+  if (!list) return;
+  _notesContactId = contactId;
+
+  if (!notes || notes.length === 0) {
+    list.innerHTML = '<div style="color:var(--text-dim);font-size:11px;">No notes yet</div>';
+    return;
+  }
+
+  list.innerHTML = notes.map(note => {
+    const created = new Date(note.created_at + "Z");
+    const updated = new Date(note.updated_at + "Z");
+    const wasEdited = note.updated_at !== note.created_at;
+    const dateStr = created.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    const timeStr = created.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+    const editedStr = wasEdited ? ` <span class="note-edited">(edited ${updated.toLocaleDateString("en-US", { month: "short", day: "numeric" })})</span>` : "";
+
+    return `<div class="note-item" data-note-id="${note.id}">
+      <div class="note-timestamp">${dateStr} at ${timeStr}${editedStr}</div>
+      <div class="note-content">${esc(note.content)}</div>
+      <div class="note-edit-area">
+        <textarea class="note-edit-text">${esc(note.content)}</textarea>
+        <div class="note-edit-actions">
+          <button class="save-edit" data-note-id="${note.id}">Save</button>
+          <button class="cancel-edit" data-note-id="${note.id}">Cancel</button>
+        </div>
+      </div>
+      <div class="note-actions">
+        <button class="note-action-btn edit-btn" data-note-id="${note.id}">Edit</button>
+        <button class="note-action-btn delete delete-btn" data-note-id="${note.id}">Delete</button>
+      </div>
+    </div>`;
+  }).join("");
+
+  // Attach event listeners via delegation
+  list.querySelectorAll(".edit-btn").forEach(btn => {
+    btn.addEventListener("click", () => startNoteEdit(parseInt(btn.dataset.noteId)));
+  });
+  list.querySelectorAll(".delete-btn").forEach(btn => {
+    btn.addEventListener("click", () => deleteNote(parseInt(btn.dataset.noteId), _notesContactId));
+  });
+  list.querySelectorAll(".save-edit").forEach(btn => {
+    btn.addEventListener("click", () => saveNoteEdit(parseInt(btn.dataset.noteId), _notesContactId));
+  });
+  list.querySelectorAll(".cancel-edit").forEach(btn => {
+    btn.addEventListener("click", () => cancelNoteEdit(parseInt(btn.dataset.noteId)));
+  });
+}
+
+function startNoteEdit(noteId) {
+  const item = document.querySelector(`.note-item[data-note-id="${noteId}"]`);
+  if (item) item.classList.add("editing");
+}
+
+function cancelNoteEdit(noteId) {
+  const item = document.querySelector(`.note-item[data-note-id="${noteId}"]`);
+  if (item) {
+    item.classList.remove("editing");
+    const textarea = item.querySelector(".note-edit-text");
+    const content = item.querySelector(".note-content");
+    if (textarea && content) textarea.value = content.textContent;
+  }
+}
+
+async function saveNoteEdit(noteId, contactId) {
+  const item = document.querySelector(`.note-item[data-note-id="${noteId}"]`);
+  if (!item) return;
+  const textarea = item.querySelector(".note-edit-text");
+  const content = (textarea?.value || "").trim();
+  if (!content) return;
+  try {
+    const res = await adminFetch(`/api/friends/contacts/${encodeURIComponent(contactId)}/notes/${noteId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content }),
+    });
+    if (!res.ok) throw new Error("Failed to update note");
+    // Refresh notes list
+    const notesRes = await adminFetch(`/api/friends/contacts/${encodeURIComponent(contactId)}/notes`);
+    if (notesRes.ok) {
+      const data = await notesRes.json();
+      renderContactNotes(contactId, data.notes);
+    }
+  } catch (err) {
+    alert("Failed to update note: " + err.message);
+  }
+}
+
+async function deleteNote(noteId, contactId) {
+  if (!confirm("Delete this note?")) return;
+  try {
+    const res = await adminFetch(`/api/friends/contacts/${encodeURIComponent(contactId)}/notes/${noteId}`, {
+      method: "DELETE",
+    });
+    if (!res.ok) throw new Error("Failed to delete note");
+    // Refresh notes list
+    const notesRes = await adminFetch(`/api/friends/contacts/${encodeURIComponent(contactId)}/notes`);
+    if (notesRes.ok) {
+      const data = await notesRes.json();
+      renderContactNotes(contactId, data.notes);
+    }
+  } catch (err) {
+    alert("Failed to delete note: " + err.message);
   }
 }
 
@@ -1556,11 +1685,8 @@ async function openContactDetail(contactId) {
     // Tags (editable)
     renderDetailTags(contactId, detailData.tags || []);
 
-    // Notes
-    const notesEl = $("contact-notes");
-    if (notesEl) notesEl.value = contact.notes || "";
-    const saveBtn = $("save-notes-btn");
-    if (saveBtn) saveBtn.dataset.contactId = contactId;
+    // Timestamped Notes
+    renderContactNotes(contactId, detailData.notes || []);
 
     // Chart title
     const chartTitle = $("detail-chart-title");
@@ -3176,6 +3302,68 @@ function gxMakeScale(axisDef, nodes, key, rangeArr) {
   return d3.scaleLinear().domain([ext[0] - pad, ext[1] + pad]).range(rangeArr);
 }
 
+function gxDeoverlapLabels(nodes, xs, ys, xv, yv) {
+  // Greedy label de-overlap: assign each label a position that avoids previous labels.
+  // Each label starts below its dot; if that collides, try right, left, above, then shift down.
+  const CHAR_W = 5.4; // approx width per char at 9px
+  const LBL_H = 12;   // label height
+  const placed = []; // { x, y, w, h }
+  const result = {}; // { id: { x, y, anchor } }
+
+  function overlaps(rect) {
+    for (const p of placed) {
+      if (rect.x < p.x + p.w && rect.x + rect.w > p.x &&
+          rect.y < p.y + p.h && rect.y + rect.h > p.y) return true;
+    }
+    return false;
+  }
+
+  for (const n of nodes) {
+    const cx = xs(xv(n));
+    const cy = ys(yv(n));
+    const r = gxGetRadius(n);
+    const text = n.name.length > 16 ? n.name.substring(0, 14) + ".." : n.name;
+    const tw = text.length * CHAR_W;
+
+    // Try positions: below, right, left, above
+    const candidates = [
+      { x: cx - tw / 2, y: cy + r + 3, anchor: "middle" },         // below
+      { x: cx + r + 4, y: cy + LBL_H / 3, anchor: "start" },       // right
+      { x: cx - r - 4 - tw, y: cy + LBL_H / 3, anchor: "end" },    // left
+      { x: cx - tw / 2, y: cy - r - 4, anchor: "middle" },          // above
+    ];
+
+    let chosen = null;
+    for (const c of candidates) {
+      const rect = { x: c.x, y: c.y - LBL_H + 2, w: tw, h: LBL_H };
+      if (!overlaps(rect)) { chosen = { ...c, rect }; break; }
+    }
+
+    // Fallback: below with increasing vertical offset
+    if (!chosen) {
+      for (let dy = LBL_H; dy < LBL_H * 6; dy += LBL_H) {
+        const c = { x: cx - tw / 2, y: cy + r + 3 + dy, anchor: "middle" };
+        const rect = { x: c.x, y: c.y - LBL_H + 2, w: tw, h: LBL_H };
+        if (!overlaps(rect)) { chosen = { ...c, rect }; break; }
+      }
+    }
+
+    if (!chosen) {
+      const c = candidates[0];
+      chosen = { ...c, rect: { x: c.x, y: c.y - LBL_H + 2, w: tw, h: LBL_H } };
+    }
+
+    placed.push(chosen.rect);
+    // SVG text x: for "start" anchor = left edge, "end" = right edge, "middle" = center
+    let labelX;
+    if (chosen.anchor === "start") labelX = chosen.x;
+    else if (chosen.anchor === "end") labelX = chosen.x + tw;
+    else labelX = chosen.x + tw / 2;
+    result[n.id] = { x: labelX, y: chosen.y, anchor: chosen.anchor };
+  }
+  return result;
+}
+
 function gxRender() {
   const wrap = $("gx-canvas-wrap");
   if (!wrap || !GX.data) return;
@@ -3188,12 +3376,18 @@ function gxRender() {
 
   const W = wrap.clientWidth;
   const H = wrap.clientHeight;
-  const margin = { top: 20, right: 20, bottom: 36, left: 60 };
 
   const xKey = GX.xAxis;
   const yKey = GX.yAxis;
   const xDef = GX.axes.find(a => a.key === xKey);
   const yDef = GX.axes.find(a => a.key === yKey);
+
+  // Dynamic margins: wider left for time Y-axis, taller bottom for time X-axis
+  const margin = {
+    top: 20, right: 20,
+    bottom: (xDef && xDef.type === "time") ? 44 : 36,
+    left: (yDef && yDef.type === "time") ? 80 : 60
+  };
 
   GX.xScale = gxMakeScale(xDef, nodes, xKey, [margin.left, W - margin.right]);
   GX.yScale = gxMakeScale(yDef, nodes, yKey, [H - margin.bottom, margin.top]);
@@ -3210,11 +3404,11 @@ function gxRender() {
     GX.g.append("g").attr("class", "gx-tag-edges-layer");
     GX.g.append("g").attr("class", "gx-dots-layer");
     GX.g.append("g").attr("class", "gx-labels-layer");
-    svg.append("g").attr("class", "gx-axis gx-x-axis").attr("transform", `translate(0,${H - margin.bottom})`);
-    svg.append("g").attr("class", "gx-axis gx-y-axis").attr("transform", `translate(${margin.left},0)`);
-    svg.append("text").attr("class", "gx-axis-label gx-x-label").attr("x", W / 2).attr("y", H - 4);
+    svg.append("g").attr("class", "gx-axis gx-x-axis");
+    svg.append("g").attr("class", "gx-axis gx-y-axis");
+    svg.append("text").attr("class", "gx-axis-label gx-x-label");
     svg.append("text").attr("class", "gx-axis-label gx-y-label")
-      .attr("transform", "rotate(-90)").attr("x", -H / 2).attr("y", 12);
+      .attr("transform", "rotate(-90)");
 
     GX.zoom = d3.zoom().scaleExtent([0.3, 20]).on("zoom", (e) => {
       GX.currentTransform = e.transform;
@@ -3248,20 +3442,25 @@ function gxRender() {
   GX._ys = ys;
 
   const xAxisGen = xDef && xDef.type === "time"
-    ? d3.axisBottom(xs).ticks(6).tickFormat(d3.timeFormat("%b %Y"))
+    ? d3.axisBottom(xs).ticks(8).tickFormat(d3.timeFormat("%b '%y"))
     : d3.axisBottom(xs).ticks(8);
   const yAxisGen = yDef && yDef.type === "time"
-    ? d3.axisLeft(ys).ticks(6).tickFormat(d3.timeFormat("%b %Y"))
+    ? d3.axisLeft(ys).ticks(8).tickFormat(d3.timeFormat("%b '%y"))
     : d3.axisLeft(ys).ticks(6);
 
-  svg.select(".gx-x-axis").transition(t).call(xAxisGen.tickSize(-H + margin.top + margin.bottom));
-  svg.select(".gx-y-axis").transition(t).call(yAxisGen.tickSize(-W + margin.left + margin.right));
+  // Update axis positions (margins may change between renders)
+  svg.select(".gx-x-axis").attr("transform", `translate(0,${H - margin.bottom})`).transition(t).call(xAxisGen.tickSize(-H + margin.top + margin.bottom));
+  svg.select(".gx-y-axis").attr("transform", `translate(${margin.left},0)`).transition(t).call(yAxisGen.tickSize(-W + margin.left + margin.right));
   svg.selectAll(".gx-axis line").attr("stroke", "rgba(255,255,255,0.04)");
   svg.selectAll(".gx-axis path").attr("stroke", "rgba(255,255,255,0.08)");
+  // Rotate X-axis tick labels for time axes to prevent overlap
+  if (xDef && xDef.type === "time") {
+    svg.select(".gx-x-axis").selectAll("text").attr("transform", "rotate(-35)").attr("text-anchor", "end").attr("dx", "-4px").attr("dy", "4px");
+  }
   const xLabel = xDef?.label || xKey;
   const yLabel = yDef?.label || yKey;
-  svg.select(".gx-x-label").text(xLabel);
-  svg.select(".gx-y-label").text(yLabel);
+  svg.select(".gx-x-label").attr("x", W / 2).attr("y", H - 4).text(xLabel);
+  svg.select(".gx-y-label").attr("x", -H / 2).attr("y", 12).text(yLabel);
 
   // Helper to get value for scale
   const xv = d => {
@@ -3314,18 +3513,25 @@ function gxRender() {
   dotMerge.classed("selected", d => GX.selected && d.id === GX.selected.id)
     .classed("dimmed", d => GX.searchQ && !d.name.toLowerCase().includes(GX.searchQ));
 
-  // Labels
+  // Labels (clickable, with de-overlap)
   if (GX.showLabels) {
     const lblSel = GX.g.select(".gx-labels-layer").selectAll("text.gx-label").data(nodes, d => d.id);
     lblSel.exit().transition(t).attr("opacity", 0).remove();
     const lblEnter = lblSel.enter().append("text").attr("class", "gx-label")
       .attr("text-anchor", "middle").attr("font-size", "9px").attr("fill", "rgba(220,220,230,0.6)")
-      .attr("pointer-events", "none");
-    lblSel.merge(lblEnter).transition(t)
-      .attr("x", d => xs(xv(d))).attr("y", d => ys(yv(d)))
-      .attr("dy", d => gxGetRadius(d) + 12)
-      .attr("opacity", d => (GX.searchQ && !d.name.toLowerCase().includes(GX.searchQ)) ? 0.05 : 0.6)
-      .text(d => d.name.length > 16 ? d.name.substring(0, 14) + ".." : d.name);
+      .attr("pointer-events", "auto").attr("cursor", "pointer")
+      .on("click", (e, d) => { e.stopPropagation(); gxSelect(d); });
+    const lblMerge = lblSel.merge(lblEnter);
+    lblMerge.text(d => d.name.length > 16 ? d.name.substring(0, 14) + ".." : d.name);
+
+    // Compute de-overlapped label positions
+    const labelPositions = gxDeoverlapLabels(nodes, xs, ys, xv, yv);
+    lblMerge.transition(t)
+      .attr("x", d => labelPositions[d.id]?.x ?? xs(xv(d)))
+      .attr("y", d => labelPositions[d.id]?.y ?? ys(yv(d)))
+      .attr("dy", 0) // offset already baked into y
+      .attr("text-anchor", d => labelPositions[d.id]?.anchor ?? "middle")
+      .attr("opacity", d => (GX.searchQ && !d.name.toLowerCase().includes(GX.searchQ)) ? 0.05 : 0.6);
   } else {
     GX.g.select(".gx-labels-layer").selectAll("text.gx-label").transition(t).attr("opacity", 0).remove();
   }
@@ -3348,9 +3554,13 @@ function gxRender() {
 function gxSelect(node) {
   GX.selected = node;
   d3.selectAll(".gx-dot").classed("selected", d => node && d.id === node.id);
-  const detail = $("gx-detail");
-  if (node) { detail?.classList.add("open"); gxRenderDetail(node); }
-  else { detail?.classList.remove("open"); }
+  if (node) {
+    // Open full profile instead of partial graph detail panel
+    openContactDetail(node.id);
+  } else {
+    const detail = $("gx-detail");
+    if (detail) detail.classList.remove("open");
+  }
   const status = $("gx-status");
   if (status) {
     const xL = GX.axes.find(a => a.key === GX.xAxis)?.label || GX.xAxis;
@@ -3426,19 +3636,20 @@ function gxDynamicRescale(transform) {
   const xv = d => { const v = d[xKey]; return v instanceof Date ? v : (v || 0); };
   const yv = d => { const v = d[yKey]; return v instanceof Date ? v : (v || 0); };
 
-  const dur = 80;
-  const t = d3.transition().duration(dur).ease(d3.easeLinear);
-
   const wrap = $("gx-canvas-wrap");
   const W = wrap ? wrap.clientWidth : 800;
   const H = wrap ? wrap.clientHeight : 600;
-  const margin = { top: 20, right: 20, bottom: 36, left: 60 };
+  const margin = {
+    top: 20, right: 20,
+    bottom: (xDef && xDef.type === "time") ? 44 : 36,
+    left: (yDef && yDef.type === "time") ? 80 : 60
+  };
 
   const xAxisGen = xDef && xDef.type === "time"
-    ? d3.axisBottom(xs).ticks(6).tickFormat(d3.timeFormat("%b %Y"))
+    ? d3.axisBottom(xs).ticks(8).tickFormat(d3.timeFormat("%b '%y"))
     : d3.axisBottom(xs).ticks(8);
   const yAxisGen = yDef && yDef.type === "time"
-    ? d3.axisLeft(ys).ticks(6).tickFormat(d3.timeFormat("%b %Y"))
+    ? d3.axisLeft(ys).ticks(8).tickFormat(d3.timeFormat("%b '%y"))
     : d3.axisLeft(ys).ticks(6);
 
   const svg = d3.select("#gx-svg");
@@ -3446,14 +3657,23 @@ function gxDynamicRescale(transform) {
   svg.select(".gx-y-axis").call(yAxisGen.tickSize(-W + margin.left + margin.right));
   svg.selectAll(".gx-axis line").attr("stroke", "rgba(255,255,255,0.04)");
   svg.selectAll(".gx-axis path").attr("stroke", "rgba(255,255,255,0.08)");
+  if (xDef && xDef.type === "time") {
+    svg.select(".gx-x-axis").selectAll("text").attr("transform", "rotate(-35)").attr("text-anchor", "end").attr("dx", "-4px").attr("dy", "4px");
+  }
 
   // Reposition dots
   GX.g.select(".gx-dots-layer").selectAll("circle.gx-dot")
     .attr("cx", d => xs(xv(d))).attr("cy", d => ys(yv(d)));
 
-  // Reposition labels
-  GX.g.select(".gx-labels-layer").selectAll("text.gx-label")
-    .attr("x", d => xs(xv(d))).attr("y", d => ys(yv(d)));
+  // Reposition labels with de-overlap
+  if (GX.showLabels) {
+    const labelPositions = gxDeoverlapLabels(GX.nodes, xs, ys, xv, yv);
+    GX.g.select(".gx-labels-layer").selectAll("text.gx-label")
+      .attr("x", d => labelPositions[d.id]?.x ?? xs(xv(d)))
+      .attr("y", d => labelPositions[d.id]?.y ?? ys(yv(d)))
+      .attr("dy", 0)
+      .attr("text-anchor", d => labelPositions[d.id]?.anchor ?? "middle");
+  }
 
   // Reposition edges
   const nodeMap = {};
