@@ -198,6 +198,13 @@ export class MetacrisisStore extends SettingsStore {
       CREATE INDEX IF NOT EXISTS idx_meta_topics_topic ON metacrisis_topics(topic);
     `);
 
+    // Migrate links table: add description column if missing
+    const linkCols = this.db.prepare("PRAGMA table_info(metacrisis_links)").all() as any[];
+    if (linkCols.length > 0 && !linkCols.find((c: any) => c.name === "description")) {
+      this.db.exec(`ALTER TABLE metacrisis_links ADD COLUMN description TEXT DEFAULT ''`);
+      console.log("[metacrisis-store] Migrated metacrisis_links: added description column");
+    }
+
     // Insert default settings if they don't exist
     const insertDefault = this.db.prepare(
       `INSERT OR IGNORE INTO metacrisis_settings (key, value) VALUES (?, ?)`
@@ -212,6 +219,21 @@ export class MetacrisisStore extends SettingsStore {
       );
     });
     insertDefaults();
+
+    // Fix any @lid sender names with known overrides
+    const SENDER_FIXES: Record<string, string> = {
+      "116084476788850:76@lid": "Benjamin Von Wong",
+    };
+    for (const [rawId, displayName] of Object.entries(SENDER_FIXES)) {
+      this.db.prepare(`UPDATE metacrisis_messages SET sender_name = ? WHERE sender = ? AND (sender_name = ? OR sender_name = '' OR sender_name IS NULL)`).run(displayName, rawId, rawId);
+      this.db.prepare(`UPDATE metacrisis_links SET sender_name = ? WHERE sender_name = ?`).run(displayName, rawId);
+      // Also fix in summary who_said_what_json
+      const summaries = this.db.prepare(`SELECT id, who_said_what_json FROM metacrisis_summaries WHERE who_said_what_json LIKE ?`).all(`%${rawId}%`) as any[];
+      for (const s of summaries) {
+        const fixed = s.who_said_what_json.replace(new RegExp(rawId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), displayName);
+        this.db.prepare(`UPDATE metacrisis_summaries SET who_said_what_json = ? WHERE id = ?`).run(fixed, s.id);
+      }
+    }
 
     this.stmts = {
       saveMessage: this.db.prepare(
@@ -372,6 +394,21 @@ export class MetacrisisStore extends SettingsStore {
     return this.stmts.getLinksByCategory.all(category, limit) as MetacrisisLink[];
   }
 
+  /** Get links that haven't been scraped yet (no title or description) */
+  getUnscrapedLinks(limit: number = 20): Array<{ id: number; url: string; category: string }> {
+    return this.db.prepare(`
+      SELECT id, url, category FROM metacrisis_links
+      WHERE (title IS NULL OR title = '') AND (description IS NULL OR description = '')
+      ORDER BY timestamp DESC LIMIT ?
+    `).all(limit) as any[];
+  }
+
+  /** Update a link's scraped title and description */
+  updateLinkMeta(id: number, title: string, description: string) {
+    this.db.prepare(`UPDATE metacrisis_links SET title = ?, description = ? WHERE id = ?`)
+      .run(title, description, id);
+  }
+
   // ── Summaries ──
 
   saveSummary(
@@ -523,6 +560,36 @@ export class MetacrisisStore extends SettingsStore {
       WHERE type = 'daily' AND date >= date('now', '-' || ? || ' days')
       ORDER BY date DESC
     `).all(days) as MetacrisisSummary[];
+  }
+
+  /** Get recent messages that contain links, grouped with link metadata, for the composer */
+  getMessagesWithLinks(days: number = 7, limit: number = 20): Array<{
+    sender_name: string; body: string; timestamp: number;
+    url: string; link_title: string; link_description: string; category: string;
+  }> {
+    const cutoff = Math.floor(Date.now() / 1000) - days * 86400;
+    return this.db.prepare(`
+      SELECT m.sender_name, m.body, m.timestamp,
+             l.url, COALESCE(l.title, '') as link_title,
+             COALESCE(l.description, '') as link_description, l.category
+      FROM metacrisis_links l
+      JOIN metacrisis_messages m ON m.id = l.message_id
+      WHERE l.timestamp >= ? AND m.sender_name != ''
+      ORDER BY l.timestamp DESC
+      LIMIT ?
+    `).all(cutoff, limit) as any[];
+  }
+
+  /** Get discussion highlights: top topics with who discussed them */
+  getWeeklyHighlights(days: number = 7): Array<{ topic: string; mention_count: number; sentiment: string }> {
+    return this.db.prepare(`
+      SELECT topic, SUM(mention_count) as mention_count, sentiment
+      FROM metacrisis_topics
+      WHERE date >= date('now', '-' || ? || ' days')
+      GROUP BY topic
+      ORDER BY mention_count DESC
+      LIMIT 10
+    `).all(days) as any[];
   }
 
 }

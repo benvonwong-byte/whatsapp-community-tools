@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { MetacrisisStore } from "./store";
 import { MetacrisisHandlerDiagnostics } from "./handler";
+import { scrapeLinksMeta } from "./summarizer";
 
 export function createMetacrisisRouter(
   store: MetacrisisStore,
@@ -178,9 +179,21 @@ export function createMetacrisisRouter(
     }
   });
 
-  // GET /api/metacrisis/weekly-draft — assemble data for the weekly update composer
-  router.get("/weekly-draft", (_req: Request, res: Response) => {
+  // POST /api/metacrisis/scrape-links — scrape unscraped link titles/descriptions
+  router.post("/scrape-links", async (_req: Request, res: Response) => {
     try {
+      const count = await scrapeLinksMeta(store);
+      res.json({ ok: true, scraped: count });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || "Link scraping failed" });
+    }
+  });
+
+  // GET /api/metacrisis/weekly-draft — assemble data for the weekly update composer
+  router.get("/weekly-draft", async (_req: Request, res: Response) => {
+    try {
+      // Auto-scrape any unscraped links before building the draft
+      try { await scrapeLinksMeta(store); } catch (e) { console.error("[metacrisis] Auto-scrape failed:", e); }
       store.markPastEvents();
       const events = store.getUpcomingEvents();
       const topResources = store.getTopResources(7, 5);
@@ -212,6 +225,23 @@ export function createMetacrisisRouter(
       const weekAgo = new Date(now.getTime() - 7 * 86400000);
       const dateRange = `${weekAgo.toLocaleDateString("en-US", { month: "short", day: "numeric" })} → ${now.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
 
+      // Discussion buckets: messages with links, grouped by person
+      const messagesWithLinks = store.getMessagesWithLinks(7, 30);
+      const discussionBuckets: Record<string, { sender: string; items: { body: string; url: string; link_title: string; link_description: string; category: string; timestamp: number }[] }> = {};
+      for (const m of messagesWithLinks) {
+        if (!discussionBuckets[m.sender_name]) {
+          discussionBuckets[m.sender_name] = { sender: m.sender_name, items: [] };
+        }
+        discussionBuckets[m.sender_name].items.push({
+          body: m.body, url: m.url, link_title: m.link_title,
+          link_description: m.link_description,
+          category: m.category, timestamp: m.timestamp,
+        });
+      }
+
+      // Highlights: top discussed topics
+      const highlights = store.getWeeklyHighlights(7);
+
       res.json({
         events,
         topResources,
@@ -219,6 +249,8 @@ export function createMetacrisisRouter(
         communityPulse,
         dateRange,
         weeklyLeaderboard: store.getLeaderboard(5),
+        discussionBuckets: Object.values(discussionBuckets),
+        highlights,
       });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || "Failed to build weekly draft" });

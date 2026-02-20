@@ -334,6 +334,116 @@ export async function processEventLinks(store: MetacrisisStore): Promise<number>
   return processed;
 }
 
+/**
+ * Scrape unscraped links to extract title and description from page HTML.
+ * Returns the number of links successfully scraped.
+ */
+export async function scrapeLinksMeta(store: MetacrisisStore): Promise<number> {
+  const unscraped = store.getUnscrapedLinks(30);
+  if (unscraped.length === 0) return 0;
+
+  console.log(`[metacrisis-scraper] Scraping ${unscraped.length} links...`);
+  let scraped = 0;
+
+  for (const link of unscraped) {
+    try {
+      const html = await fetchRawHtml(link.url);
+      if (!html) {
+        // Mark as scraped with empty values so we don't retry
+        store.updateLinkMeta(link.id, "(untitled)", "");
+        continue;
+      }
+
+      const title = extractTitle(html);
+      const description = extractDescription(html);
+      store.updateLinkMeta(link.id, title, description);
+      scraped++;
+      console.log(`[metacrisis-scraper] Scraped: ${title.slice(0, 60)} — ${link.url}`);
+    } catch (err: any) {
+      console.error(`[metacrisis-scraper] Error scraping ${link.url}:`, err?.message || err);
+      store.updateLinkMeta(link.id, "(error)", "");
+    }
+  }
+
+  console.log(`[metacrisis-scraper] Scraped ${scraped}/${unscraped.length} links.`);
+  return scraped;
+}
+
+/** Fetch raw HTML from a URL with timeout */
+async function fetchRawHtml(url: string): Promise<string | null> {
+  try {
+    const { hostname } = new URL(url);
+    if (hostname === "localhost" || hostname === "127.0.0.1" || hostname.endsWith(".local")) return null;
+  } catch { return null; }
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; MetacrisisBot/1.0)",
+        "Accept": "text/html,application/xhtml+xml,*/*",
+      },
+      redirect: "follow",
+    });
+
+    clearTimeout(timeout);
+    if (!res.ok) return null;
+
+    const contentType = res.headers.get("content-type") || "";
+    if (!contentType.includes("text/html") && !contentType.includes("application/xhtml")) return null;
+
+    const html = await res.text();
+    // Only need first 20KB for metadata extraction
+    return html.slice(0, 20000);
+  } catch {
+    return null;
+  }
+}
+
+/** Extract page title from HTML */
+function extractTitle(html: string): string {
+  // Try og:title first
+  const ogMatch = html.match(/<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["']/i)
+    || html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:title["']/i);
+  if (ogMatch) return decodeHtmlEntities(ogMatch[1]).trim();
+
+  // Fall back to <title>
+  const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+  if (titleMatch) return decodeHtmlEntities(titleMatch[1]).trim();
+
+  return "(untitled)";
+}
+
+/** Extract page description from HTML */
+function extractDescription(html: string): string {
+  // Try og:description first
+  const ogMatch = html.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([^"']+)["']/i)
+    || html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:description["']/i);
+  if (ogMatch) return decodeHtmlEntities(ogMatch[1]).trim().slice(0, 300);
+
+  // Fall back to meta description
+  const metaMatch = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i)
+    || html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*name=["']description["']/i);
+  if (metaMatch) return decodeHtmlEntities(metaMatch[1]).trim().slice(0, 300);
+
+  return "";
+}
+
+/** Decode basic HTML entities */
+function decodeHtmlEntities(str: string): string {
+  return str
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#x27;/g, "'")
+    .replace(/&#x2F;/g, "/");
+}
+
 // ── Legacy export for backward compatibility ──
 
 export function formatSummaryForWhatsApp(

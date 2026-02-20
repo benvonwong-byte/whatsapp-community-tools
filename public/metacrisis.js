@@ -788,13 +788,17 @@ function renderComposer() {
         var checked = composerBuckets[senderKey] !== false ? "checked" : "";
         var itemsHtml = bucket.items.map(function(item) {
           var linkTitle = item.link_title || truncateUrl(item.url, 40);
+          var desc = item.link_description || "";
           var contextSnippet = item.body ? item.body.replace(/https?:\/\/[^\s]+/g, "").trim() : "";
           if (contextSnippet.length > 100) contextSnippet = contextSnippet.slice(0, 100) + "…";
+          // Prefer scraped description over raw message context
+          var displayDesc = desc || contextSnippet;
+          if (displayDesc.length > 150) displayDesc = displayDesc.slice(0, 150) + "…";
           return '<div class="composer-bucket-item">' +
             '<span>→</span>' +
             '<div>' +
               '<a href="' + escapeAttr(item.url) + '" target="_blank" rel="noopener">' + escapeHtml(linkTitle) + '</a>' +
-              (contextSnippet ? '<div style="color:var(--text-dim);font-size:11px;margin-top:1px;">' + escapeHtml(contextSnippet) + '</div>' : '') +
+              (displayDesc ? '<div style="color:var(--text-dim);font-size:11px;margin-top:1px;">' + escapeHtml(displayDesc) + '</div>' : '') +
             '</div>' +
           '</div>';
         }).join("");
@@ -907,10 +911,13 @@ function buildComposerMessage() {
         lines.push("*" + bucket.sender + "*:");
         bucket.items.forEach(function(item) {
           var title = item.link_title || truncateUrl(item.url, 40);
+          var desc = item.link_description || "";
           var context = item.body ? item.body.replace(/https?:\/\/[^\s]+/g, "").trim() : "";
           if (context.length > 120) context = context.slice(0, 120) + "…";
-          if (context) {
-            lines.push("→ " + title + " — " + context);
+          var summary = desc || context;
+          if (summary.length > 150) summary = summary.slice(0, 150) + "…";
+          if (summary) {
+            lines.push("→ " + title + " — " + summary);
           } else {
             lines.push("→ " + title);
           }
