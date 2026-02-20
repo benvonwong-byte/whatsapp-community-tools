@@ -1897,28 +1897,27 @@ function setupDetailReplyBox(contactId, messages) {
     else if (lastMsg.source === "imessage") isIMessage = true;
   }
 
-  if (isIMessage) {
-    // iMessage is receive-only — show info but no input
-    replyBox.style.display = "";
-    replyPlatform.innerHTML = '<span style="color:#3478F6;">iMessage</span> — send-only not available (receive only)';
-    replyInput.style.display = "none";
-    replyBtn.style.display = "none";
-    replyStatus.style.display = "none";
-    return;
-  }
-
-  if (!isWhatsApp) {
+  if (!isWhatsApp && !isIMessage) {
     replyBox.style.display = "none";
     return;
   }
 
-  // WhatsApp — show reply box
+  // Determine phone number for iMessage
+  var imessagePhone = "";
+  if (isIMessage) {
+    imessagePhone = contactId.split("@")[0];
+    if (/^\d{7,15}$/.test(imessagePhone)) imessagePhone = "+" + imessagePhone;
+  }
+
+  // Show reply box for both platforms
   replyBox.style.display = "";
   replyInput.style.display = "";
   replyBtn.style.display = "";
   replyInput.value = "";
   replyStatus.style.display = "none";
-  replyPlatform.innerHTML = 'Reply via <span style="color:#25D366;">WhatsApp</span>';
+  replyPlatform.innerHTML = isWhatsApp
+    ? 'Reply via <span style="color:#25D366;">WhatsApp</span>'
+    : 'Reply via <span style="color:#3478F6;">iMessage</span>';
 
   // Auto-resize textarea
   replyInput.oninput = function() {
@@ -1949,11 +1948,20 @@ function setupDetailReplyBox(contactId, messages) {
     replyStatus.textContent = "Sending message...";
 
     try {
-      var res = await adminFetch("/api/friends/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contactIds: [contactId], message: msg }),
-      });
+      var res;
+      if (isIMessage) {
+        res = await adminFetch("/api/friends/send-imessage", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ phone: imessagePhone, message: msg }),
+        });
+      } else {
+        res = await adminFetch("/api/friends/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ contactIds: [contactId], message: msg }),
+        });
+      }
       if (!res.ok) {
         var errData = await res.json().catch(function() { return {}; });
         throw new Error(errData.error || "Send failed");
@@ -1962,7 +1970,8 @@ function setupDetailReplyBox(contactId, messages) {
       // Success — clear input and show sent message in conversation
       replyInput.value = "";
       replyInput.style.height = "auto";
-      replyStatus.style.color = "#25D366";
+      var successColor = isIMessage ? "#3478F6" : "#25D366";
+      replyStatus.style.color = successColor;
       replyStatus.textContent = "Sent!";
       setTimeout(function() { replyStatus.style.display = "none"; }, 3000);
 
@@ -1971,10 +1980,14 @@ function setupDetailReplyBox(contactId, messages) {
       if (container) {
         var now = new Date();
         var timeStr = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        var sourceBadge = isIMessage
+          ? '<span class="msg-source imessage">iM</span>'
+          : '<span class="msg-source whatsapp">WA</span>';
+        var bubbleClass = isIMessage ? "msg-bubble sent imessage" : "msg-bubble sent";
         var bubble = '<div class="msg-row sent">' +
-          '<div class="msg-bubble sent">' +
+          '<div class="' + bubbleClass + '">' +
             esc(msg) +
-            '<span class="msg-time"><span class="msg-source whatsapp">WA</span>' + esc(timeStr) + '</span>' +
+            '<span class="msg-time">' + sourceBadge + esc(timeStr) + '</span>' +
           '</div></div>';
         container.insertAdjacentHTML("beforeend", bubble);
         container.scrollTop = container.scrollHeight;

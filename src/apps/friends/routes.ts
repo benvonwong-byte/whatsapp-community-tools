@@ -1,4 +1,5 @@
 import { Router, Request, Response } from "express";
+import { execFile } from "child_process";
 import { FriendsStore } from "./store";
 
 export interface SendProgress {
@@ -459,6 +460,41 @@ export function createFriendsRouter(
 
   router.get("/send-status", (_req: Request, res: Response) => {
     res.json(sendProgress);
+  });
+
+  // Send iMessage via AppleScript (macOS only)
+  router.post("/send-imessage", (req: Request, res: Response) => {
+    const { phone, message } = req.body;
+    if (!phone || !message) {
+      res.status(400).json({ error: "phone and message required" });
+      return;
+    }
+
+    // Sanitize: only allow phone numbers/emails, no script injection
+    const cleanPhone = String(phone).replace(/[^+\d@.\-_a-zA-Z]/g, "");
+    if (!cleanPhone) {
+      res.status(400).json({ error: "Invalid phone/email" });
+      return;
+    }
+
+    // AppleScript to send iMessage
+    const script = `
+      tell application "Messages"
+        set targetService to 1st account whose service type = iMessage
+        set targetBuddy to participant "${cleanPhone}" of targetService
+        send "${message.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n")}" to targetBuddy
+      end tell
+    `;
+
+    execFile("osascript", ["-e", script], { timeout: 15000 }, (err, stdout, stderr) => {
+      if (err) {
+        console.error("[imessage-send] Error:", err.message, stderr);
+        res.status(500).json({ error: "Failed to send iMessage: " + (stderr || err.message) });
+        return;
+      }
+      console.log("[imessage-send] Sent to", cleanPhone);
+      res.json({ ok: true });
+    });
   });
 
   // ── Backfill ──
