@@ -1040,9 +1040,11 @@ function setupNeglectedNav() {
   var sortSel = $("neg-sort");
   var groupSel = $("neg-group-filter");
   var tagSel = $("neg-tag-filter");
+  var recencySel = $("neg-recency-filter");
   if (sortSel) sortSel.addEventListener("change", () => renderNeglectedList());
   if (groupSel) groupSel.addEventListener("change", () => renderNeglectedList());
   if (tagSel) tagSel.addEventListener("change", () => renderNeglectedList());
+  if (recencySel) recencySel.addEventListener("change", () => renderNeglectedList());
 }
 
 async function loadNeglected() {
@@ -1096,10 +1098,16 @@ function renderNeglectedList() {
   var filtered = [].concat(neglectedData);
   var groupFilter = $("neg-group-filter")?.value;
   var tagFilter = $("neg-tag-filter")?.value;
+  var recencyFilter = $("neg-recency-filter")?.value;
   var sortMode = $("neg-sort")?.value || "msgs-per-day";
 
   if (groupFilter) filtered = filtered.filter(function(c) { return (c.group_names || "").split(", ").includes(groupFilter); });
   if (tagFilter) filtered = filtered.filter(function(c) { return (c.tag_names || "").split(", ").includes(tagFilter); });
+  if (recencyFilter) {
+    var recencyDays = parseInt(recencyFilter);
+    var recencyCutoff = Math.floor(Date.now() / 1000) - recencyDays * 86400;
+    filtered = filtered.filter(function(c) { return !c.last_seen || c.last_seen < recencyCutoff; });
+  }
 
   if (sortMode === "msgs-per-day") filtered.sort(function(a, b) { return (b.messages_per_active_day || 0) - (a.messages_per_active_day || 0); });
   else if (sortMode === "total-in-range") filtered.sort(function(a, b) { return (b.messages_in_range || 0) - (a.messages_in_range || 0); });
