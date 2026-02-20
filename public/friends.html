@@ -1068,6 +1068,21 @@
     .gx-icon-btn:hover { color:var(--text); border-color:var(--accent); }
     .gx-icon-btn.active { background:var(--accent); color:#000; border-color:var(--accent); }
 
+    /* Floating tooltips */
+    [data-tip] { position:relative; }
+    [data-tip]::after {
+      content:attr(data-tip);
+      position:absolute; bottom:calc(100% + 6px); left:50%; transform:translateX(-50%);
+      background:rgba(16,16,24,.95); color:var(--text); border:1px solid var(--border);
+      border-radius:6px; padding:5px 10px; font-size:11px; font-weight:400;
+      white-space:nowrap; pointer-events:none; z-index:40;
+      opacity:0; transition:opacity .15s; box-shadow:0 4px 16px rgba(0,0,0,.5);
+    }
+    [data-tip]:hover::after { opacity:1; }
+    [data-tip-pos="below"]::after { bottom:auto; top:calc(100% + 6px); }
+    [data-tip-pos="left"]::after { left:auto; right:0; transform:none; }
+    [data-tip-pos="right"]::after { left:0; right:auto; transform:none; }
+
     /* Split layout */
     .gx-split { display:flex; height:calc(100vh - 180px); gap:0; transition: height .3s ease; }
     .gx-canvas-wrap {
@@ -1995,36 +2010,36 @@
       <div class="gx-toolbar">
         <div class="gx-toolbar-row">
           <div class="gx-toolbar-section">
-            <span class="gx-label">Time</span>
+            <span class="gx-label" data-tip="X axis: time of last contact" data-tip-pos="below">Time</span>
             <div class="gx-pill-group" id="gx-x-pills"></div>
           </div>
           <div class="gx-toolbar-section gx-toolbar-right">
             <div class="gx-tier-pills" id="gx-tier-pills"></div>
             <input type="text" id="gx-search" class="gx-search" placeholder="Search (F)">
-            <button class="gx-icon-btn" id="gx-btn-help" title="Help (?)">?</button>
+            <button class="gx-icon-btn" id="gx-btn-help" data-tip="Keyboard shortcuts" title="Help (?)">?</button>
           </div>
         </div>
         <div class="gx-toolbar-row">
           <div class="gx-toolbar-section">
-            <span class="gx-label">Y</span>
+            <span class="gx-label" data-tip="Y axis metric (scroll to zoom)" data-tip-pos="below">Y</span>
             <div class="gx-pill-group gx-pill-group-wrap" id="gx-y-pills"></div>
-            <button class="gx-icon-btn" id="gx-btn-log" title="Logarithmic Y scale (W)">LOG</button>
+            <button class="gx-icon-btn" id="gx-btn-log" data-tip="Toggle logarithmic Y scale (W)" title="Logarithmic Y scale (W)">LOG</button>
           </div>
         </div>
         <div class="gx-toolbar-row">
           <div class="gx-toolbar-section">
-            <span class="gx-label">Color</span>
+            <span class="gx-label" data-tip="Dot color encoding" data-tip-pos="below">Color</span>
             <div class="gx-pill-group" id="gx-color-pills"></div>
           </div>
           <div class="gx-toolbar-section">
-            <span class="gx-label">Size</span>
+            <span class="gx-label" data-tip="Dot size encoding" data-tip-pos="below">Size</span>
             <div class="gx-pill-group" id="gx-size-pills"></div>
           </div>
           <div class="gx-toolbar-section" style="margin-left:auto;gap:4px;">
-            <button class="gx-icon-btn" id="gx-btn-filter" title="Filters (/)">&#9776;</button>
-            <button class="gx-icon-btn" id="gx-btn-lines" title="Group connections (G)">G</button>
-            <button class="gx-icon-btn" id="gx-btn-tags" title="Tag connections (T)">T</button>
-            <button class="gx-icon-btn" id="gx-btn-labels" title="Labels (L)">L</button>
+            <button class="gx-icon-btn" id="gx-btn-filter" data-tip="Range filters" title="Filters (/)">&#9776;</button>
+            <button class="gx-icon-btn" id="gx-btn-lines" data-tip="Show shared group lines" title="Group connections (G)">G</button>
+            <button class="gx-icon-btn" id="gx-btn-tags" data-tip="Show shared tag lines" title="Tag connections (T)">T</button>
+            <button class="gx-icon-btn" id="gx-btn-labels" data-tip="Toggle name labels" title="Labels (L)">L</button>
           </div>
         </div>
       </div>

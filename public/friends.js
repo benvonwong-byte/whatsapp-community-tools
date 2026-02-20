@@ -3442,34 +3442,36 @@ function gxBuildToolbar() {
     const wins = ["1m", "3m", "6m", "1y"];
     const labels = { "1m": "1 Mo", "3m": "3 Mo", "6m": "6 Mo", "1y": "1 Yr" };
     xC.innerHTML =
-      `<button class="gx-pill gx-nav-btn" data-nav="left" title="Earlier">&larr;</button>` +
+      `<button class="gx-pill gx-nav-btn" data-nav="left" data-tip="Scroll earlier ( [ )">&larr;</button>` +
       wins.map(w =>
-        `<span class="gx-pill${w === GX.timeWindow ? ' active' : ''}" data-window="${w}">${labels[w]}</span>`
+        `<span class="gx-pill${w === GX.timeWindow ? ' active' : ''}" data-window="${w}" data-tip="Show last ${labels[w].toLowerCase()}">${labels[w]}</span>`
       ).join("") +
-      `<button class="gx-pill gx-nav-btn" data-nav="right" title="Later">&rarr;</button>` +
+      `<button class="gx-pill gx-nav-btn" data-nav="right" data-tip="Scroll later ( ] )">&rarr;</button>` +
       `<span style="font-size:10px;color:var(--text-dim);margin-left:4px;" id="gx-window-label">${gxTimeWindowLabel()}</span>`;
   }
 
   // Y axis pills (only numeric axes now)
   const yC = $("gx-y-pills");
   if (yC) yC.innerHTML = GX.yAxes.map(a =>
-    `<span class="gx-pill${a.key === GX.yAxis ? ' active' : ''}" data-axis="y" data-key="${a.key}">${a.short}</span>`
+    `<span class="gx-pill${a.key === GX.yAxis ? ' active' : ''}" data-axis="y" data-key="${a.key}" data-tip="${a.label}">${a.short}</span>`
   ).join("");
+  const colorTips = { tier: "Color by tier assignment", recency: "Color by last contact date", activity: "Color by 30-day message count" };
   const cC = $("gx-color-pills");
   if (cC) cC.innerHTML = GX.colors.map(c =>
-    `<span class="gx-pill${c.key === GX.colorMode ? ' active' : ''}" data-mode="color" data-key="${c.key}">${c.label}</span>`
+    `<span class="gx-pill${c.key === GX.colorMode ? ' active' : ''}" data-mode="color" data-key="${c.key}" data-tip="${colorTips[c.key] || c.label}">${c.label}</span>`
   ).join("");
+  const sizeTips = { messages: "Size by total messages", quality: "Size by quality score", messages30d: "Size by last 30 days", equal: "All dots same size" };
   const sC = $("gx-size-pills");
   if (sC) sC.innerHTML = GX.sizes.map(s =>
-    `<span class="gx-pill${s.key === GX.sizeMode ? ' active' : ''}" data-mode="size" data-key="${s.key}">${s.label}</span>`
+    `<span class="gx-pill${s.key === GX.sizeMode ? ' active' : ''}" data-mode="size" data-key="${s.key}" data-tip="${sizeTips[s.key] || s.label}">${s.label}</span>`
   ).join("");
   const tC = $("gx-tier-pills");
   if (tC && GX.tiers.length > 0) {
-    let html = `<span class="gx-tier-pill active" data-tier="all" style="background:#888;" title="All"></span>`;
+    let html = `<span class="gx-tier-pill active" data-tier="all" style="background:#888;" data-tip="Show all tiers"></span>`;
     for (const t of GX.tiers) {
-      html += `<span class="gx-tier-pill" data-tier="${t.id}" style="background:${t.color};" title="${esc(t.name)}"></span>`;
+      html += `<span class="gx-tier-pill" data-tier="${t.id}" style="background:${t.color};" data-tip="Filter: ${esc(t.name)}"></span>`;
     }
-    html += `<span class="gx-tier-pill" data-tier="none" style="background:#444;" title="Unassigned"></span>`;
+    html += `<span class="gx-tier-pill" data-tier="none" style="background:#444;" data-tip="Filter: Unassigned"></span>`;
     tC.innerHTML = html;
   }
 }
