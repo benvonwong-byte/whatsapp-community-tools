@@ -14,7 +14,7 @@ import { createRelationshipRouter } from "./apps/relationship/routes";
 import { buildUpdateMessage, shouldSendUpdate } from "./apps/relationship/updater";
 import { MetacrisisStore } from "./apps/metacrisis/store";
 import { createMetacrisisHandler, categorizeUrl } from "./apps/metacrisis/handler";
-import { runDailyDigest, runWeeklySummary, processEventLinks, formatSummaryForWhatsApp } from "./apps/metacrisis/summarizer";
+import { runDailyDigest, runWeeklySummary, processEventLinks, formatSummaryForWhatsApp, scrapeLinksMeta } from "./apps/metacrisis/summarizer";
 import { createMetacrisisRouter } from "./apps/metacrisis/routes";
 import { FriendsStore } from "./apps/friends/store";
 import { createFriendsHandler } from "./apps/friends/handler";
@@ -475,6 +475,11 @@ async function main() {
       sendRawToAnnouncement
     ),
   });
+
+  // Auto-scrape any unscraped links on startup (picks up new links + retries failures)
+  scrapeLinksMeta(metacrisisStore).then((n) => {
+    if (n > 0) console.log(`[metacrisis] Startup scrape: ${n} links scraped.`);
+  }).catch((err) => console.error(`[metacrisis] Startup scrape failed:`, err?.message || err));
 
   // Friends/Network app: monitor private chats + small groups, track interaction frequency
   const friendsStore = new FriendsStore();
