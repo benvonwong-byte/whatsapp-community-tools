@@ -915,6 +915,20 @@ export class FriendsStore extends SettingsStore {
     `).all() as { chat_id: string; active_days: number; total_chars_text: number; voice_notes: number }[];
   }
 
+  /** Get iMessage sync stats for the monitor dashboard */
+  getImessageStats(): { totalMessages: number; totalContacts: number; latestMessageTs: number | null } {
+    const count = this.db.prepare(
+      `SELECT COUNT(*) as cnt FROM friends_messages WHERE source = 'imessage'`
+    ).get() as { cnt: number };
+    const latest = this.db.prepare(
+      `SELECT MAX(timestamp) as latest FROM friends_messages WHERE source = 'imessage'`
+    ).get() as { latest: number | null };
+    const contacts = this.db.prepare(
+      `SELECT COUNT(DISTINCT chat_id) as cnt FROM friends_messages WHERE source = 'imessage'`
+    ).get() as { cnt: number };
+    return { totalMessages: count.cnt, totalContacts: contacts.cnt, latestMessageTs: latest.latest };
+  }
+
   /** Resolve all DM chat_ids for a contact (handles both sender_id and chat_id lookups for iMessage) */
   private contactChatIds(contactId: string): string[] {
     const bySender = this.db.prepare(`

@@ -840,10 +840,16 @@ User query: "${query.replace(/"/g, '\\"')}"`);
 
   // ── iMessage Sync ──
 
+  // In-memory sync log (last 50 events)
+  const imessageSyncLog: Array<{ time: string; imported: number; skipped: number; voiceImported: number; error?: string }> = [];
+  const MAX_SYNC_LOG = 50;
+
   router.post("/imessage/sync", (req: Request, res: Response) => {
     const syncKey = req.headers["x-sync-key"] as string;
     const expectedKey = process.env.IMESSAGE_SYNC_KEY;
     if (!expectedKey || syncKey !== expectedKey) {
+      imessageSyncLog.push({ time: new Date().toISOString(), imported: 0, skipped: 0, voiceImported: 0, error: "Auth failed (invalid sync key)" });
+      if (imessageSyncLog.length > MAX_SYNC_LOG) imessageSyncLog.shift();
       return res.status(401).json({ error: "Invalid sync key" });
     }
 
@@ -864,11 +870,31 @@ User query: "${query.replace(/"/g, '\\"')}"`);
         console.log(`[imessage-sync] Voice notes: imported ${vnResult.imported}`);
       }
 
+      imessageSyncLog.push({
+        time: new Date().toISOString(),
+        imported: result.imported,
+        skipped: result.updated,
+        voiceImported: result.voiceImported,
+      });
+      if (imessageSyncLog.length > MAX_SYNC_LOG) imessageSyncLog.shift();
+
       res.json(result);
     } catch (err: any) {
       console.error("[imessage-sync] Error:", err?.message || err);
+      imessageSyncLog.push({ time: new Date().toISOString(), imported: 0, skipped: 0, voiceImported: 0, error: err?.message || "Sync failed" });
+      if (imessageSyncLog.length > MAX_SYNC_LOG) imessageSyncLog.shift();
       res.status(500).json({ error: "Sync failed" });
     }
+  });
+
+  // iMessage sync status & log
+  router.get("/imessage/status", (_req: Request, res: Response) => {
+    const stats = store.getImessageStats();
+    res.json({
+      ...stats,
+      syncLog: imessageSyncLog.slice().reverse(), // newest first
+      syncKeyConfigured: !!process.env.IMESSAGE_SYNC_KEY,
+    });
   });
 
   // ── Health ──

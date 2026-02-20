@@ -34,13 +34,17 @@ const APPLE_EPOCH_OFFSET = 978307200;
 
 // ── Helpers ──
 
+// Detect if running under launchd (stdout already goes to log file)
+const IS_LAUNCHD = !process.stdin.isTTY && !process.env.TERM;
+
 function log(msg) {
   const ts = new Date().toISOString();
   const line = `[${ts}] ${msg}`;
   console.log(line);
-  try {
-    fs.appendFileSync(LOG_PATH, line + "\n");
-  } catch { /* ignore */ }
+  // Only append to file when running interactively (launchd already captures stdout)
+  if (!IS_LAUNCHD) {
+    try { fs.appendFileSync(LOG_PATH, line + "\n"); } catch { /* ignore */ }
+  }
 }
 
 function loadConfig() {
@@ -109,12 +113,15 @@ function queryDb(sql) {
     });
     if (result.error) throw result.error;
     if (result.status !== 0) {
+      const stderr = (result.stderr || "").trim();
+      if (stderr) log(`WARN: sqlite3 JSON mode failed: ${stderr}`);
       // sqlite3 might not support -json; fall back to separator mode
       return queryDbFallback(sql);
     }
     const out = result.stdout.trim();
     return out ? JSON.parse(out) : [];
   } catch (err) {
+    log(`WARN: queryDb error: ${err.message}`);
     // Try fallback if JSON mode fails
     return queryDbFallback(sql);
   }
@@ -129,6 +136,14 @@ function queryDbFallback(sql) {
     encoding: "utf-8",
   });
   if (result.error) throw result.error;
+  if (result.status !== 0) {
+    const stderr = (result.stderr || "").trim();
+    if (stderr) log(`ERROR: sqlite3 query failed: ${stderr}`);
+    if (stderr.includes("authorization denied") || stderr.includes("unable to open")) {
+      log("ERROR: Full Disk Access denied. Grant FDA to /usr/local/bin/node in System Settings > Privacy & Security > Full Disk Access.");
+    }
+    return [];
+  }
   const lines = result.stdout.trim().split("\n").filter(Boolean);
   if (lines.length < 2) return [];
   const headers = lines[0].split("\t");
@@ -226,6 +241,16 @@ async function sync() {
   const config = loadConfig();
   const lastRowId = loadCursor();
   const contactNames = loadContactNames();
+
+  // Pre-flight: verify we can actually read chat.db (catches FDA issues)
+  const preflight = queryDb("SELECT COUNT(*) as cnt FROM message LIMIT 1");
+  if (preflight.length === 0) {
+    log("ERROR: Cannot read chat.db — sqlite3 returned no data.");
+    log("This usually means Full Disk Access is not granted.");
+    log("Fix: System Settings > Privacy & Security > Full Disk Access > add /usr/local/bin/node");
+    log("Or run manually from Terminal (which has FDA): node scripts/imessage-sync.js");
+    return;
+  }
 
   log(`Syncing iMessages (cursor: ROWID > ${lastRowId})...`);
 

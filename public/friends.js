@@ -548,8 +548,79 @@ async function loadDashboard() {
     setupTagAllButton();
     // Calendar is now part of dashboard
     loadCalendar();
+    // iMessage sync monitor
+    loadImessageMonitor();
   } catch (err) {
     console.error("Failed to load dashboard:", err);
+  }
+}
+
+// ── iMessage Sync Monitor ──
+
+async function loadImessageMonitor() {
+  try {
+    const res = await adminFetch("/api/friends/imessage/status");
+    if (!res.ok) return;
+    const data = await res.json();
+
+    // Status badge
+    const badge = $("imsg-status-badge");
+    if (badge) {
+      if (!data.syncKeyConfigured) {
+        badge.textContent = "Not configured";
+        badge.style.background = "#f4433620";
+        badge.style.color = "#f44336";
+      } else if (data.syncLog.length === 0) {
+        badge.textContent = "Awaiting first sync";
+        badge.style.background = "#ff980020";
+        badge.style.color = "#ff9800";
+      } else {
+        const lastEntry = data.syncLog[0];
+        if (lastEntry.error) {
+          badge.textContent = "Error";
+          badge.style.background = "#f4433620";
+          badge.style.color = "#f44336";
+        } else {
+          badge.textContent = "Active";
+          badge.style.background = "#4caf5020";
+          badge.style.color = "#4caf50";
+        }
+      }
+    }
+
+    // Stats cards
+    const statsEl = $("imsg-stats");
+    if (statsEl) {
+      const lastSync = data.syncLog.length > 0 ? data.syncLog[0].time : null;
+      const lastSyncLabel = lastSync ? timeAgo(Math.floor(new Date(lastSync).getTime() / 1000)) : "Never";
+      statsEl.innerHTML =
+        '<div style="text-align:center;"><div style="font-size:18px;font-weight:700;color:var(--accent);">' + (data.totalMessages || 0).toLocaleString() + '</div><div style="font-size:9px;color:var(--text-dim);text-transform:uppercase;">Messages</div></div>' +
+        '<div style="text-align:center;"><div style="font-size:18px;font-weight:700;color:var(--accent);">' + (data.totalContacts || 0) + '</div><div style="font-size:9px;color:var(--text-dim);text-transform:uppercase;">Contacts</div></div>' +
+        '<div style="text-align:center;"><div style="font-size:18px;font-weight:700;color:var(--accent);">' + lastSyncLabel + '</div><div style="font-size:9px;color:var(--text-dim);text-transform:uppercase;">Last Sync</div></div>';
+    }
+
+    // Sync log
+    const logEl = $("imsg-log");
+    if (logEl) {
+      if (data.syncLog.length === 0) {
+        logEl.innerHTML = '<span style="opacity:.5;">No sync events recorded yet. The sync log appears here once the iMessage sync script sends data to the server.</span>';
+      } else {
+        logEl.innerHTML = data.syncLog.map(function(entry) {
+          const t = new Date(entry.time).toLocaleString();
+          if (entry.error) {
+            return '<div style="color:#f44336;">[' + esc(t) + '] ERROR: ' + esc(entry.error) + '</div>';
+          }
+          const parts = [];
+          if (entry.imported > 0) parts.push(entry.imported + ' imported');
+          if (entry.skipped > 0) parts.push(entry.skipped + ' skipped');
+          if (entry.voiceImported > 0) parts.push(entry.voiceImported + ' voice');
+          const summary = parts.length > 0 ? parts.join(', ') : 'no new messages';
+          return '<div>[' + esc(t) + '] ' + esc(summary) + '</div>';
+        }).join('');
+      }
+    }
+  } catch (err) {
+    console.error("Failed to load iMessage monitor:", err);
   }
 }
 
@@ -917,7 +988,7 @@ function filterAndRenderNeglected() {
       : "";
     return '<div class="neglected-card" data-contact-id="' + esc(c.id) + '" style="cursor:pointer;">' +
       '<div class="neglected-card-info">' +
-        '<span class="neglected-name">' + esc(c.name) + '</span>' +
+        '<span class="neglected-name">' + esc(contactDisplayName(c)) + '</span>' +
         '<div class="neglected-meta">' +
           '<span class="neglected-time">' + esc(label) + '</span>' +
           (tierDot ? '<span>' + tierDot + '</span>' : '') +
@@ -964,7 +1035,7 @@ function renderInitiatorsList(data) {
     const myPct = Math.round((myInit / total) * 100);
     const theirPct = 100 - myPct;
     return '<div class="initiator-row" data-contact-id="' + esc(item.contact_id || '') + '" style="cursor:pointer;">' +
-      '<div class="initiator-name">' + esc(item.name) + '</div>' +
+      '<div class="initiator-name">' + esc(contactDisplayName(item)) + '</div>' +
       '<div class="initiator-bar-bg">' +
         '<div class="initiator-bar-fill" style="width:' + myPct + '%"></div>' +
       '</div>' +
@@ -1204,7 +1275,7 @@ function filterAndRenderReciprocity() {
     const sentPct = Math.round((r.sent / total) * 100);
     const recvPct = 100 - sentPct;
     return '<div class="recip-row" data-contact-id="' + esc(r.id) + '" style="cursor:pointer;">' +
-      '<div class="recip-name">' + esc(r.name) + '</div>' +
+      '<div class="recip-name">' + esc(contactDisplayName(r)) + '</div>' +
       '<div class="recip-bar">' +
         '<div class="recip-bar-sent" style="width:' + sentPct + '%" title="Sent: ' + r.sent + '"></div>' +
         '<div class="recip-bar-received" style="width:' + recvPct + '%" title="Received: ' + r.received + '"></div>' +
@@ -1238,7 +1309,7 @@ function renderStreaks(data) {
   }
   container.innerHTML = data.map(s => {
     return '<div class="streak-row" data-contact-id="' + esc(s.id) + '" style="cursor:pointer;">' +
-      '<div class="streak-name">' + esc(s.name) + '</div>' +
+      '<div class="streak-name">' + esc(contactDisplayName(s)) + '</div>' +
       (s.current_streak > 0
         ? '<span class="streak-badge active">\uD83D\uDD25 ' + s.current_streak + 'd</span>'
         : '') +
@@ -1262,7 +1333,7 @@ function renderFastResponders(data) {
   container.innerHTML = data.map((f, i) => {
     return '<div class="fast-row" data-contact-id="' + esc(f.id) + '" style="cursor:pointer;">' +
       '<div class="fast-rank">' + (i + 1) + '</div>' +
-      '<div class="fast-name">' + esc(f.name) + '</div>' +
+      '<div class="fast-name">' + esc(contactDisplayName(f)) + '</div>' +
       '<div class="fast-time">' + formatDuration(f.avg_response_sec) + '</div>' +
     '</div>';
   }).join("");
@@ -1646,7 +1717,7 @@ async function openContactDetail(contactId) {
     const contact = detailData.contact;
 
     // Populate detail panel with editable name
-    const displayName = contact.name || "Unknown";
+    const displayName = contactDisplayName(contact);
     const nameDisplay = $("detail-name");
     if (nameDisplay) {
       nameDisplay.textContent = displayName;
@@ -2155,7 +2226,7 @@ function renderGroupLanes(groupsList, allContacts) {
     '<div class="group-lane-body" data-group-id="ungrouped">' +
       ungrouped.map((c) =>
         '<div class="contact-chip" draggable="true" data-contact-id="' + esc(String(c.id)) + '" data-source-group="ungrouped">' +
-          esc(c.name) +
+          esc(contactDisplayName(c)) +
         '</div>'
       ).join("") +
     '</div>' +
@@ -2345,7 +2416,7 @@ var chipDragOccurred = false;
 
 function renderContactChip(c, sourceTier) {
   return '<div class="contact-chip" draggable="true" data-contact-id="' + esc(String(c.id)) + '" data-source-tier="' + esc(String(sourceTier)) + '">' +
-    '<div class="chip-name">' + esc(c.name) + '</div>' +
+    '<div class="chip-name">' + esc(contactDisplayName(c)) + '</div>' +
     '<div class="chip-meta">' + (c.messages_30d || 0) + ' msgs / 30d</div>' +
   '</div>';
 }
@@ -2992,7 +3063,7 @@ function renderContactPills() {
   container.innerHTML = contacts.map((c) => {
     const isSelected = selectedRecipients.has(String(c.id));
     return '<span class="contact-pill' + (isSelected ? " selected" : "") + '" data-contact-id="' + esc(String(c.id)) + '">' +
-      esc(c.name) +
+      esc(contactDisplayName(c)) +
     '</span>';
   }).join("");
 
@@ -4220,12 +4291,12 @@ function esc(str) {
 function contactDisplayName(c) {
   if (c.name && c.name.trim() && c.name !== "Unknown") return c.name;
   // Extract phone from contact ID (format: "15551234567@c.us" or "+1234@imessage")
-  const id = c.id || "";
+  const id = c.id || c.contact_id || "";
   const phonePart = id.split("@")[0];
   if (phonePart && /^\d{7,15}$/.test(phonePart)) {
     return "+" + phonePart;
   }
-  return c.name || "Unknown";
+  return c.name || c.id || "Unknown";
 }
 
 function timeAgo(unixTs) {
