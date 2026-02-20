@@ -93,29 +93,50 @@ function apiRequest(method, urlPath, config, body) {
 
 // ── AppleScript execution ──
 
-function sendImessage(phone, message) {
+function runAppleScript(script) {
   return new Promise((resolve, reject) => {
-    const escapedMessage = message
-      .replace(/\\/g, "\\\\")
-      .replace(/"/g, '\\"')
-      .replace(/\n/g, "\\n");
-
-    const script = `
-      tell application "Messages"
-        set targetService to 1st account whose service type = iMessage
-        set targetBuddy to participant "${phone}" of targetService
-        send "${escapedMessage}" to targetBuddy
-      end tell
-    `;
-
     execFile("/usr/bin/osascript", ["-e", script], { timeout: 15000 }, (err, stdout, stderr) => {
-      if (err) {
-        reject(new Error(stderr || err.message));
-      } else {
-        resolve(stdout);
-      }
+      if (err) reject(new Error(stderr || err.message));
+      else resolve(stdout);
     });
   });
+}
+
+async function sendImessage(phone, message) {
+  const escapedMessage = message
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, "\\n");
+
+  // Try iMessage first
+  const imessageScript = `
+    tell application "Messages"
+      set targetService to 1st account whose service type = iMessage
+      set targetBuddy to participant "${phone}" of targetService
+      send "${escapedMessage}" to targetBuddy
+    end tell
+  `;
+
+  try {
+    const result = await runAppleScript(imessageScript);
+    log("Sent via iMessage to " + phone);
+    return result;
+  } catch (imsgErr) {
+    log("iMessage failed (" + imsgErr.message.split("\n")[0] + "), trying SMS...");
+  }
+
+  // Fall back to SMS (for Android contacts — requires iPhone with Text Message Forwarding)
+  const smsScript = `
+    tell application "Messages"
+      set targetService to 1st account whose service type = SMS
+      set targetBuddy to participant "${phone}" of targetService
+      send "${escapedMessage}" to targetBuddy
+    end tell
+  `;
+
+  const result = await runAppleScript(smsScript);
+  log("Sent via SMS to " + phone);
+  return result;
 }
 
 // ── Main poll loop ──

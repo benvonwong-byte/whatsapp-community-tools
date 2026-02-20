@@ -562,7 +562,15 @@ async function loadDashboard() {
   setupNeglectedNav();
   setupTagAllButton();
 
-  // 3. Fetch fresh data in background, re-render when ready
+  // 3. Kick off ALL secondary sections immediately (don't wait for dashboard fetch)
+  loadDashboardStatusBar();
+  loadTopFriends();
+  loadNeglected();
+  loadDashboardTags();
+  loadCalendar();
+  loadImessageMonitor();
+
+  // 4. Fetch fresh dashboard data in background, re-render when ready
   try {
     var res = await cachedFetch("/api/friends/dashboard" + tierParam);
     if (!res.ok) throw new Error("Server returned " + res.status);
@@ -573,14 +581,6 @@ async function loadDashboard() {
   } catch (err) {
     console.error("Failed to load dashboard:", err);
   }
-
-  // 4. Load secondary sections in parallel (don't block main render)
-  loadDashboardStatusBar();
-  loadTopFriends();
-  loadNeglected(); // Refresh with correct window (dashboard bundles 30d default)
-  loadDashboardTags();
-  loadCalendar();
-  loadImessageMonitor();
 }
 
 // ── iMessage Sync Monitor ──
