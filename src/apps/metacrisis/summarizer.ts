@@ -260,19 +260,32 @@ function buildDefaultWhatsAppMessage(parsed: any, dateRange: string): string {
 
 // ── Event Link Processor ──
 
-async function extractEventDetails(url: string, pageText: string): Promise<{
+async function extractEventDetails(url: string, pageText: string, html?: string): Promise<{
   name: string; date: string | null; startTime: string | null;
   endTime: string | null; location: string; description: string;
 }> {
   try {
     const model = getModel();
-    const result = await model.generateContent(`Extract event details from this page content.
+    const today = new Date().toISOString().split("T")[0];
+
+    // Use structured data if we have the full HTML
+    let context = `PAGE TEXT:\n${pageText.slice(0, 6000)}`;
+    if (html) {
+      const jsonLd = extractJsonLd(html);
+      const meta = extractAllMeta(html);
+      const embedded = extractEmbeddedData(html);
+      if (jsonLd) context = `JSON-LD:\n${jsonLd.slice(0, 4000)}\n\n${embedded ? `EMBEDDED DATA:\n${embedded}\n\n` : ""}META:\n${meta}\n\n${context}`;
+    }
+
+    const result = await model.generateContent(`Extract event details from this page. Today's date is ${today}.
 URL: ${url}
-PAGE CONTENT:
-${pageText.slice(0, 4000)}
+
+${context}
+
+Look carefully at structured data, meta tags, and page text. Resolve relative dates (e.g. "this Tuesday") using today=${today}.
 
 Respond with ONLY a JSON object:
-{"name":"Event Name","date":"YYYY-MM-DD","startTime":"HH:MM","endTime":"HH:MM","location":"Venue, City","description":"Brief 1-sentence description"}
+{"name":"Event Name","date":"YYYY-MM-DD","startTime":"HH:MM","endTime":"HH:MM","location":"Venue, City","description":"Brief 1-sentence description of what the event is about"}
 
 Use null for any field you cannot determine. JSON:`);
 
@@ -295,8 +308,10 @@ export async function processEventLinks(store: MetacrisisStore): Promise<number>
 
   for (const link of unprocessed) {
     try {
-      const pageText = await fetchPageText(link.url);
-      if (!pageText) {
+      // Fetch full HTML for structured data extraction, plus plain text as fallback
+      const html = await fetchRawHtml(link.url);
+      const pageText = html ? htmlToPlainText(html) : await fetchPageText(link.url);
+      if (!pageText && !html) {
         // Save stub so we don't re-fetch
         store.saveEvent({
           url: link.url,
@@ -312,7 +327,7 @@ export async function processEventLinks(store: MetacrisisStore): Promise<number>
         continue;
       }
 
-      const details = await extractEventDetails(link.url, pageText);
+      const details = await extractEventDetails(link.url, pageText || "", html || undefined);
       store.saveEvent({
         url: link.url,
         name: details.name || "",
@@ -347,14 +362,38 @@ export async function scrapeLinksMeta(store: MetacrisisStore): Promise<number> {
 
   for (const link of unscraped) {
     try {
+      // Try oEmbed first for supported platforms (YouTube, Vimeo) — fast & reliable
+      const oembedData = await fetchOEmbed(link.url);
+      let oembedParsed: any = null;
+      if (oembedData) {
+        try { oembedParsed = JSON.parse(oembedData); } catch {}
+      }
+
       const html = await fetchRawHtml(link.url);
-      if (!html) {
-        store.updateLinkMeta(link.id, "(untitled)", "Could not fetch page content.");
+      if (!html && !oembedParsed) {
+        store.updateLinkMeta(link.id, "(untitled)", "");
         continue;
       }
 
-      const title = extractTitle(html);
-      const pageText = htmlToPlainText(html).slice(0, 4000);
+      // Title: prefer oEmbed title (most reliable for YouTube), then HTML extraction
+      let title = (html ? extractTitle(html) : "(untitled)");
+      if ((title === "(untitled)" || !title) && oembedParsed?.title) {
+        title = oembedParsed.title;
+      }
+
+      // Build context for AI
+      let pageContext = html ? buildPageContext(html, link.url) : "";
+      if (oembedData) pageContext = `OEMBED DATA:\n${oembedData}\n\n---\n\n${pageContext}`;
+
+      // Check if we have enough content to actually summarize
+      const hasContent = pageContext.length > 100;
+      if (!hasContent) {
+        // No content at all — just save title, no fake summary
+        store.updateLinkMeta(link.id, title, "");
+        scraped++;
+        console.log(`[metacrisis-scraper] Scraped (no content): ${title.slice(0, 50)} — ${link.url}`);
+        continue;
+      }
 
       // AI: summarize + classify + extract event date/location in one call
       let summary = "";
@@ -363,21 +402,40 @@ export async function scrapeLinksMeta(store: MetacrisisStore): Promise<number> {
       let eventLocation: string | null = null;
       try {
         const model = getModel();
+        const today = new Date().toISOString().split("T")[0];
         const result = await model.generateContent(
-          `Analyze this web page and respond with ONLY a JSON object (no markdown fences):
-{
-  "summary": "A 2-sentence summary of the content. Keep it concise and informative.",
-  "category": "article" or "video" or "event" or "podcast" or "other",
-  "event_date": "YYYY-MM-DD" or null (only if this is an event page, extract the event date),
-  "event_location": "venue or location name" or null (only if this is an event page)
-}
+          `You are summarizing a shared link for a community newsletter. Today's date is ${today}.
+
+Read the page content carefully — look at structured data, meta tags, and page text to understand what this is about.
 
 URL: ${link.url}
 Title: ${title}
 URL-based category hint: ${link.category}
 
-Content:
-${pageText}`
+${pageContext}
+
+Respond with ONLY a JSON object (no markdown fences):
+{
+  "summary": "your summary here",
+  "category": "article" or "video" or "event" or "podcast" or "other",
+  "event_date": "YYYY-MM-DD" or null,
+  "event_location": "venue or location name" or null
+}
+
+SUMMARY RULES:
+- For EVENTS: Write exactly what the event is, when it happens, and where. Example: "Film screening of 'Buy Now' followed by discussion and item swap. Tue Feb 17, 6:30-10PM in Greenpoint, Brooklyn."
+- For ARTICLES: Summarize the key argument or finding in 2 sentences. What will the reader learn?
+- For VIDEOS: Describe what the video covers and why it's worth watching.
+- For PODCASTS: Describe the episode topic and key guests/perspectives.
+- NEVER write generic descriptions like "This page contains an event" or "This is an article about...". Be specific and informative.
+- If the page content is mostly error messages, login walls, or technical junk with no real content, set summary to an empty string "". Do NOT describe the error page itself.
+- Keep it to 2 concise sentences max.
+
+CATEGORY & EVENT RULES:
+- Set category based on actual content, not just URL.
+- For events: extract the exact date (resolve relative dates like "this Tuesday" using today=${today}), start/end times, and location from the page content. Check structured data and meta tags first.
+
+JSON:`
         );
         const text = result.response.text().trim();
         const parsed = parseGeminiJson(text);
@@ -390,7 +448,7 @@ ${pageText}`
         }
         eventLocation = parsed.event_location || null;
       } catch (aiErr: any) {
-        summary = extractDescription(html) || title;
+        summary = (html ? extractDescription(html) : "") || "";
         console.log(`[metacrisis-scraper] AI failed for ${link.url}, using meta description`);
       }
 
@@ -413,9 +471,151 @@ function htmlToPlainText(html: string): string {
   return html
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<noscript[^>]*>[\s\S]*?<\/noscript>/gi, "")
+    .replace(/<(\/?(p|div|h[1-6]|li|tr|br)\b)[^>]*>/gi, "\n")
     .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n\s*\n/g, "\n")
     .trim();
+}
+
+/** Extract JSON-LD structured data from HTML */
+function extractJsonLd(html: string): string {
+  const blocks: string[] = [];
+  const regex = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let match;
+  while ((match = regex.exec(html)) !== null) {
+    try {
+      const parsed = JSON.parse(match[1]);
+      blocks.push(JSON.stringify(parsed, null, 2));
+    } catch { /* skip malformed JSON-LD */ }
+  }
+  return blocks.join("\n");
+}
+
+/** Extract __NEXT_DATA__ or similar embedded JSON from SPAs */
+function extractEmbeddedData(html: string): string {
+  // Next.js __NEXT_DATA__
+  const nextMatch = html.match(/<script[^>]*id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i);
+  if (nextMatch) {
+    try {
+      const data = JSON.parse(nextMatch[1]);
+      // Extract just the page props, which contain the actual content
+      const props = data?.props?.pageProps;
+      if (props) return JSON.stringify(props, null, 2).slice(0, 8000);
+    } catch { /* skip */ }
+  }
+  return "";
+}
+
+/** Extract all OpenGraph and meta tags into a structured block */
+function extractAllMeta(html: string): string {
+  const lines: string[] = [];
+  const metaRegex = /<meta[^>]*(?:property|name)=["']([^"']+)["'][^>]*content=["']([^"']+)["'][^>]*>/gi;
+  const metaRegex2 = /<meta[^>]*content=["']([^"']+)["'][^>]*(?:property|name)=["']([^"']+)["'][^>]*>/gi;
+
+  let m;
+  const seen = new Set<string>();
+  while ((m = metaRegex.exec(html)) !== null) {
+    const key = m[1].toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      lines.push(`${key}: ${decodeHtmlEntities(m[2])}`);
+    }
+  }
+  while ((m = metaRegex2.exec(html)) !== null) {
+    const key = m[2].toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      lines.push(`${key}: ${decodeHtmlEntities(m[1])}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+/** Fetch oEmbed metadata for supported platforms (YouTube, Vimeo, etc.) */
+async function fetchOEmbed(url: string): Promise<string | null> {
+  // Map domains to oEmbed endpoints
+  let oembedUrl: string | null = null;
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.replace("www.", "");
+    if (host === "youtube.com" || host === "youtu.be") {
+      oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`;
+    } else if (host === "vimeo.com") {
+      oembedUrl = `https://vimeo.com/api/oembed.json?url=${encodeURIComponent(url)}`;
+    }
+  } catch { return null; }
+
+  if (!oembedUrl) return null;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch(oembedUrl, { signal: controller.signal });
+    clearTimeout(timeout);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return JSON.stringify(data, null, 2);
+  } catch { return null; }
+}
+
+/** Extract YouTube-specific data embedded in script variables */
+function extractYouTubeData(html: string): string {
+  const parts: string[] = [];
+
+  // ytInitialPlayerResponse has video title, description, etc.
+  const playerMatch = html.match(/var\s+ytInitialPlayerResponse\s*=\s*(\{[\s\S]*?\});\s*(?:var|<\/script)/);
+  if (playerMatch) {
+    try {
+      const data = JSON.parse(playerMatch[1]);
+      const details = data?.videoDetails;
+      if (details) {
+        parts.push(`Title: ${details.title || ""}`);
+        parts.push(`Author: ${details.author || ""}`);
+        parts.push(`Description: ${(details.shortDescription || "").slice(0, 2000)}`);
+        parts.push(`Length: ${details.lengthSeconds ? Math.round(parseInt(details.lengthSeconds) / 60) + " min" : "unknown"}`);
+        if (details.keywords?.length) parts.push(`Keywords: ${details.keywords.slice(0, 10).join(", ")}`);
+      }
+    } catch { /* skip */ }
+  }
+
+  return parts.length > 0 ? parts.join("\n") : "";
+}
+
+/** Build rich context from HTML for AI summarization */
+function buildPageContext(html: string, url: string): string {
+  const parts: string[] = [];
+
+  // 1. Platform-specific extraction
+  try {
+    const host = new URL(url).hostname.replace("www.", "");
+    if (host === "youtube.com" || host === "youtu.be") {
+      const ytData = extractYouTubeData(html);
+      if (ytData) parts.push(`VIDEO DATA:\n${ytData}`);
+    }
+  } catch { /* skip */ }
+
+  // 2. Structured data (most reliable)
+  const jsonLd = extractJsonLd(html);
+  if (jsonLd) parts.push(`STRUCTURED DATA (JSON-LD):\n${jsonLd.slice(0, 4000)}`);
+
+  // 3. Embedded SPA data
+  const embedded = extractEmbeddedData(html);
+  if (embedded) parts.push(`EMBEDDED PAGE DATA:\n${embedded}`);
+
+  // 4. Meta tags
+  const meta = extractAllMeta(html);
+  if (meta) parts.push(`META TAGS:\n${meta}`);
+
+  // 5. Plain text content (less for video platforms since it's mostly player junk)
+  const isVideoSite = /youtube\.com|youtu\.be|vimeo\.com/i.test(url);
+  if (!isVideoSite) {
+    const plainText = htmlToPlainText(html).slice(0, 6000);
+    parts.push(`PAGE TEXT:\n${plainText}`);
+  }
+
+  return parts.join("\n\n---\n\n");
 }
 
 /** Fetch raw HTML from a URL with timeout */
@@ -427,13 +627,14 @@ async function fetchRawHtml(url: string): Promise<string | null> {
 
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
+    const timeout = setTimeout(() => controller.abort(), 12000);
 
     const res = await fetch(url, {
       signal: controller.signal,
       headers: {
-        "User-Agent": "Mozilla/5.0 (compatible; MetacrisisBot/1.0)",
-        "Accept": "text/html,application/xhtml+xml,*/*",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
       },
       redirect: "follow",
     });
@@ -445,8 +646,8 @@ async function fetchRawHtml(url: string): Promise<string | null> {
     if (!contentType.includes("text/html") && !contentType.includes("application/xhtml")) return null;
 
     const html = await res.text();
-    // Only need first 20KB for metadata extraction
-    return html.slice(0, 20000);
+    // SPAs embed data in script tags — need enough HTML to capture it
+    return html.slice(0, 200_000);
   } catch {
     return null;
   }

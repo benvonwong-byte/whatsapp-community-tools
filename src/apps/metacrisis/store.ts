@@ -402,13 +402,31 @@ export class MetacrisisStore extends SettingsStore {
     return this.stmts.getLinksByCategory.all(category, limit) as MetacrisisLink[];
   }
 
-  /** Get links that haven't been scraped yet (no title or description) */
+  /** Get links that need scraping: never scraped, failed scrapes, or events missing dates */
   getUnscrapedLinks(limit: number = 20): Array<{ id: number; url: string; category: string }> {
     return this.db.prepare(`
       SELECT id, url, category FROM metacrisis_links
-      WHERE (title IS NULL OR title = '') AND (description IS NULL OR description = '')
+      WHERE
+        ((title IS NULL OR title = '' OR title = '(untitled)' OR title = '(error)') AND (description IS NULL OR description = ''))
+        OR (category = 'event' AND event_date IS NULL)
       ORDER BY timestamp DESC LIMIT ?
     `).all(limit) as any[];
+  }
+
+  /** Get all links for re-scraping (force refresh) */
+  getAllLinksForRescrape(limit: number = 50): Array<{ id: number; url: string; category: string }> {
+    return this.db.prepare(`
+      SELECT id, url, category FROM metacrisis_links
+      ORDER BY timestamp DESC LIMIT ?
+    `).all(limit) as any[];
+  }
+
+  /** Clear scraped metadata for all links so they get re-scraped */
+  clearAllLinkMeta(): number {
+    const result = this.db.prepare(`
+      UPDATE metacrisis_links SET title = NULL, description = NULL, event_date = NULL, event_location = NULL
+    `).run();
+    return result.changes;
   }
 
   /** Update a link's scraped title, description, and optionally event fields + category */
@@ -614,6 +632,14 @@ export class MetacrisisStore extends SettingsStore {
       ORDER BY l.timestamp DESC
       LIMIT ?
     `).all(cutoff, limit) as any[];
+  }
+
+  /** Get the date of the last pushed weekly update */
+  getLastWeeklyPushDate(): string | null {
+    const row = this.db.prepare(
+      `SELECT date, created_at FROM metacrisis_summaries WHERE type = 'weekly' AND pushed = 1 ORDER BY date DESC LIMIT 1`
+    ).get() as any;
+    return row ? row.created_at || row.date : null;
   }
 
   /** Get discussion highlights: top topics with who discussed them */

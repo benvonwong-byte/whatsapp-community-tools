@@ -189,6 +189,17 @@ export function createMetacrisisRouter(
     }
   });
 
+  // POST /api/metacrisis/rescrape-links — force re-scrape all links with improved scraper
+  router.post("/rescrape-links", async (_req: Request, res: Response) => {
+    try {
+      const cleared = store.clearAllLinkMeta();
+      const count = await scrapeLinksMeta(store);
+      res.json({ ok: true, cleared, scraped: count });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || "Re-scraping failed" });
+    }
+  });
+
   // GET /api/metacrisis/weekly-draft — assemble data for the weekly update composer
   router.get("/weekly-draft", async (_req: Request, res: Response) => {
     try {
@@ -200,7 +211,10 @@ export function createMetacrisisRouter(
       const dateRange = `${weekAgo.toLocaleDateString("en-US", { month: "short", day: "numeric" })} → ${now.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
 
       // Links: articles/videos from last 7 days + future events
-      const links = store.getComposerLinks();
+      const allLinks = store.getComposerLinks();
+      const events = allLinks.filter(l => l.category === "event");
+      const videos = allLinks.filter(l => l.category === "video");
+      const articles = allLinks.filter(l => l.category !== "event" && l.category !== "video");
 
       // Weekly topic summary: aggregate topics from all daily digests this week
       const dailyDigests = store.getRecentDailyDigests(7);
@@ -225,12 +239,17 @@ export function createMetacrisisRouter(
         .slice(0, 15)
         .map(([topic, count]) => ({ topic, count }));
 
+      const lastUpdateSent = store.getLastWeeklyPushDate();
+
       res.json({
         dateRange,
-        links,
+        events,
+        videos,
+        articles,
         weeklyTopics,
         participants: [...allParticipants],
         totalMessages: dailyDigests.reduce((sum, d) => sum + (d.message_count || 0), 0),
+        lastUpdateSent,
       });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || "Failed to build weekly draft" });

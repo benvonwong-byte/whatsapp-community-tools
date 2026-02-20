@@ -78,7 +78,9 @@ async function loadDashboard() {
       if (!weeklyDraft) {
         weeklyDraft = draft;
         composerLinks = {};
-        (draft.links || []).forEach(function(_, i) { composerLinks[i] = true; });
+        ["events", "videos", "articles"].forEach(function(cat) {
+          (draft[cat] || []).forEach(function(link) { composerLinks[link.id] = true; });
+        });
       } else {
         weeklyDraft = draft;
       }
@@ -634,13 +636,6 @@ function safeJsonParse(json) {
 
 // ── Weekly Update Composer ──
 
-function categoryEmoji(cat) {
-  if (cat === "event") return "\uD83D\uDCC5";   // 📅
-  if (cat === "video") return "\uD83C\uDFA5";    // 🎥
-  if (cat === "podcast") return "\uD83C\uDFA7";  // 🎧
-  return "\uD83D\uDCF0";                          // 📰 (article/other)
-}
-
 function setupComposer() {
   // Copy button
   var copyBtn = document.getElementById("composer-copy");
@@ -657,16 +652,20 @@ function setupComposer() {
   var pushBtn = document.getElementById("composer-push");
   if (pushBtn) pushBtn.addEventListener("click", handleComposerPush);
 
-  // Select All / None for links
-  var linksAll = document.getElementById("composer-links-all");
-  var linksNone = document.getElementById("composer-links-none");
-  if (linksAll) linksAll.addEventListener("click", function() {
-    (weeklyDraft.links || []).forEach(function(_, i) { composerLinks[i] = true; });
-    renderComposer();
-  });
-  if (linksNone) linksNone.addEventListener("click", function() {
-    (weeklyDraft.links || []).forEach(function(_, i) { composerLinks[i] = false; });
-    renderComposer();
+  // Per-section All/None buttons
+  ["events", "videos", "articles"].forEach(function(cat) {
+    var allBtn = document.getElementById("composer-" + cat + "-all");
+    var noneBtn = document.getElementById("composer-" + cat + "-none");
+    if (allBtn) allBtn.addEventListener("click", function() {
+      if (!weeklyDraft) return;
+      (weeklyDraft[cat] || []).forEach(function(link) { composerLinks[link.id] = true; });
+      renderComposer();
+    });
+    if (noneBtn) noneBtn.addEventListener("click", function() {
+      if (!weeklyDraft) return;
+      (weeklyDraft[cat] || []).forEach(function(link) { composerLinks[link.id] = false; });
+      renderComposer();
+    });
   });
 }
 
@@ -677,48 +676,20 @@ function renderComposer() {
   var rangeEl = document.getElementById("composer-date-range");
   if (rangeEl) rangeEl.textContent = weeklyDraft.dateRange || "";
 
-  // Links list
-  var linksList = document.getElementById("composer-links-list");
-  if (linksList) {
-    var links = weeklyDraft.links || [];
-    if (links.length === 0) {
-      linksList.innerHTML = '<div style="font-size:12px;color:var(--text-dim);">No links shared this week.</div>';
+  // Last update sent
+  var lastSentEl = document.getElementById("composer-last-sent");
+  if (lastSentEl) {
+    if (weeklyDraft.lastUpdateSent) {
+      lastSentEl.textContent = "Last sent: " + formatRelativeTime(weeklyDraft.lastUpdateSent);
     } else {
-      linksList.innerHTML = links.map(function(link, i) {
-        var checked = composerLinks[i] !== false ? "checked" : "";
-        var emoji = categoryEmoji(link.category);
-        var title = link.title && link.title !== "(untitled)" && link.title !== "(error)" ? link.title : truncateUrl(link.url, 50);
-        var summary = link.description || "";
-        var eventMeta = "";
-        if (link.category === "event") {
-          var parts = [];
-          if (link.event_date) {
-            var ed = new Date(link.event_date + "T00:00:00");
-            parts.push(ed.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }));
-          }
-          if (link.event_location) parts.push(link.event_location);
-          if (parts.length > 0) eventMeta = parts.join(" · ");
-        }
-        return '<div class="composer-link-row">' +
-          '<input type="checkbox" data-link-idx="' + i + '" ' + checked + '>' +
-          '<span style="font-size:16px;flex-shrink:0;margin-top:1px;">' + emoji + '</span>' +
-          '<div class="composer-link-info">' +
-            '<div class="composer-link-title"><a href="' + escapeAttr(link.url) + '" target="_blank" rel="noopener">' + escapeHtml(title) + '</a></div>' +
-            (eventMeta ? '<div style="font-size:11px;color:var(--accent);font-weight:500;">' + escapeHtml(eventMeta) + '</div>' : '') +
-            (summary ? '<div class="composer-link-summary">' + escapeHtml(summary) + '</div>' : '') +
-            '<div class="composer-link-meta">Shared by ' + escapeHtml(link.sender_name || "Unknown") + '</div>' +
-          '</div>' +
-        '</div>';
-      }).join("");
-
-      linksList.querySelectorAll("input[data-link-idx]").forEach(function(cb) {
-        cb.addEventListener("change", function() {
-          composerLinks[parseInt(cb.dataset.linkIdx)] = cb.checked;
-          updateComposerPreview();
-        });
-      });
+      lastSentEl.textContent = "No updates sent yet";
     }
   }
+
+  // Render each category section
+  renderComposerSection("events", weeklyDraft.events || []);
+  renderComposerSection("articles", weeklyDraft.articles || []);
+  renderComposerSection("videos", weeklyDraft.videos || []);
 
   // Weekly topics summary
   var topicsEl = document.getElementById("composer-topics-summary");
@@ -742,40 +713,106 @@ function renderComposer() {
   updateComposerPreview();
 }
 
+function renderComposerSection(category, links) {
+  var container = document.getElementById("composer-" + category + "-list");
+  var countEl = document.getElementById("composer-" + category + "-count");
+
+  if (countEl) countEl.textContent = "(" + links.length + ")";
+
+  if (!container) return;
+
+  if (links.length === 0) {
+    container.innerHTML = '<div style="font-size:12px;color:var(--text-dim);padding:8px 0;">No ' + category + ' this week.</div>';
+    return;
+  }
+
+  container.innerHTML = links.map(function(link) {
+    var checked = composerLinks[link.id] !== false ? "checked" : "";
+    var title = link.title && link.title !== "(untitled)" && link.title !== "(error)" ? link.title : truncateUrl(link.url, 50);
+    var summary = link.description || "";
+
+    var metaHtml = "";
+    if (category === "events") {
+      if (link.event_date) {
+        var ed = new Date(link.event_date + "T00:00:00");
+        metaHtml += '<div style="font-size:11px;color:var(--accent);font-weight:500;">' +
+          ed.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }) + '</div>';
+      }
+      if (link.event_location) {
+        metaHtml += '<div style="font-size:11px;color:var(--text-dim);">' + escapeHtml(link.event_location) + '</div>';
+      }
+    }
+
+    return '<div class="composer-link-row">' +
+      '<input type="checkbox" data-link-id="' + link.id + '" ' + checked + '>' +
+      '<div class="composer-link-info">' +
+        '<div class="composer-link-title"><a href="' + escapeAttr(link.url) + '" target="_blank" rel="noopener">' + escapeHtml(title) + '</a></div>' +
+        metaHtml +
+        (summary ? '<div class="composer-link-summary">' + escapeHtml(summary) + '</div>' : '') +
+      '</div>' +
+    '</div>';
+  }).join("");
+
+  // Attach checkbox listeners
+  container.querySelectorAll("input[data-link-id]").forEach(function(cb) {
+    cb.addEventListener("change", function() {
+      composerLinks[parseInt(cb.dataset.linkId)] = cb.checked;
+      updateComposerPreview();
+    });
+  });
+}
+
 function buildComposerMessage() {
   if (!weeklyDraft) return "";
 
   var lines = [];
-  lines.push("*Metacrisis Community — Weekly Update*");
+  lines.push("*Metacrisis Community \u2014 Weekly Update*");
   lines.push("*" + (weeklyDraft.dateRange || "") + "*");
   lines.push("");
 
-  // Top Resources (selected links)
-  var selectedLinks = (weeklyDraft.links || []).filter(function(_, i) { return composerLinks[i] !== false; });
-  if (selectedLinks.length > 0) {
-    lines.push("*Top Resources*");
+  // Events
+  var selectedEvents = (weeklyDraft.events || []).filter(function(l) { return composerLinks[l.id] !== false; });
+  if (selectedEvents.length > 0) {
+    lines.push("\uD83D\uDCC5 *Upcoming Events*");
     lines.push("");
-    selectedLinks.forEach(function(link) {
-      var emoji = categoryEmoji(link.category);
+    selectedEvents.forEach(function(link) {
       var title = link.title && link.title !== "(untitled)" && link.title !== "(error)" ? link.title : truncateUrl(link.url, 40);
-      var summary = link.description || "";
-
-      if (link.category === "event") {
-        // Event format: title, date, location, link, description
-        lines.push(emoji + " *" + title + "*");
-        if (link.event_date) {
-          var ed = new Date(link.event_date + "T00:00:00");
-          lines.push("Date: " + ed.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", year: "numeric" }));
-        }
-        if (link.event_location) lines.push("Location: " + link.event_location);
-        lines.push("Link: " + link.url);
-        if (summary) lines.push(summary);
-      } else {
-        // Article/video/podcast format
-        lines.push(emoji + " *" + title + "*");
-        if (summary) lines.push(summary);
-        lines.push(link.url);
+      lines.push("*" + title + "*");
+      if (link.event_date) {
+        var ed = new Date(link.event_date + "T00:00:00");
+        lines.push("\uD83D\uDDD3 " + ed.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", year: "numeric" }));
       }
+      if (link.event_location) lines.push("\uD83D\uDCCD " + link.event_location);
+      if (link.description) lines.push(link.description);
+      lines.push("\uD83D\uDD17 " + link.url);
+      lines.push("");
+    });
+  }
+
+  // Articles
+  var selectedArticles = (weeklyDraft.articles || []).filter(function(l) { return composerLinks[l.id] !== false; });
+  if (selectedArticles.length > 0) {
+    lines.push("\uD83D\uDCF0 *Articles*");
+    lines.push("");
+    selectedArticles.forEach(function(link) {
+      var title = link.title && link.title !== "(untitled)" && link.title !== "(error)" ? link.title : truncateUrl(link.url, 40);
+      lines.push("*" + title + "*");
+      if (link.description) lines.push(link.description);
+      lines.push("\uD83D\uDD17 " + link.url);
+      lines.push("");
+    });
+  }
+
+  // Videos
+  var selectedVideos = (weeklyDraft.videos || []).filter(function(l) { return composerLinks[l.id] !== false; });
+  if (selectedVideos.length > 0) {
+    lines.push("\uD83C\uDFA5 *Videos*");
+    lines.push("");
+    selectedVideos.forEach(function(link) {
+      var title = link.title && link.title !== "(untitled)" && link.title !== "(error)" ? link.title : truncateUrl(link.url, 40);
+      lines.push("*" + title + "*");
+      if (link.description) lines.push(link.description);
+      lines.push("\uD83D\uDD17 " + link.url);
       lines.push("");
     });
   }
@@ -804,7 +841,7 @@ function updateComposerPreview() {
 async function handleComposerPush() {
   var message = buildComposerMessage();
   if (!message) {
-    alert("Nothing to push — all sections are empty or unchecked.");
+    alert("Nothing to push \u2014 all sections are empty or unchecked.");
     return;
   }
 

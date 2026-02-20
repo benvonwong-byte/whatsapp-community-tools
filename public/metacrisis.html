@@ -832,6 +832,41 @@
       margin-top: 4px;
     }
 
+    .composer-toggle-btn {
+      font-size: 10px;
+      padding: 2px 8px;
+      background: var(--surface2);
+      color: var(--text-dim);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .composer-toggle-btn:hover {
+      border-color: var(--accent);
+      color: var(--text);
+    }
+
+    .composer-section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+
+    .composer-section-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--accent);
+    }
+
+    .composer-section-count {
+      font-weight: 400;
+      color: var(--text-dim);
+      font-size: 11px;
+    }
+
     .hidden { display: none !important; }
 
     /* Responsive */
@@ -909,18 +944,43 @@
             <div class="section-title" style="margin-bottom:2px;">Weekly Update Composer</div>
             <div id="composer-date-range" style="font-size:11px;color:var(--text-dim);"></div>
           </div>
+          <div id="composer-last-sent" style="font-size:11px;color:var(--text-dim);background:var(--surface2);padding:4px 10px;border-radius:999px;"></div>
         </div>
 
-        <!-- Links section -->
+        <!-- Events section -->
         <div class="composer-block">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-            <span style="font-size:13px;font-weight:600;color:var(--accent);">Links</span>
+          <div class="composer-section-header">
+            <span class="composer-section-label">Events <span id="composer-events-count" class="composer-section-count"></span></span>
             <div style="display:flex;gap:8px;">
-              <button id="composer-links-all" style="font-size:10px;padding:2px 8px;background:var(--surface2);color:var(--text-dim);border:1px solid var(--border);border-radius:4px;cursor:pointer;">All</button>
-              <button id="composer-links-none" style="font-size:10px;padding:2px 8px;background:var(--surface2);color:var(--text-dim);border:1px solid var(--border);border-radius:4px;cursor:pointer;">None</button>
+              <button id="composer-events-all" class="composer-toggle-btn">All</button>
+              <button id="composer-events-none" class="composer-toggle-btn">None</button>
             </div>
           </div>
-          <div id="composer-links-list"></div>
+          <div id="composer-events-list"></div>
+        </div>
+
+        <!-- Articles section -->
+        <div class="composer-block">
+          <div class="composer-section-header">
+            <span class="composer-section-label">Articles <span id="composer-articles-count" class="composer-section-count"></span></span>
+            <div style="display:flex;gap:8px;">
+              <button id="composer-articles-all" class="composer-toggle-btn">All</button>
+              <button id="composer-articles-none" class="composer-toggle-btn">None</button>
+            </div>
+          </div>
+          <div id="composer-articles-list"></div>
+        </div>
+
+        <!-- Videos section -->
+        <div class="composer-block">
+          <div class="composer-section-header">
+            <span class="composer-section-label">Videos <span id="composer-videos-count" class="composer-section-count"></span></span>
+            <div style="display:flex;gap:8px;">
+              <button id="composer-videos-all" class="composer-toggle-btn">All</button>
+              <button id="composer-videos-none" class="composer-toggle-btn">None</button>
+            </div>
+          </div>
+          <div id="composer-videos-list"></div>
         </div>
 
         <!-- Weekly Topics Summary -->
