@@ -516,43 +516,86 @@ function setupAISearch() {
 }
 
 function showDashboardSkeleton() {
-  const cards = $("summary-cards");
+  // Summary cards skeleton
+  var cards = $("summary-cards");
   if (cards && !cards.children.length) {
-    cards.innerHTML = Array(5).fill(0).map(() =>
-      '<div class="stat-card skeleton-card"><div class="skel-line skel-big"></div><div class="skel-line skel-sm"></div></div>'
-    ).join("");
+    cards.innerHTML = Array(5).fill(0).map(function() {
+      return '<div class="stat-card skeleton-card"><div class="skel-line skel-big"></div><div class="skel-line skel-sm"></div></div>';
+    }).join("");
+  }
+  // Top friends skeleton
+  var tf = $("top-friends-list");
+  if (tf && tf.querySelector(".chart-empty")) {
+    tf.innerHTML = Array(5).fill(0).map(function() {
+      return '<div class="skeleton-card" style="height:36px;margin-bottom:4px;border-radius:6px;"></div>';
+    }).join("");
+  }
+  // Reciprocity skeleton
+  var rp = $("reciprocity-list");
+  if (rp && rp.querySelector(".chart-empty")) {
+    rp.innerHTML = Array(5).fill(0).map(function() {
+      return '<div class="skeleton-card" style="height:28px;margin-bottom:4px;border-radius:6px;"></div>';
+    }).join("");
+  }
+  // Streaks skeleton
+  var sk = $("streaks-list");
+  if (sk && sk.querySelector(".chart-empty")) {
+    sk.innerHTML = Array(3).fill(0).map(function() {
+      return '<div class="skeleton-card" style="height:28px;margin-bottom:4px;border-radius:6px;"></div>';
+    }).join("");
   }
 }
 
+/** Render all dashboard sections from a data object */
+function renderDashboardData(data) {
+  renderSummaryCards(data.stats, data.voiceTotal);
+  renderWeeklyChart(data.weeklyVolume);
+  renderHourlyChart(data.hourly);
+  renderReciprocity(data.reciprocity);
+  renderStreaks(data.streaks);
+  renderFastResponders(data.fastResponders);
+  neglectedData = data.neglected || [];
+  populateNeglectedFilters(neglectedData);
+  filterAndRenderNeglected();
+  renderInitiatorsList(data.topInitiators);
+  renderTierPills(data.tierDistribution);
+}
+
 async function loadDashboard() {
+  var tierParam = dashboardTierFilter !== null ? "?tier=" + encodeURIComponent(dashboardTierFilter) : "";
+  var cacheKey = "_dash" + tierParam;
+
+  // 1. Instant render from localStorage (stale data, shown immediately)
   try {
-    const tierParam = dashboardTierFilter !== null ? "?tier=" + encodeURIComponent(dashboardTierFilter) : "";
-    const res = await cachedFetch("/api/friends/dashboard" + tierParam);
+    var cached = localStorage.getItem(cacheKey);
+    if (cached) {
+      var stale = JSON.parse(cached);
+      renderDashboardData(stale);
+    }
+  } catch (e) { /* ignore parse errors */ }
+
+  // 2. Setup nav/handlers (idempotent, safe to call multiple times)
+  setupTopFriendsNav();
+  setupNeglectedNav();
+  setupTagAllButton();
+
+  // 3. Fetch fresh data in background, re-render when ready
+  try {
+    var res = await cachedFetch("/api/friends/dashboard" + tierParam);
     if (!res.ok) throw new Error("Server returned " + res.status);
-    const data = await res.json();
-    renderSummaryCards(data.stats, data.voiceTotal);
-    renderWeeklyChart(data.weeklyVolume);
-    renderHourlyChart(data.hourly);
-    setupTopFriendsNav();
-    loadTopFriends();
-    renderReciprocity(data.reciprocity);
-    renderStreaks(data.streaks);
-    renderFastResponders(data.fastResponders);
-    neglectedData = data.neglected || [];
-    setupNeglectedNav();
-    populateNeglectedFilters(neglectedData);
-    filterAndRenderNeglected();
-    renderInitiatorsList(data.topInitiators);
-    renderTierPills(data.tierDistribution);
-    loadDashboardTags();
-    setupTagAllButton();
-    // Calendar is now part of dashboard
-    loadCalendar();
-    // iMessage sync monitor
-    loadImessageMonitor();
+    var data = await res.json();
+    renderDashboardData(data);
+    // Save to localStorage for next instant load
+    try { localStorage.setItem(cacheKey, JSON.stringify(data)); } catch (e) { /* quota */ }
   } catch (err) {
     console.error("Failed to load dashboard:", err);
   }
+
+  // 4. Load secondary sections in parallel (don't block main render)
+  loadTopFriends();
+  loadDashboardTags();
+  loadCalendar();
+  loadImessageMonitor();
 }
 
 // ── iMessage Sync Monitor ──

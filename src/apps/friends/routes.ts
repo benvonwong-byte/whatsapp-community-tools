@@ -40,7 +40,10 @@ export function createFriendsRouter(
     return { startTs, endTs };
   }
 
-  // ── Dashboard ──
+  // ── Dashboard (with server-side cache) ──
+
+  let _dashCache: { data: any; time: number; key: string } | null = null;
+  const DASH_CACHE_TTL = 60000; // 60 seconds
 
   router.get("/dashboard", (req: Request, res: Response) => {
     // Parse optional tier filter
@@ -48,6 +51,12 @@ export function createFriendsRouter(
     let tierId: number | null | undefined = undefined;
     if (tierParam === "none") tierId = null;
     else if (tierParam && !isNaN(parseInt(tierParam))) tierId = parseInt(tierParam);
+
+    const cacheKey = String(tierId ?? "all");
+    if (_dashCache && _dashCache.key === cacheKey && (Date.now() - _dashCache.time) < DASH_CACHE_TTL) {
+      res.json(_dashCache.data);
+      return;
+    }
 
     const stats = store.getDashboardStats(tierId);
     const weeklyVolume = store.getWeeklyVolume(12, tierId);
@@ -62,8 +71,10 @@ export function createFriendsRouter(
     const hourly = store.getHourlyDistribution(tierId);
     const fastResponders = store.getFastestResponders(5, tierId);
     const mostBalanced = store.getMostBalanced(tierId);
-    res.json({ stats, weeklyVolume, neglected, topInitiators, health, tierDistribution, voiceTotal,
-      topFriends, reciprocity, streaks, hourly, fastResponders, mostBalanced });
+    const responseData = { stats, weeklyVolume, neglected, topInitiators, health, tierDistribution, voiceTotal,
+      topFriends, reciprocity, streaks, hourly, fastResponders, mostBalanced };
+    _dashCache = { data: responseData, time: Date.now(), key: cacheKey };
+    res.json(responseData);
   });
 
   // ── Neglected Friends (time-browsable) ──
