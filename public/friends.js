@@ -43,8 +43,8 @@ let activeTagFilters = new Set();
 let tagFilterMode = "OR";
 let calYear = new Date().getFullYear();
 let calMonth = new Date().getMonth() + 1;
-let negWindowDays = 14;
-let negOffsetPeriods = 0;
+let negWindowDays = 30;
+let negOffsetPeriods = 90;
 let neglectedData = [];
 let negNavBound = false;
 let dashboardTierFilter = null; // null = all, number = tier_id, "none" = unassigned
@@ -1002,43 +1002,38 @@ function renderNeglectedList() {
   var filtered = [].concat(neglectedData);
   var groupFilter = $("neg-group-filter")?.value;
   var tagFilter = $("neg-tag-filter")?.value;
-  var sortMode = $("neg-sort")?.value || "days-silent";
+  var sortMode = $("neg-sort")?.value || "msgs-per-day";
 
   if (groupFilter) filtered = filtered.filter(function(c) { return (c.group_names || "").split(", ").includes(groupFilter); });
   if (tagFilter) filtered = filtered.filter(function(c) { return (c.tag_names || "").split(", ").includes(tagFilter); });
 
-  if (sortMode === "days-silent") filtered.sort(function(a, b) { return a.last_seen - b.last_seen; });
-  else if (sortMode === "days-silent-asc") filtered.sort(function(a, b) { return b.last_seen - a.last_seen; });
-  else if (sortMode === "name") filtered.sort(function(a, b) { return (a.name || "").localeCompare(b.name || ""); });
-  else if (sortMode === "total-messages") filtered.sort(function(a, b) { return (b.total_messages || 0) - (a.total_messages || 0); });
-  else if (sortMode === "tier") filtered.sort(function(a, b) {
-    if (!a.tier_name && !b.tier_name) return 0;
-    if (!a.tier_name) return 1;
-    if (!b.tier_name) return -1;
-    return a.tier_name.localeCompare(b.tier_name);
-  });
+  if (sortMode === "msgs-per-day") filtered.sort(function(a, b) { return (b.messages_per_active_day || 0) - (a.messages_per_active_day || 0); });
+  else if (sortMode === "total-in-range") filtered.sort(function(a, b) { return (b.messages_in_range || 0) - (a.messages_in_range || 0); });
+  else if (sortMode === "voice-in-range") filtered.sort(function(a, b) { return (b.voice_notes_in_range || 0) - (a.voice_notes_in_range || 0); });
 
   // Limit to 10
   filtered = filtered.slice(0, 10);
 
   if (filtered.length === 0) {
-    container.innerHTML = '<div class="chart-empty">No neglected contacts in this period.</div>';
+    container.innerHTML = '<div class="chart-empty">No contacts with activity in this period.</div>';
     return;
   }
 
   container.innerHTML = filtered.map(function(c) {
-    var daysAgo = c.last_seen ? Math.floor((Date.now() / 1000 - c.last_seen) / 86400) : null;
-    var label = daysAgo !== null ? daysAgo + "d ago" : "never";
     var tierDot = c.tier_color
       ? '<span class="neglected-tier-dot" style="background:' + esc(c.tier_color) + '"></span>' + esc(c.tier_name || "")
       : "";
+    var metricLabel = "";
+    if (sortMode === "msgs-per-day") metricLabel = (c.messages_per_active_day || 0) + " msgs/day";
+    else if (sortMode === "total-in-range") metricLabel = (c.messages_in_range || 0) + " msgs";
+    else if (sortMode === "voice-in-range") metricLabel = (c.voice_notes_in_range || 0) + " VNs";
     return '<div class="neglected-card" data-contact-id="' + esc(c.id) + '" style="cursor:pointer;">' +
       '<div class="neglected-card-info">' +
         '<span class="neglected-name">' + esc(contactDisplayName(c)) + '</span>' +
         '<div class="neglected-meta">' +
-          '<span class="neglected-time">' + esc(label) + '</span>' +
+          '<span class="neglected-time">' + esc(metricLabel) + '</span>' +
+          (c.active_days ? '<span>' + c.active_days + ' active days</span>' : '') +
           (tierDot ? '<span>' + tierDot + '</span>' : '') +
-          (c.total_messages ? '<span>' + c.total_messages + ' msgs</span>' : '') +
         '</div>' +
       '</div>' +
       '<button class="neglected-dismiss" title="Dismiss" data-dismiss-id="' + esc(c.id) + '">&times;</button>' +

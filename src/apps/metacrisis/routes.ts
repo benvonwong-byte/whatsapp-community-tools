@@ -9,7 +9,8 @@ export function createMetacrisisRouter(
   pushToWhatsApp: (date: string) => Promise<void>,
   backfillTrigger: () => Promise<number>,
   processEventsTrigger: () => Promise<number>,
-  handlerDiagnostics?: () => MetacrisisHandlerDiagnostics
+  handlerDiagnostics?: () => MetacrisisHandlerDiagnostics,
+  sendRawToAnnouncement?: (message: string) => Promise<void>
 ): Router {
   const router = Router();
 
@@ -174,6 +175,79 @@ export function createMetacrisisRouter(
       res.json({ ok: true, messagesImported: count });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || "Backfill failed" });
+    }
+  });
+
+  // GET /api/metacrisis/weekly-draft — assemble data for the weekly update composer
+  router.get("/weekly-draft", (_req: Request, res: Response) => {
+    try {
+      store.markPastEvents();
+      const events = store.getUpcomingEvents();
+      const topResources = store.getTopResources(7, 5);
+      const topMember = store.getWeeklyTopMember(7);
+      const dailyDigests = store.getRecentDailyDigests(7);
+
+      // Build community pulse from daily digests' who-said-what
+      const whoEntries: { sender: string; summary: string }[] = [];
+      for (const d of dailyDigests) {
+        try {
+          const parsed = JSON.parse(d.who_said_what_json || "[]");
+          if (Array.isArray(parsed)) {
+            for (const entry of parsed) {
+              const name = entry.sender || entry.name || "Unknown";
+              const existing = whoEntries.find((e: any) => e.sender === name);
+              if (!existing) {
+                whoEntries.push({ sender: name, summary: entry.summary || entry.contribution || "" });
+              }
+            }
+          }
+        } catch {}
+      }
+      let communityPulse = "";
+      if (whoEntries.length > 0) {
+        communityPulse = whoEntries.map((e) => `*${e.sender}*: ${e.summary}`).join("\n");
+      }
+
+      const now = new Date();
+      const weekAgo = new Date(now.getTime() - 7 * 86400000);
+      const dateRange = `${weekAgo.toLocaleDateString("en-US", { month: "short", day: "numeric" })} → ${now.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+
+      res.json({
+        events,
+        topResources,
+        topMember: topMember || null,
+        communityPulse,
+        dateRange,
+        weeklyLeaderboard: store.getLeaderboard(5),
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || "Failed to build weekly draft" });
+    }
+  });
+
+  // POST /api/metacrisis/push-weekly — push a composed message to WhatsApp announcement chat
+  router.post("/push-weekly", async (req: Request, res: Response) => {
+    try {
+      const { message } = req.body;
+      if (!message || typeof message !== "string") {
+        res.status(400).json({ error: "message (string) is required" });
+        return;
+      }
+      if (!sendRawToAnnouncement) {
+        res.status(500).json({ error: "Raw message sending not configured" });
+        return;
+      }
+      const today = new Date().toISOString().split("T")[0];
+
+      // Save as a weekly summary so it's tracked
+      store.saveSummary(today, "weekly", message, "[]", "[]", "[]", 0);
+
+      // Send the exact composed message (no template wrapping)
+      await sendRawToAnnouncement(message);
+      store.markPushed(today, "weekly");
+      res.json({ ok: true, date: today });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || "Push failed" });
     }
   });
 

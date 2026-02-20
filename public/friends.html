@@ -1817,8 +1817,8 @@
           </div>
           <div class="tf-window-btns" id="neg-window-btns">
             <button class="neg-window-btn tf-window-btn" data-days="7">7d</button>
-            <button class="neg-window-btn tf-window-btn active" data-days="14">14d</button>
-            <button class="neg-window-btn tf-window-btn" data-days="30">30d</button>
+            <button class="neg-window-btn tf-window-btn" data-days="14">14d</button>
+            <button class="neg-window-btn tf-window-btn active" data-days="30">30d</button>
             <button class="neg-window-btn tf-window-btn" data-days="60">60d</button>
             <button class="neg-window-btn tf-window-btn" data-days="90">90d</button>
           </div>
@@ -1826,11 +1826,9 @@
         <div id="neg-date-range" style="font-size:10px;color:var(--muted);margin-bottom:6px;"></div>
         <div id="neg-filters" style="display:flex;gap:4px;margin-bottom:6px;flex-wrap:wrap;">
           <select id="neg-sort" style="font-size:10px;padding:2px 4px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;">
-            <option value="days-silent">Days Silent (Most)</option>
-            <option value="days-silent-asc">Days Silent (Least)</option>
-            <option value="name">Name A-Z</option>
-            <option value="total-messages">Total Messages</option>
-            <option value="tier">Tier</option>
+            <option value="msgs-per-day">Avg Messages / Active Day</option>
+            <option value="total-in-range">Total Messages / Range</option>
+            <option value="voice-in-range">Total Voice Notes / Range</option>
           </select>
           <select id="neg-group-filter" style="font-size:10px;padding:2px 4px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;">
             <option value="">All Groups</option>

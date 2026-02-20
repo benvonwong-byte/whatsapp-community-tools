@@ -12,6 +12,15 @@ let upcomingEvents = [];
 let topics = [];
 let activeTopicPeriod = "week";
 
+// Composer state
+let weeklyDraft = null;
+let composerEvents = {};    // { index: boolean } — which events are checked
+let composerResources = {}; // { index: boolean } — which resources are checked
+let composerShowMember = true;
+let composerShowEvents = true;
+let composerShowResources = true;
+let composerShowPulse = true;
+
 // ── Init ──
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -28,6 +37,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupSettingsSave();
   setupScheduleVisibility();
   setupTopicPeriodTabs();
+  setupComposer();
   loadDashboard();
 
   // Auto-refresh every 60 seconds
@@ -38,7 +48,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
 async function loadDashboard() {
   try {
-    const [statsRes, summariesRes, linksRes, leaderboardRes, settingsRes, dailyRes, eventsRes, topicsRes] =
+    const [statsRes, summariesRes, linksRes, leaderboardRes, settingsRes, dailyRes, eventsRes, topicsRes, draftRes] =
       await Promise.all([
         adminFetch("/api/metacrisis/stats"),
         adminFetch("/api/metacrisis/summaries?days=30&type=weekly"),
@@ -48,6 +58,7 @@ async function loadDashboard() {
         adminFetch("/api/metacrisis/summaries?days=7&type=daily"),
         adminFetch("/api/metacrisis/events"),
         adminFetch(`/api/metacrisis/topics?period=${activeTopicPeriod}`),
+        adminFetch("/api/metacrisis/weekly-draft"),
       ]);
 
     if (!statsRes.ok) throw new Error(`Stats: ${statsRes.status}`);
@@ -64,6 +75,28 @@ async function loadDashboard() {
     dailyDigests = dailyRes.ok ? await dailyRes.json() : [];
     upcomingEvents = eventsRes.ok ? await eventsRes.json() : [];
     topics = topicsRes.ok ? await topicsRes.json() : [];
+
+    // Load weekly draft for composer
+    if (draftRes.ok) {
+      const draft = await draftRes.json();
+      // Only reset composer state on first load (when weeklyDraft is null)
+      if (!weeklyDraft) {
+        weeklyDraft = draft;
+        composerEvents = {};
+        (draft.events || []).forEach(function(_, i) { composerEvents[i] = true; });
+        composerResources = {};
+        (draft.topResources || []).forEach(function(_, i) { composerResources[i] = true; });
+        composerShowMember = true;
+        composerShowEvents = true;
+        composerShowResources = true;
+        composerShowPulse = true;
+        var pulseEl = document.getElementById("composer-pulse-text");
+        if (pulseEl) pulseEl.value = draft.communityPulse || "";
+      } else {
+        // Refresh data but keep user's toggle state
+        weeklyDraft = draft;
+      }
+    }
 
     renderDashboard();
   } catch (err) {
@@ -218,6 +251,7 @@ function renderDashboard() {
 
   renderMonitorBar();
   renderStats();
+  renderComposer();
   renderDailyDigest();
   renderUpcomingEvents();
   renderTopics();
@@ -609,5 +643,256 @@ function safeJsonParse(json) {
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
+  }
+}
+
+// ── Weekly Update Composer ──
+
+function setupComposer() {
+  // Section toggles
+  var evtToggle = document.getElementById("composer-events-toggle");
+  var resToggle = document.getElementById("composer-resources-toggle");
+  var memToggle = document.getElementById("composer-member-toggle");
+  var pulseToggle = document.getElementById("composer-pulse-toggle");
+
+  if (evtToggle) evtToggle.addEventListener("change", function() { composerShowEvents = evtToggle.checked; updateComposerPreview(); });
+  if (resToggle) resToggle.addEventListener("change", function() { composerShowResources = resToggle.checked; updateComposerPreview(); });
+  if (memToggle) memToggle.addEventListener("change", function() { composerShowMember = memToggle.checked; updateComposerPreview(); });
+  if (pulseToggle) pulseToggle.addEventListener("change", function() { composerShowPulse = pulseToggle.checked; updateComposerPreview(); });
+
+  // Pulse text edit
+  var pulseText = document.getElementById("composer-pulse-text");
+  if (pulseText) pulseText.addEventListener("input", function() { updateComposerPreview(); });
+
+  // Copy button
+  var copyBtn = document.getElementById("composer-copy");
+  if (copyBtn) copyBtn.addEventListener("click", function() {
+    var preview = document.getElementById("composer-preview");
+    if (!preview) return;
+    navigator.clipboard.writeText(preview.textContent || "").then(function() {
+      var statusEl = document.getElementById("composer-status");
+      if (statusEl) { statusEl.textContent = "Copied to clipboard!"; setTimeout(function() { statusEl.textContent = ""; }, 2000); }
+    });
+  });
+
+  // Push button
+  var pushBtn = document.getElementById("composer-push");
+  if (pushBtn) pushBtn.addEventListener("click", handleComposerPush);
+
+  // Regenerate button
+  var regenBtn = document.getElementById("composer-regenerate");
+  if (regenBtn) regenBtn.addEventListener("click", handleRegeneratePulse);
+}
+
+function renderComposer() {
+  if (!weeklyDraft) return;
+
+  // Date range
+  var rangeEl = document.getElementById("composer-date-range");
+  if (rangeEl) rangeEl.textContent = weeklyDraft.dateRange || "";
+
+  // Events list with individual checkboxes
+  var eventsList = document.getElementById("composer-events-list");
+  if (eventsList) {
+    var events = weeklyDraft.events || [];
+    if (events.length === 0) {
+      eventsList.innerHTML = '<div style="font-size:12px;color:var(--text-dim);padding-left:22px;">No upcoming events.</div>';
+    } else {
+      eventsList.innerHTML = events.map(function(evt, i) {
+        var checked = composerEvents[i] !== false ? "checked" : "";
+        var dateStr = evt.date ? new Date(evt.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "TBA";
+        var details = [dateStr];
+        if (evt.start_time) details.push(evt.start_time);
+        if (evt.location) details.push(evt.location);
+        return '<div class="composer-event-row">' +
+          '<input type="checkbox" data-event-idx="' + i + '" ' + checked + '>' +
+          '<span>' + escapeHtml(evt.name || "Untitled") + '</span>' +
+          '<span class="composer-event-meta">' + escapeHtml(details.join(" · ")) + '</span>' +
+        '</div>';
+      }).join("");
+
+      // Attach change listeners
+      eventsList.querySelectorAll("input[data-event-idx]").forEach(function(cb) {
+        cb.addEventListener("change", function() {
+          composerEvents[parseInt(cb.dataset.eventIdx)] = cb.checked;
+          updateComposerPreview();
+        });
+      });
+    }
+  }
+
+  // Resources list
+  var resourcesList = document.getElementById("composer-resources-list");
+  if (resourcesList) {
+    var resources = weeklyDraft.topResources || [];
+    if (resources.length === 0) {
+      resourcesList.innerHTML = '<div style="font-size:12px;color:var(--text-dim);padding-left:22px;">No resources shared this week.</div>';
+    } else {
+      resourcesList.innerHTML = resources.map(function(res, i) {
+        var checked = composerResources[i] !== false ? "checked" : "";
+        var displayUrl = truncateUrl(res.url, 50);
+        return '<div class="composer-resource-row">' +
+          '<input type="checkbox" data-resource-idx="' + i + '" ' + checked + '>' +
+          '<a href="' + escapeAttr(res.url) + '" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none;font-size:12px;">' + escapeHtml(res.title || displayUrl) + '</a>' +
+          '<span class="composer-resource-meta">(' + (res.share_count || 1) + 'x' + (res.shared_by ? ' by ' + escapeHtml(res.shared_by) : '') + ')</span>' +
+        '</div>';
+      }).join("");
+
+      resourcesList.querySelectorAll("input[data-resource-idx]").forEach(function(cb) {
+        cb.addEventListener("change", function() {
+          composerResources[parseInt(cb.dataset.resourceIdx)] = cb.checked;
+          updateComposerPreview();
+        });
+      });
+    }
+  }
+
+  // Most active member
+  var memberContent = document.getElementById("composer-member-content");
+  if (memberContent) {
+    var member = weeklyDraft.topMember;
+    if (member) {
+      memberContent.textContent = member.sender_name + " — " + member.message_count + " messages this week";
+    } else {
+      memberContent.textContent = "No member data this week.";
+    }
+  }
+
+  // Pulse text (only set if not user-edited)
+  var pulseEl = document.getElementById("composer-pulse-text");
+  if (pulseEl && !pulseEl.dataset.userEdited) {
+    pulseEl.value = weeklyDraft.communityPulse || "";
+  }
+
+  updateComposerPreview();
+}
+
+function buildComposerMessage() {
+  if (!weeklyDraft) return "";
+
+  var lines = [];
+  lines.push("*Metacrisis Community — Weekly Update*");
+  lines.push("*" + (weeklyDraft.dateRange || "") + "*");
+  lines.push("");
+
+  // Events
+  if (composerShowEvents) {
+    var events = (weeklyDraft.events || []).filter(function(_, i) { return composerEvents[i] !== false; });
+    if (events.length > 0) {
+      lines.push("*Upcoming Events*");
+      events.forEach(function(evt) {
+        var line = "- " + (evt.name || "Untitled");
+        if (evt.date) {
+          var d = new Date(evt.date + "T00:00:00");
+          line += " — " + d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+        }
+        if (evt.start_time) line += " at " + evt.start_time;
+        if (evt.location) line += " | " + evt.location;
+        lines.push(line);
+        if (evt.url) lines.push("  " + evt.url);
+      });
+      lines.push("");
+    }
+  }
+
+  // Resources
+  if (composerShowResources) {
+    var resources = (weeklyDraft.topResources || []).filter(function(_, i) { return composerResources[i] !== false; });
+    if (resources.length > 0) {
+      lines.push("*Top Resources*");
+      resources.forEach(function(res) {
+        var title = res.title || truncateUrl(res.url, 40);
+        lines.push("- " + title);
+        lines.push("  " + res.url);
+      });
+      lines.push("");
+    }
+  }
+
+  // Most active member
+  if (composerShowMember && weeklyDraft.topMember) {
+    lines.push("*Most Active Member*");
+    lines.push(weeklyDraft.topMember.sender_name + " — " + weeklyDraft.topMember.message_count + " messages");
+    lines.push("");
+  }
+
+  // Community pulse
+  if (composerShowPulse) {
+    var pulseEl = document.getElementById("composer-pulse-text");
+    var pulseText = pulseEl ? pulseEl.value.trim() : "";
+    if (pulseText) {
+      lines.push("*Community Pulse*");
+      lines.push(pulseText);
+      lines.push("");
+    }
+  }
+
+  return lines.join("\n").trim();
+}
+
+function updateComposerPreview() {
+  var preview = document.getElementById("composer-preview");
+  if (!preview) return;
+  preview.textContent = buildComposerMessage();
+}
+
+async function handleComposerPush() {
+  var message = buildComposerMessage();
+  if (!message) {
+    alert("Nothing to push — all sections are empty or unchecked.");
+    return;
+  }
+
+  if (!confirm("Push this weekly update to the announcement chat?")) return;
+
+  var pushBtn = document.getElementById("composer-push");
+  var statusEl = document.getElementById("composer-status");
+  if (pushBtn) { pushBtn.disabled = true; pushBtn.textContent = "Pushing..."; }
+
+  try {
+    var res = await adminFetch("/api/metacrisis/push-weekly", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: message }),
+    });
+    if (!res.ok) {
+      var data = await res.json().catch(function() { return {}; });
+      throw new Error(data.error || "Server returned " + res.status);
+    }
+    if (statusEl) statusEl.textContent = "Pushed successfully!";
+    setTimeout(function() { if (statusEl) statusEl.textContent = ""; }, 3000);
+  } catch (err) {
+    console.error("Push failed:", err);
+    alert("Push failed: " + err.message);
+  } finally {
+    if (pushBtn) { pushBtn.disabled = false; pushBtn.textContent = "Push to Announcement Chat"; }
+  }
+}
+
+async function handleRegeneratePulse() {
+  var btn = document.getElementById("composer-regenerate");
+  if (btn) { btn.disabled = true; btn.textContent = "Generating..."; }
+
+  try {
+    // Trigger daily digest to regenerate the community pulse
+    var res = await adminFetch("/api/metacrisis/daily-digest", { method: "POST" });
+    if (!res.ok) throw new Error("Digest failed");
+
+    // Re-fetch the draft
+    var draftRes = await adminFetch("/api/metacrisis/weekly-draft");
+    if (draftRes.ok) {
+      weeklyDraft = await draftRes.json();
+      var pulseEl = document.getElementById("composer-pulse-text");
+      if (pulseEl) {
+        pulseEl.value = weeklyDraft.communityPulse || "";
+        pulseEl.dataset.userEdited = "";
+      }
+      renderComposer();
+    }
+  } catch (err) {
+    console.error("Regenerate failed:", err);
+    alert("Failed to regenerate: " + err.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Regenerate Pulse"; }
   }
 }

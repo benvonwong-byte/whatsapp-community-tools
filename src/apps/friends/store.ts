@@ -941,15 +941,21 @@ export class FriendsStore extends SettingsStore {
   }
 
   getNeglectedContacts(daysSilent: number, tierId?: number | null, beforeTs?: number): any[] {
-    const cutoff = (beforeTs || Math.floor(Date.now() / 1000)) - daysSilent * 86400;
+    const now = Math.floor(Date.now() / 1000);
+    const rangeEnd = beforeTs || now;
+    const rangeStart = rangeEnd - daysSilent * 86400;
     const tf = this.tierClause(tierId);
-    const upperBound = beforeTs ? ` AND c.last_seen < ${Number(beforeTs)}` : "";
     return this.db.prepare(`
       SELECT
         c.id, COALESCE(c.display_name, c.name) as name,
         c.last_seen,
         c.tier_id, t.name as tier_name, t.color as tier_color,
-        COALESCE(msg_stats.total_messages, 0) as total_messages,
+        COALESCE(range_stats.messages_in_range, 0) as messages_in_range,
+        COALESCE(range_stats.active_days, 0) as active_days,
+        CASE WHEN COALESCE(range_stats.active_days, 0) > 0
+          THEN ROUND(CAST(range_stats.messages_in_range AS REAL) / range_stats.active_days, 1)
+          ELSE 0 END as messages_per_active_day,
+        COALESCE(vn_stats.voice_notes_in_range, 0) as voice_notes_in_range,
         (SELECT GROUP_CONCAT(tg.name, ', ')
          FROM friends_contact_tags ct JOIN friends_tags tg ON tg.id = ct.tag_id
          WHERE ct.contact_id = c.id) as tag_names,
@@ -959,18 +965,27 @@ export class FriendsStore extends SettingsStore {
       FROM friends_contacts c
       LEFT JOIN friends_tiers t ON t.id = c.tier_id
       LEFT JOIN (
-        SELECT m.chat_id, COUNT(*) as total_messages
+        SELECT m.chat_id,
+          COUNT(*) as messages_in_range,
+          COUNT(DISTINCT date(m.timestamp, 'unixepoch')) as active_days
         FROM friends_messages m
         JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0
+        WHERE m.timestamp >= ? AND m.timestamp < ?
         GROUP BY m.chat_id
-      ) msg_stats ON msg_stats.chat_id = c.id
-      WHERE c.last_seen < ? AND c.last_seen > 0${upperBound}
-        AND c.id NOT LIKE '%@broadcast'
+      ) range_stats ON range_stats.chat_id = c.id
+      LEFT JOIN (
+        SELECT vn.chat_id, COUNT(*) as voice_notes_in_range
+        FROM friends_voice_notes vn
+        WHERE vn.timestamp >= ? AND vn.timestamp < ?
+        GROUP BY vn.chat_id
+      ) vn_stats ON vn_stats.chat_id = c.id
+      WHERE c.id NOT LIKE '%@broadcast'
         AND COALESCE(c.hidden, 0) = 0
-        AND COALESCE(c.hidden_from_neglected, 0) = 0${tf}
-      ORDER BY c.last_seen ASC
+        AND COALESCE(c.hidden_from_neglected, 0) = 0
+        AND (COALESCE(range_stats.messages_in_range, 0) > 0 OR COALESCE(vn_stats.voice_notes_in_range, 0) > 0)${tf}
+      ORDER BY messages_per_active_day DESC
       LIMIT 100
-    `).all(cutoff) as any[];
+    `).all(rangeStart, rangeEnd, rangeStart, rangeEnd) as any[];
   }
 
   dismissNeglectedContact(contactId: string): void {

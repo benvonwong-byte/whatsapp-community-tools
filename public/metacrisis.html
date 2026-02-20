@@ -737,6 +737,35 @@
       font-size: 14px;
     }
 
+    /* Composer blocks */
+    .composer-block {
+      padding: 12px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .composer-block:last-of-type { border-bottom: none; }
+
+    .composer-event-row,
+    .composer-resource-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 0 4px 22px;
+      font-size: 12px;
+      color: var(--text);
+    }
+
+    .composer-event-row input[type="checkbox"],
+    .composer-resource-row input[type="checkbox"] {
+      flex-shrink: 0;
+    }
+
+    .composer-event-meta,
+    .composer-resource-meta {
+      color: var(--text-dim);
+      font-size: 11px;
+    }
+
     .hidden { display: none !important; }
 
     /* Responsive */
@@ -805,6 +834,66 @@
           <div class="stat-value" id="stat-members">0</div>
           <div class="stat-label">Active Members</div>
         </div>
+      </div>
+
+      <!-- Weekly Update Composer -->
+      <div class="section" id="composer-section" style="border-left:3px solid var(--accent);">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:16px;">
+          <div>
+            <div class="section-title" style="margin-bottom:2px;">Weekly Update Composer</div>
+            <div id="composer-date-range" style="font-size:11px;color:var(--text-dim);"></div>
+          </div>
+          <button id="composer-regenerate" class="summarize-btn" style="font-size:11px;padding:4px 12px;">Regenerate Pulse</button>
+        </div>
+
+        <!-- Events section -->
+        <div class="composer-block" id="composer-events-block">
+          <label style="display:flex;align-items:center;gap:6px;margin-bottom:8px;cursor:pointer;">
+            <input type="checkbox" id="composer-events-toggle" checked>
+            <span style="font-size:13px;font-weight:600;color:var(--accent);">Upcoming Events</span>
+          </label>
+          <div id="composer-events-list"></div>
+        </div>
+
+        <!-- Top Resources section -->
+        <div class="composer-block" id="composer-resources-block">
+          <label style="display:flex;align-items:center;gap:6px;margin-bottom:8px;cursor:pointer;">
+            <input type="checkbox" id="composer-resources-toggle" checked>
+            <span style="font-size:13px;font-weight:600;color:#6c5ce7;">Top Resources</span>
+          </label>
+          <div id="composer-resources-list"></div>
+        </div>
+
+        <!-- Most Active Member section -->
+        <div class="composer-block" id="composer-member-block">
+          <label style="display:flex;align-items:center;gap:6px;margin-bottom:8px;cursor:pointer;">
+            <input type="checkbox" id="composer-member-toggle" checked>
+            <span style="font-size:13px;font-weight:600;color:var(--green);">Most Active Member</span>
+          </label>
+          <div id="composer-member-content" style="font-size:13px;color:var(--text-dim);padding-left:22px;"></div>
+        </div>
+
+        <!-- Community Pulse section -->
+        <div class="composer-block" id="composer-pulse-block">
+          <label style="display:flex;align-items:center;gap:6px;margin-bottom:8px;cursor:pointer;">
+            <input type="checkbox" id="composer-pulse-toggle" checked>
+            <span style="font-size:13px;font-weight:600;color:var(--yellow);">Community Pulse</span>
+          </label>
+          <textarea id="composer-pulse-text" style="width:100%;min-height:80px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:12px;font-family:inherit;resize:vertical;line-height:1.5;" placeholder="AI-generated summary of who said what this week..."></textarea>
+        </div>
+
+        <!-- Preview -->
+        <div style="margin-top:16px;">
+          <div style="font-size:12px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">WhatsApp Preview</div>
+          <pre id="composer-preview" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:14px;font-size:12px;color:var(--text);white-space:pre-wrap;word-wrap:break-word;line-height:1.6;max-height:400px;overflow-y:auto;font-family:inherit;"></pre>
+        </div>
+
+        <!-- Action buttons -->
+        <div style="display:flex;gap:8px;margin-top:12px;">
+          <button id="composer-copy" class="push-btn" style="flex:1;">Copy to Clipboard</button>
+          <button id="composer-push" class="summarize-btn" style="flex:1;">Push to Announcement Chat</button>
+        </div>
+        <div id="composer-status" style="font-size:11px;color:var(--text-dim);margin-top:6px;text-align:center;"></div>
       </div>
 
       <!-- Daily Digest -->

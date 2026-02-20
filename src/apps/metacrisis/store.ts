@@ -489,4 +489,40 @@ export class MetacrisisStore extends SettingsStore {
     }[];
   }
 
+  // ── Weekly Draft helpers ──
+
+  getTopResources(days: number = 7, limit: number = 3): { url: string; title: string; category: string; share_count: number; shared_by: string }[] {
+    const cutoff = Math.floor(Date.now() / 1000) - days * 86400;
+    return this.db.prepare(`
+      SELECT url, MAX(title) as title, MAX(category) as category,
+             COUNT(*) as share_count,
+             GROUP_CONCAT(DISTINCT sender_name) as shared_by
+      FROM metacrisis_links
+      WHERE timestamp >= ?
+      GROUP BY url
+      ORDER BY share_count DESC, MAX(timestamp) DESC
+      LIMIT ?
+    `).all(cutoff, limit) as any[];
+  }
+
+  getWeeklyTopMember(days: number = 7): { sender_name: string; message_count: number } | undefined {
+    const cutoff = Math.floor(Date.now() / 1000) - days * 86400;
+    return this.db.prepare(`
+      SELECT sender_name, COUNT(*) as message_count
+      FROM metacrisis_messages
+      WHERE timestamp >= ? AND sender_name != ''
+      GROUP BY sender_name
+      ORDER BY message_count DESC
+      LIMIT 1
+    `).get(cutoff) as any;
+  }
+
+  getRecentDailyDigests(days: number = 7): MetacrisisSummary[] {
+    return this.db.prepare(`
+      SELECT * FROM metacrisis_summaries
+      WHERE type = 'daily' AND date >= date('now', '-' || ? || ' days')
+      ORDER BY date DESC
+    `).all(days) as MetacrisisSummary[];
+  }
+
 }
