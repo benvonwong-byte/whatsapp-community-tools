@@ -43,7 +43,7 @@ let activeTagFilters = new Set();
 let tagFilterMode = "OR";
 let calYear = new Date().getFullYear();
 let calMonth = new Date().getMonth() + 1;
-let negWindowDays = 90;
+let negWindowDays = 14;
 let negOffsetPeriods = 0;
 let neglectedData = [];
 let negNavBound = false;
@@ -532,20 +532,6 @@ function showDashboardSkeleton() {
       return '<div class="skeleton-card" style="height:36px;margin-bottom:4px;border-radius:6px;"></div>';
     }).join("");
   }
-  // Reciprocity skeleton
-  var rp = $("reciprocity-list");
-  if (rp && rp.querySelector(".chart-empty")) {
-    rp.innerHTML = Array(5).fill(0).map(function() {
-      return '<div class="skeleton-card" style="height:28px;margin-bottom:4px;border-radius:6px;"></div>';
-    }).join("");
-  }
-  // Streaks skeleton
-  var sk = $("streaks-list");
-  if (sk && sk.querySelector(".chart-empty")) {
-    sk.innerHTML = Array(3).fill(0).map(function() {
-      return '<div class="skeleton-card" style="height:28px;margin-bottom:4px;border-radius:6px;"></div>';
-    }).join("");
-  }
 }
 
 /** Render all dashboard sections from a data object */
@@ -553,14 +539,7 @@ function renderDashboardData(data) {
   renderSummaryCards(data.stats, data.voiceTotal);
   renderWeeklyChart(data.weeklyVolume);
   renderHourlyChart(data.hourly);
-  renderReciprocity(data.reciprocity);
-  renderStreaks(data.streaks);
   renderFastResponders(data.fastResponders);
-  neglectedData = data.neglected || [];
-  populateNeglectedFilters(neglectedData);
-  filterAndRenderNeglected();
-  var negRangeEl = $("neg-date-range");
-  if (negRangeEl) negRangeEl.textContent = negDateRangeLabel();
   renderInitiatorsList(data.topInitiators);
   renderTierPills(data.tierDistribution);
 }
@@ -930,13 +909,13 @@ function renderWeeklyChart(data) {
   });
 }
 
-// ── Neglected Friends (browsable + sortable) ──
+// ── Top 10 to Follow Up (mirrors Top Friends nav) ──
 
 function setupNeglectedNav() {
   if (negNavBound) return;
   negNavBound = true;
 
-  // Range buttons (3m, 6m, 1y)
+  // Window buttons (same as Top Friends)
   document.querySelectorAll(".neg-window-btn").forEach(btn => {
     btn.addEventListener("click", () => {
       negWindowDays = parseInt(btn.dataset.days);
@@ -950,137 +929,107 @@ function setupNeglectedNav() {
   // Prev/Next arrows
   var prevBtn = $("neg-prev");
   var nextBtn = $("neg-next");
-  if (prevBtn) {
-    prevBtn.addEventListener("click", () => {
-      negOffsetPeriods++;
-      loadNeglected();
-    });
-  }
-  if (nextBtn) {
-    nextBtn.addEventListener("click", () => {
-      negOffsetPeriods = Math.max(0, negOffsetPeriods - 1);
-      loadNeglected();
-    });
-  }
+  if (prevBtn) prevBtn.addEventListener("click", () => { negOffsetPeriods += negWindowDays; loadNeglected(); });
+  if (nextBtn) nextBtn.addEventListener("click", () => { negOffsetPeriods = Math.max(0, negOffsetPeriods - negWindowDays); loadNeglected(); });
 
-  // Keyboard navigation
+  // Keyboard navigation (left/right arrows)
   var section = $("neglected-section");
   if (section) {
     section.addEventListener("keydown", (e) => {
-      if (e.key === "ArrowLeft") { e.preventDefault(); negOffsetPeriods++; loadNeglected(); }
-      else if (e.key === "ArrowRight") { e.preventDefault(); negOffsetPeriods = Math.max(0, negOffsetPeriods - 1); loadNeglected(); }
+      if (e.key === "ArrowLeft") { e.preventDefault(); negOffsetPeriods += negWindowDays; loadNeglected(); }
+      else if (e.key === "ArrowRight") { e.preventDefault(); negOffsetPeriods = Math.max(0, negOffsetPeriods - negWindowDays); loadNeglected(); }
     });
     section.addEventListener("mouseenter", () => section.focus());
   }
-}
 
-function negDateRangeLabel() {
-  var now = Date.now();
-  var periodEnd = new Date(now - negOffsetPeriods * negWindowDays * 86400000);
-  var periodStart = new Date(now - (negOffsetPeriods + 1) * negWindowDays * 86400000);
-  var fmt = function(d) { return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); };
-  return fmt(periodStart) + " \u2192 " + fmt(periodEnd);
+  // Bind filter dropdowns
+  var sortSel = $("neg-sort");
+  var groupSel = $("neg-group-filter");
+  var tagSel = $("neg-tag-filter");
+  if (sortSel) sortSel.addEventListener("change", () => renderNeglectedList());
+  if (groupSel) groupSel.addEventListener("change", () => renderNeglectedList());
+  if (tagSel) tagSel.addEventListener("change", () => renderNeglectedList());
 }
 
 async function loadNeglected() {
   try {
-    var now = Math.floor(Date.now() / 1000);
-    var beforeTs = now - negOffsetPeriods * negWindowDays * 86400;
-    var url = "/api/friends/neglected?days=" + negWindowDays + "&before=" + beforeTs;
     var negTierParam = dashboardTierFilter !== null ? "&tier=" + encodeURIComponent(dashboardTierFilter) : "";
-    var res = await adminFetch(url + negTierParam);
+    var res = await adminFetch("/api/friends/neglected?days=" + negWindowDays + "&offset=" + negOffsetPeriods + negTierParam);
     if (!res.ok) throw new Error("Failed");
     var data = await res.json();
     neglectedData = data.contacts || [];
-    populateNeglectedFilters(neglectedData);
-    filterAndRenderNeglected();
 
-    // Update date range label
+    // Update date range label (same format as Top Friends)
     var rangeEl = $("neg-date-range");
-    if (rangeEl) rangeEl.textContent = negDateRangeLabel();
+    if (rangeEl) {
+      var now = Date.now();
+      var end = new Date(now - negOffsetPeriods * 86400000);
+      var start = new Date(now - (negOffsetPeriods + negWindowDays) * 86400000);
+      var fmt = function(d) { return d.toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
+      rangeEl.textContent = fmt(start) + " \u2192 " + fmt(end);
+    }
 
-    // Disable next button at current period
+    // Disable next at current period
     var nextBtn = $("neg-next");
     if (nextBtn) nextBtn.disabled = negOffsetPeriods === 0;
+
+    // Populate filter dropdowns
+    var groupSel = $("neg-group-filter");
+    var tagSel = $("neg-tag-filter");
+    if (groupSel) {
+      var groups = new Set();
+      neglectedData.forEach(function(c) { (c.group_names || "").split(", ").filter(Boolean).forEach(function(g) { groups.add(g); }); });
+      groupSel.innerHTML = '<option value="">All Groups</option>' +
+        [...groups].sort().map(function(g) { return '<option value="' + esc(g) + '">' + esc(g) + '</option>'; }).join("");
+    }
+    if (tagSel) {
+      var tags = new Set();
+      neglectedData.forEach(function(c) { (c.tag_names || "").split(", ").filter(Boolean).forEach(function(t) { tags.add(t); }); });
+      tagSel.innerHTML = '<option value="">All Tags</option>' +
+        [...tags].sort().map(function(t) { var p = parseTagCategory(t); return '<option value="' + esc(t) + '">' + esc(p.label) + '</option>'; }).join("");
+    }
+
+    renderNeglectedList();
   } catch (err) {
     console.error("Failed to load neglected:", err);
   }
 }
 
-function populateNeglectedFilters(data) {
-  const groupSel = $("neg-group-filter");
-  const tagSel = $("neg-tag-filter");
-  if (groupSel) {
-    const groups = new Set();
-    data.forEach(c => (c.group_names || "").split(", ").filter(Boolean).forEach(g => groups.add(g)));
-    groupSel.innerHTML = '<option value="">All Groups</option>' +
-      [...groups].sort().map(g => '<option value="' + esc(g) + '">' + esc(g) + '</option>').join("");
-  }
-  if (tagSel) {
-    const tags = new Set();
-    data.forEach(c => (c.tag_names || "").split(", ").filter(Boolean).forEach(t => tags.add(t)));
-    tagSel.innerHTML = '<option value="">All Tags</option>' +
-      [...tags].sort().map(t => {
-        const p = parseTagCategory(t);
-        return '<option value="' + esc(t) + '">' + esc(p.label) + '</option>';
-      }).join("");
-  }
-  if (groupSel && !groupSel.dataset.bound) {
-    groupSel.addEventListener("change", filterAndRenderNeglected);
-    groupSel.dataset.bound = "1";
-  }
-  if (tagSel && !tagSel.dataset.bound) {
-    tagSel.addEventListener("change", filterAndRenderNeglected);
-    tagSel.dataset.bound = "1";
-  }
-  const sortSel = $("neg-sort");
-  if (sortSel && !sortSel.dataset.bound) {
-    sortSel.addEventListener("change", filterAndRenderNeglected);
-    sortSel.dataset.bound = "1";
-  }
-}
-
-function filterAndRenderNeglected() {
-  const container = $("neglected-list");
+function renderNeglectedList() {
+  var container = $("neglected-list");
   if (!container) return;
 
-  let filtered = [...neglectedData];
-  const groupFilter = $("neg-group-filter")?.value;
-  const tagFilter = $("neg-tag-filter")?.value;
-  const sortMode = $("neg-sort")?.value || "days-silent";
+  var filtered = [].concat(neglectedData);
+  var groupFilter = $("neg-group-filter")?.value;
+  var tagFilter = $("neg-tag-filter")?.value;
+  var sortMode = $("neg-sort")?.value || "days-silent";
 
-  if (groupFilter) filtered = filtered.filter(c => (c.group_names || "").split(", ").includes(groupFilter));
-  if (tagFilter) filtered = filtered.filter(c => (c.tag_names || "").split(", ").includes(tagFilter));
+  if (groupFilter) filtered = filtered.filter(function(c) { return (c.group_names || "").split(", ").includes(groupFilter); });
+  if (tagFilter) filtered = filtered.filter(function(c) { return (c.tag_names || "").split(", ").includes(tagFilter); });
 
-  if (sortMode === "days-silent") filtered.sort((a, b) => a.last_seen - b.last_seen);
-  else if (sortMode === "days-silent-asc") filtered.sort((a, b) => b.last_seen - a.last_seen);
-  else if (sortMode === "name") filtered.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-  else if (sortMode === "total-messages") filtered.sort((a, b) => (b.total_messages || 0) - (a.total_messages || 0));
-  else if (sortMode === "tier") filtered.sort((a, b) => {
+  if (sortMode === "days-silent") filtered.sort(function(a, b) { return a.last_seen - b.last_seen; });
+  else if (sortMode === "days-silent-asc") filtered.sort(function(a, b) { return b.last_seen - a.last_seen; });
+  else if (sortMode === "name") filtered.sort(function(a, b) { return (a.name || "").localeCompare(b.name || ""); });
+  else if (sortMode === "total-messages") filtered.sort(function(a, b) { return (b.total_messages || 0) - (a.total_messages || 0); });
+  else if (sortMode === "tier") filtered.sort(function(a, b) {
     if (!a.tier_name && !b.tier_name) return 0;
     if (!a.tier_name) return 1;
     if (!b.tier_name) return -1;
     return a.tier_name.localeCompare(b.tier_name);
   });
 
-  const countEl = $("neg-count");
-  if (countEl) {
-    const total = neglectedData.length;
-    const shown = Math.min(filtered.length, 30);
-    countEl.textContent = filtered.length === total
-      ? "Showing " + shown + " of " + total
-      : "Showing " + shown + " of " + filtered.length + " (filtered from " + total + ")";
-  }
+  // Limit to 10
+  filtered = filtered.slice(0, 10);
 
   if (filtered.length === 0) {
-    container.innerHTML = '<div class="chart-empty">No neglected friends matching filters.</div>';
+    container.innerHTML = '<div class="chart-empty">No neglected contacts in this period.</div>';
     return;
   }
 
-  container.innerHTML = filtered.slice(0, 30).map(c => {
-    const daysAgo = c.last_seen ? Math.floor((Date.now() / 1000 - c.last_seen) / 86400) : null;
-    const label = daysAgo !== null ? daysAgo + "d ago" : "never";
-    const tierDot = c.tier_color
+  container.innerHTML = filtered.map(function(c) {
+    var daysAgo = c.last_seen ? Math.floor((Date.now() / 1000 - c.last_seen) / 86400) : null;
+    var label = daysAgo !== null ? daysAgo + "d ago" : "never";
+    var tierDot = c.tier_color
       ? '<span class="neglected-tier-dot" style="background:' + esc(c.tier_color) + '"></span>' + esc(c.tier_name || "")
       : "";
     return '<div class="neglected-card" data-contact-id="' + esc(c.id) + '" style="cursor:pointer;">' +
@@ -1092,25 +1041,25 @@ function filterAndRenderNeglected() {
           (c.total_messages ? '<span>' + c.total_messages + ' msgs</span>' : '') +
         '</div>' +
       '</div>' +
-      '<button class="neglected-dismiss" title="Dismiss from neglected list" data-dismiss-id="' + esc(c.id) + '">&times;</button>' +
+      '<button class="neglected-dismiss" title="Dismiss" data-dismiss-id="' + esc(c.id) + '">&times;</button>' +
     '</div>';
   }).join("");
 
-  container.querySelectorAll("[data-contact-id]").forEach(el => {
-    el.addEventListener("click", (e) => {
+  container.querySelectorAll("[data-contact-id]").forEach(function(el) {
+    el.addEventListener("click", function(e) {
       if (e.target.classList.contains("neglected-dismiss")) return;
       if (el.dataset.contactId) openContactDetail(el.dataset.contactId);
     });
   });
-  container.querySelectorAll(".neglected-dismiss").forEach(btn => {
-    btn.addEventListener("click", async (e) => {
+  container.querySelectorAll(".neglected-dismiss").forEach(function(btn) {
+    btn.addEventListener("click", async function(e) {
       e.stopPropagation();
-      const id = btn.dataset.dismissId;
+      var id = btn.dataset.dismissId;
       if (!id) return;
       try {
         await adminFetch("/api/friends/contacts/" + encodeURIComponent(id) + "/dismiss-neglected", { method: "POST" });
-        neglectedData = neglectedData.filter(c => c.id !== id);
-        filterAndRenderNeglected();
+        neglectedData = neglectedData.filter(function(c) { return c.id !== id; });
+        renderNeglectedList();
       } catch (err) {
         console.error("Dismiss failed:", err);
       }
@@ -1289,134 +1238,6 @@ function renderTopFriends(data) {
   });
 }
 
-// ── Reciprocity (Message Balance) ──
-
-let reciprocityData = [];
-
-function renderReciprocity(data) {
-  reciprocityData = data || [];
-  populateRecipFilters(reciprocityData);
-  filterAndRenderReciprocity();
-}
-
-function populateRecipFilters(data) {
-  const groupSel = $("recip-group-filter");
-  const tagSel = $("recip-tag-filter");
-  if (groupSel) {
-    const groups = new Set();
-    data.forEach(r => (r.group_names || "").split(", ").filter(Boolean).forEach(g => groups.add(g)));
-    groupSel.innerHTML = '<option value="">All Groups</option>' +
-      [...groups].sort().map(g => '<option value="' + esc(g) + '">' + esc(g) + '</option>').join("");
-  }
-  if (tagSel) {
-    const tags = new Set();
-    data.forEach(r => (r.tag_names || "").split(", ").filter(Boolean).forEach(t => tags.add(t)));
-    tagSel.innerHTML = '<option value="">All Tags</option>' +
-      [...tags].sort().map(t => '<option value="' + esc(t) + '">' + esc(t) + '</option>').join("");
-  }
-  // Attach change listeners (only once)
-  if (!groupSel?.dataset.bound) {
-    groupSel?.addEventListener("change", filterAndRenderReciprocity);
-    if (groupSel) groupSel.dataset.bound = "1";
-  }
-  if (!tagSel?.dataset.bound) {
-    tagSel?.addEventListener("change", filterAndRenderReciprocity);
-    if (tagSel) tagSel.dataset.bound = "1";
-  }
-  const sortSel = $("recip-sort");
-  if (sortSel && !sortSel.dataset.bound) {
-    sortSel.addEventListener("change", filterAndRenderReciprocity);
-    sortSel.dataset.bound = "1";
-  }
-}
-
-function filterAndRenderReciprocity() {
-  const container = $("reciprocity-list");
-  if (!container) return;
-
-  let filtered = [...reciprocityData];
-  const groupFilter = $("recip-group-filter")?.value;
-  const tagFilter = $("recip-tag-filter")?.value;
-  const sortMode = $("recip-sort")?.value || "balance";
-
-  if (groupFilter) {
-    filtered = filtered.filter(r => (r.group_names || "").includes(groupFilter));
-  }
-  if (tagFilter) {
-    filtered = filtered.filter(r => (r.tag_names || "").includes(tagFilter));
-  }
-
-  if (sortMode === "balance") {
-    filtered.sort((a, b) => b.ratio - a.ratio);
-  } else if (sortMode === "most-sent") {
-    filtered.sort((a, b) => b.sent - a.sent);
-  } else if (sortMode === "most-received") {
-    filtered.sort((a, b) => b.received - a.received);
-  } else if (sortMode === "least-active") {
-    filtered.sort((a, b) => (a.sent + a.received) - (b.sent + b.received));
-  } else if (sortMode === "worst-balance") {
-    filtered.sort((a, b) => a.ratio - b.ratio);
-  } else if (sortMode === "name") {
-    filtered.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-  } else {
-    filtered.sort((a, b) => (b.sent + b.received) - (a.sent + a.received));
-  }
-
-  if (filtered.length === 0) {
-    container.innerHTML = '<div class="chart-empty">No data matching filters.</div>';
-    return;
-  }
-
-  container.innerHTML = filtered.slice(0, 15).map(r => {
-    const total = r.sent + r.received || 1;
-    const sentPct = Math.round((r.sent / total) * 100);
-    const recvPct = 100 - sentPct;
-    return '<div class="recip-row" data-contact-id="' + esc(r.id) + '" style="cursor:pointer;">' +
-      '<div class="recip-name">' + esc(contactDisplayName(r)) + '</div>' +
-      '<div class="recip-bar">' +
-        '<div class="recip-bar-sent" style="width:' + sentPct + '%" title="Sent: ' + r.sent + '"></div>' +
-        '<div class="recip-bar-received" style="width:' + recvPct + '%" title="Received: ' + r.received + '"></div>' +
-      '</div>' +
-      '<div class="recip-pct">' + r.ratio + '%</div>' +
-    '</div>';
-  }).join("") +
-  '<div style="font-size:10px;color:var(--text-dim);margin-top:8px;display:flex;gap:12px;">' +
-    '<span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--accent);margin-right:3px;"></span>Sent</span>' +
-    '<span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--green);margin-right:3px;"></span>Received</span>' +
-    '<span style="margin-left:auto;">% = balance (100=perfect)</span>' +
-  '</div>';
-
-  // Make rows clickable
-  container.querySelectorAll(".recip-row[data-contact-id]").forEach(row => {
-    row.addEventListener("click", () => {
-      const id = row.dataset.contactId;
-      if (id) openContactDetail(id);
-    });
-  });
-}
-
-// ── Streaks ──
-
-function renderStreaks(data) {
-  const container = $("streaks-list");
-  if (!container) return;
-  if (!data || data.length === 0) {
-    container.innerHTML = '<div class="chart-empty">No data yet.</div>';
-    return;
-  }
-  container.innerHTML = data.map(s => {
-    return '<div class="streak-row" data-contact-id="' + esc(s.id) + '" style="cursor:pointer;">' +
-      '<div class="streak-name">' + esc(contactDisplayName(s)) + '</div>' +
-      (s.current_streak > 0
-        ? '<span class="streak-badge active">\uD83D\uDD25 ' + s.current_streak + 'd</span>'
-        : '') +
-      '<span class="streak-badge record">\uD83C\uDFC6 ' + s.longest_streak + 'd best</span>' +
-    '</div>';
-  }).join("");
-  container.querySelectorAll("[data-contact-id]").forEach(el => {
-    el.addEventListener("click", () => { if (el.dataset.contactId) openContactDetail(el.dataset.contactId); });
-  });
-}
 
 // ── Fastest Responders ──
 

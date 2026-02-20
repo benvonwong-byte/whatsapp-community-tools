@@ -82,12 +82,14 @@ export function createFriendsRouter(
 
   router.get("/neglected", (req: Request, res: Response) => {
     const days = parseInt(req.query.days as string) || 30;
-    const before = parseInt(req.query.before as string) || 0;
+    const offset = parseInt(req.query.offset as string) || 0;
     const tierParam = req.query.tier as string | undefined;
     let tierId: number | null | undefined = undefined;
     if (tierParam === "none") tierId = null;
     else if (tierParam && !isNaN(parseInt(tierParam))) tierId = parseInt(tierParam);
-    const contacts = store.getNeglectedContacts(days, tierId, before || undefined);
+    // beforeTs = reference point shifted by offset days
+    const beforeTs = offset > 0 ? Math.floor(Date.now() / 1000) - offset * 86400 : undefined;
+    const contacts = store.getNeglectedContacts(days, tierId, beforeTs);
     res.json({ contacts, days });
   });
 

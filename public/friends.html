@@ -1727,11 +1727,8 @@
     <div class="tab active" data-tab="dashboard">Dashboard</div>
     <div class="tab" data-tab="contacts">Contacts</div>
     <div class="tab" data-tab="tiers">Tiers</div>
-    <div class="tab" data-tab="groups">Groups</div>
     <div class="tab" data-tab="graph">Graph</div>
     <div class="tab" data-tab="calls">Calls</div>
-    <div class="tab" data-tab="messaging">Messaging</div>
-    <div class="tab" data-tab="chats">Manage Chats</div>
   </div>
 
   <!-- Login gate -->
@@ -1810,6 +1807,43 @@
         <div id="calendar-days" class="calendar-days"></div>
       </div>
 
+      <!-- Top 10 to Follow Up With (mirrors Top Friends nav) -->
+      <div class="section" id="neglected-section" tabindex="0" style="outline:none;">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <button id="neg-prev" class="tf-nav-btn" title="Previous period (Left arrow)">&larr;</button>
+            <div class="section-title" style="margin:0;">Top 10 to Follow Up</div>
+            <button id="neg-next" class="tf-nav-btn" title="Next period (Right arrow)">&rarr;</button>
+          </div>
+          <div class="tf-window-btns" id="neg-window-btns">
+            <button class="neg-window-btn tf-window-btn" data-days="7">7d</button>
+            <button class="neg-window-btn tf-window-btn active" data-days="14">14d</button>
+            <button class="neg-window-btn tf-window-btn" data-days="30">30d</button>
+            <button class="neg-window-btn tf-window-btn" data-days="60">60d</button>
+            <button class="neg-window-btn tf-window-btn" data-days="90">90d</button>
+          </div>
+        </div>
+        <div id="neg-date-range" style="font-size:10px;color:var(--muted);margin-bottom:6px;"></div>
+        <div id="neg-filters" style="display:flex;gap:4px;margin-bottom:6px;flex-wrap:wrap;">
+          <select id="neg-sort" style="font-size:10px;padding:2px 4px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;">
+            <option value="days-silent">Days Silent (Most)</option>
+            <option value="days-silent-asc">Days Silent (Least)</option>
+            <option value="name">Name A-Z</option>
+            <option value="total-messages">Total Messages</option>
+            <option value="tier">Tier</option>
+          </select>
+          <select id="neg-group-filter" style="font-size:10px;padding:2px 4px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;">
+            <option value="">All Groups</option>
+          </select>
+          <select id="neg-tag-filter" style="font-size:10px;padding:2px 4px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;">
+            <option value="">All Tags</option>
+          </select>
+        </div>
+        <div id="neglected-list">
+          <div class="chart-empty">No data yet.</div>
+        </div>
+      </div>
+
       <!-- Two-column grid for charts -->
       <div class="dash-grid-2">
         <!-- Weekly chart -->
@@ -1829,40 +1863,6 @@
         </div>
       </div>
 
-      <!-- Reciprocity + Streaks row -->
-      <div class="dash-grid-2">
-        <div class="section">
-          <div class="section-title">Message Balance</div>
-          <div id="recip-filters" style="display:flex;gap:4px;margin-bottom:6px;flex-wrap:wrap;">
-            <select id="recip-sort" style="font-size:10px;padding:2px 4px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;">
-              <option value="balance">Best Balance</option>
-              <option value="volume">Most Messages</option>
-              <option value="most-sent">Most Sent</option>
-              <option value="most-received">Most Received</option>
-              <option value="least-active">Least Active</option>
-              <option value="worst-balance">Worst Balance</option>
-              <option value="name">Name A-Z</option>
-            </select>
-            <select id="recip-group-filter" style="font-size:10px;padding:2px 4px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;">
-              <option value="">All Groups</option>
-            </select>
-            <select id="recip-tag-filter" style="font-size:10px;padding:2px 4px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;">
-              <option value="">All Tags</option>
-            </select>
-          </div>
-          <div id="reciprocity-list">
-            <div class="chart-empty">No data yet.</div>
-          </div>
-        </div>
-
-        <div class="section">
-          <div class="section-title">Streaks</div>
-          <div id="streaks-list">
-            <div class="chart-empty">No data yet.</div>
-          </div>
-        </div>
-      </div>
-
       <!-- Fastest responders + Initiators row -->
       <div class="dash-grid-2">
         <div class="section">
@@ -1877,42 +1877,6 @@
           <div id="initiators-list">
             <div class="chart-empty">No data yet.</div>
           </div>
-        </div>
-      </div>
-
-      <!-- Neglected friends -->
-      <div class="section" id="neglected-section" tabindex="0" style="outline:none;">
-        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
-          <div style="display:flex;align-items:center;gap:8px;">
-            <button id="neg-prev" class="tf-nav-btn" title="Previous period">&larr;</button>
-            <div class="section-title" style="margin:0;">Neglected Friends</div>
-            <button id="neg-next" class="tf-nav-btn" title="Next period">&rarr;</button>
-          </div>
-          <div class="neg-window-btns" id="neg-window-btns">
-            <button class="neg-window-btn active" data-days="90">3m</button>
-            <button class="neg-window-btn" data-days="180">6m</button>
-            <button class="neg-window-btn" data-days="365">1y</button>
-          </div>
-        </div>
-        <div id="neg-date-range" style="font-size:10px;color:var(--muted);margin-bottom:6px;"></div>
-        <div id="neg-filters" style="display:flex;gap:4px;margin-bottom:6px;flex-wrap:wrap;">
-          <select id="neg-sort" style="font-size:10px;padding:2px 4px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;">
-            <option value="days-silent">Days Silent (Most)</option>
-            <option value="days-silent-asc">Days Silent (Least)</option>
-            <option value="name">Name A-Z</option>
-            <option value="total-messages">Total Messages</option>
-            <option value="tier">Tier</option>
-          </select>
-          <select id="neg-group-filter" style="font-size:10px;padding:2px 4px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;">
-            <option value="">All Groups</option>
-          </select>
-          <select id="neg-tag-filter" style="font-size:10px;padding:2px 4px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;">
-            <option value="">All Tags</option>
-          </select>
-        </div>
-        <div id="neg-count" style="font-size:10px;color:var(--text-dim);margin-bottom:6px;"></div>
-        <div id="neglected-list">
-          <div class="chart-empty">No neglected friends found.</div>
         </div>
       </div>
 
