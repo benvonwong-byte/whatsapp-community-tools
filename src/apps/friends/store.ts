@@ -1568,6 +1568,29 @@ export class FriendsStore extends SettingsStore {
     `).all(...params, ...params, limit) as any[];
   }
 
+  /** Search contacts by phrases in their notes. Returns contacts whose notes contain any of the phrases. */
+  searchNotes(phrases: string[], limit = 50): Array<{ contact_id: string; name: string; tier_name: string | null; tier_color: string | null; tag_names: string | null; snippet: string; match_count: number }> {
+    if (phrases.length === 0) return [];
+    const conditions = phrases.map(() => `LOWER(n.content) LIKE LOWER(?)`).join(" OR ");
+    const params = phrases.map(p => `%${p}%`);
+    return this.db.prepare(`
+      SELECT c.id as contact_id, COALESCE(c.display_name, c.name) as name,
+             t.name as tier_name, t.color as tier_color,
+             (SELECT GROUP_CONCAT(tg.name, ', ')
+              FROM friends_contact_tags ct JOIN friends_tags tg ON tg.id = ct.tag_id
+              WHERE ct.contact_id = c.id) as tag_names,
+             n.content as snippet,
+             COUNT(*) as match_count
+      FROM friends_contact_notes n
+      JOIN friends_contacts c ON c.id = n.contact_id
+      LEFT JOIN friends_tiers t ON t.id = c.tier_id
+      WHERE (${conditions}) AND COALESCE(c.hidden, 0) = 0
+      GROUP BY c.id
+      ORDER BY match_count DESC
+      LIMIT ?
+    `).all(...params, limit) as any[];
+  }
+
   getTagBufferContacts(minMessages = 20): Array<{ contact_id: string; message_count: number }> {
     return this.db.prepare(`
       SELECT contact_id, COUNT(*) as message_count

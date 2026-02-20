@@ -201,10 +201,13 @@ export function createFriendsRouter(
       contacts = contacts.filter(c => c.quality_score >= minScore);
     }
 
-    // Filter by search term
+    // Filter by search term (searches name + notes)
     const search = (req.query.search as string || "").toLowerCase();
     if (search) {
-      contacts = contacts.filter(c => c.name.toLowerCase().includes(search));
+      const noteMatchIds = new Set(store.searchNotes([search], 500).map(r => r.contact_id));
+      contacts = contacts.filter(c =>
+        c.name.toLowerCase().includes(search) || noteMatchIds.has(c.id)
+      );
     }
 
     // Sort
@@ -993,6 +996,23 @@ User query: "${query.replace(/"/g, '\\"')}"`);
                 score: matchedTags.length * 5
               });
             }
+          }
+        }
+      }
+
+      // Search notes
+      if (phrases.length > 0) {
+        const noteResults = store.searchNotes(phrases, 50);
+        for (const r of noteResults) {
+          if (!seenIds.has(r.contact_id)) {
+            seenIds.add(r.contact_id);
+            results.push({
+              id: r.contact_id, name: r.name, tier_name: r.tier_name, tier_color: r.tier_color,
+              tag_names: r.tag_names, match_source: "note",
+              match_reason: `Found in notes`,
+              snippet: r.snippet?.substring(0, 200),
+              score: r.match_count * 7
+            });
           }
         }
       }
