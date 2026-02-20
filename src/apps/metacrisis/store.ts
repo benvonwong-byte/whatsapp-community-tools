@@ -208,6 +208,10 @@ export class MetacrisisStore extends SettingsStore {
       this.db.exec(`ALTER TABLE metacrisis_links ADD COLUMN event_date TEXT DEFAULT NULL`);
       console.log("[metacrisis-store] Migrated metacrisis_links: added event_date column");
     }
+    if (linkCols.length > 0 && !linkCols.find((c: any) => c.name === "event_location")) {
+      this.db.exec(`ALTER TABLE metacrisis_links ADD COLUMN event_location TEXT DEFAULT NULL`);
+      console.log("[metacrisis-store] Migrated metacrisis_links: added event_location column");
+    }
 
     // Insert default settings if they don't exist
     const insertDefault = this.db.prepare(
@@ -407,11 +411,11 @@ export class MetacrisisStore extends SettingsStore {
     `).all(limit) as any[];
   }
 
-  /** Update a link's scraped title, description, and optionally event_date + category */
-  updateLinkMeta(id: number, title: string, description: string, eventDate?: string | null, category?: string) {
-    if (eventDate !== undefined || category) {
-      this.db.prepare(`UPDATE metacrisis_links SET title = ?, description = ?, event_date = ?, category = COALESCE(?, category) WHERE id = ?`)
-        .run(title, description, eventDate || null, category || null, id);
+  /** Update a link's scraped title, description, and optionally event fields + category */
+  updateLinkMeta(id: number, title: string, description: string, eventDate?: string | null, category?: string, eventLocation?: string | null) {
+    if (eventDate !== undefined || category || eventLocation !== undefined) {
+      this.db.prepare(`UPDATE metacrisis_links SET title = ?, description = ?, event_date = ?, event_location = ?, category = COALESCE(?, category) WHERE id = ?`)
+        .run(title, description, eventDate || null, eventLocation || null, category || null, id);
     } else {
       this.db.prepare(`UPDATE metacrisis_links SET title = ?, description = ? WHERE id = ?`)
         .run(title, description, id);
@@ -422,14 +426,15 @@ export class MetacrisisStore extends SettingsStore {
   getComposerLinks(): Array<{
     id: number; url: string; title: string; description: string;
     category: string; sender_name: string; timestamp: number;
-    event_date: string | null;
+    event_date: string | null; event_location: string | null;
   }> {
     const cutoff = Math.floor(Date.now() / 1000) - 7 * 86400;
     const today = new Date().toISOString().split("T")[0];
     return this.db.prepare(`
       SELECT id, url, COALESCE(title, '') as title,
              COALESCE(description, '') as description,
-             category, sender_name, timestamp, event_date
+             category, sender_name, timestamp, event_date,
+             COALESCE(event_location, '') as event_location
       FROM metacrisis_links
       WHERE
         (category IN ('article', 'video', 'podcast', 'other') AND timestamp >= ?)

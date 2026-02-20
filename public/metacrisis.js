@@ -689,17 +689,22 @@ function renderComposer() {
         var emoji = categoryEmoji(link.category);
         var title = link.title && link.title !== "(untitled)" && link.title !== "(error)" ? link.title : truncateUrl(link.url, 50);
         var summary = link.description || "";
-        var eventDateStr = "";
-        if (link.category === "event" && link.event_date) {
-          var ed = new Date(link.event_date + "T00:00:00");
-          eventDateStr = ed.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+        var eventMeta = "";
+        if (link.category === "event") {
+          var parts = [];
+          if (link.event_date) {
+            var ed = new Date(link.event_date + "T00:00:00");
+            parts.push(ed.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }));
+          }
+          if (link.event_location) parts.push(link.event_location);
+          if (parts.length > 0) eventMeta = parts.join(" · ");
         }
         return '<div class="composer-link-row">' +
           '<input type="checkbox" data-link-idx="' + i + '" ' + checked + '>' +
           '<span style="font-size:16px;flex-shrink:0;margin-top:1px;">' + emoji + '</span>' +
           '<div class="composer-link-info">' +
             '<div class="composer-link-title"><a href="' + escapeAttr(link.url) + '" target="_blank" rel="noopener">' + escapeHtml(title) + '</a></div>' +
-            (eventDateStr ? '<div style="font-size:11px;color:var(--accent);font-weight:500;">' + escapeHtml(eventDateStr) + '</div>' : '') +
+            (eventMeta ? '<div style="font-size:11px;color:var(--accent);font-weight:500;">' + escapeHtml(eventMeta) + '</div>' : '') +
             (summary ? '<div class="composer-link-summary">' + escapeHtml(summary) + '</div>' : '') +
             '<div class="composer-link-meta">Shared by ' + escapeHtml(link.sender_name || "Unknown") + '</div>' +
           '</div>' +
@@ -754,14 +759,23 @@ function buildComposerMessage() {
       var emoji = categoryEmoji(link.category);
       var title = link.title && link.title !== "(untitled)" && link.title !== "(error)" ? link.title : truncateUrl(link.url, 40);
       var summary = link.description || "";
-      var eventInfo = "";
-      if (link.category === "event" && link.event_date) {
-        var ed = new Date(link.event_date + "T00:00:00");
-        eventInfo = " — " + ed.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+
+      if (link.category === "event") {
+        // Event format: title, date, location, link, description
+        lines.push(emoji + " *" + title + "*");
+        if (link.event_date) {
+          var ed = new Date(link.event_date + "T00:00:00");
+          lines.push("Date: " + ed.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", year: "numeric" }));
+        }
+        if (link.event_location) lines.push("Location: " + link.event_location);
+        lines.push("Link: " + link.url);
+        if (summary) lines.push(summary);
+      } else {
+        // Article/video/podcast format
+        lines.push(emoji + " *" + title + "*");
+        if (summary) lines.push(summary);
+        lines.push(link.url);
       }
-      lines.push(emoji + " *" + title + "*" + eventInfo);
-      if (summary) lines.push(summary);
-      lines.push(link.url);
       lines.push("");
     });
   }

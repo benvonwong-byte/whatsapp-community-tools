@@ -356,10 +356,11 @@ export async function scrapeLinksMeta(store: MetacrisisStore): Promise<number> {
       const title = extractTitle(html);
       const pageText = htmlToPlainText(html).slice(0, 4000);
 
-      // AI: summarize + classify + extract event date in one call
+      // AI: summarize + classify + extract event date/location in one call
       let summary = "";
       let aiCategory: string | undefined;
       let eventDate: string | null = null;
+      let eventLocation: string | null = null;
       try {
         const model = getModel();
         const result = await model.generateContent(
@@ -367,7 +368,8 @@ export async function scrapeLinksMeta(store: MetacrisisStore): Promise<number> {
 {
   "summary": "A 2-sentence summary of the content. Keep it concise and informative.",
   "category": "article" or "video" or "event" or "podcast" or "other",
-  "event_date": "YYYY-MM-DD" or null (only if this is an event page, extract the event date)
+  "event_date": "YYYY-MM-DD" or null (only if this is an event page, extract the event date),
+  "event_location": "venue or location name" or null (only if this is an event page)
 }
 
 URL: ${link.url}
@@ -386,12 +388,13 @@ ${pageText}`
         if (parsed.event_date && /^\d{4}-\d{2}-\d{2}/.test(parsed.event_date)) {
           eventDate = parsed.event_date.slice(0, 10);
         }
+        eventLocation = parsed.event_location || null;
       } catch (aiErr: any) {
         summary = extractDescription(html) || title;
         console.log(`[metacrisis-scraper] AI failed for ${link.url}, using meta description`);
       }
 
-      store.updateLinkMeta(link.id, title, summary, eventDate, aiCategory);
+      store.updateLinkMeta(link.id, title, summary, eventDate, aiCategory, eventLocation);
       scraped++;
       const catLabel = aiCategory || link.category;
       console.log(`[metacrisis-scraper] Scraped [${catLabel}]: ${title.slice(0, 50)} — ${link.url}${eventDate ? ` (event: ${eventDate})` : ""}`);
