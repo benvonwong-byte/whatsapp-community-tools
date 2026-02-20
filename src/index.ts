@@ -595,6 +595,14 @@ async function main() {
     friendsSendProgress.failed = 0;
     friendsSendProgress.errorMessage = undefined;
 
+    if (!whatsapp.isConnected()) {
+      console.error("[friends-send] WhatsApp client not connected");
+      friendsSendProgress.failed = contactIds.length;
+      friendsSendProgress.errorMessage = "WhatsApp client not connected. Check server logs.";
+      markProgressError(friendsSendProgress, new Error("WhatsApp not connected"));
+      return;
+    }
+
     const allChats = await whatsapp.getClient().getChats();
     const { MessageMedia } = await import("whatsapp-web.js");
 
@@ -604,6 +612,7 @@ async function main() {
         if (!chat) {
           console.log(`[friends-send] Chat not found for ${contactId}, skipping`);
           friendsSendProgress.failed++;
+          friendsSendProgress.errorMessage = `Chat not found for ${contactId}`;
           continue;
         }
 
@@ -622,10 +631,15 @@ async function main() {
       } catch (err: any) {
         console.error(`[friends-send] Failed for ${contactId}:`, err?.message || err);
         friendsSendProgress.failed++;
+        friendsSendProgress.errorMessage = err?.message || "Send failed";
       }
     }
 
-    markProgressDone(friendsSendProgress);
+    if (friendsSendProgress.failed > 0 && friendsSendProgress.sent === 0) {
+      markProgressError(friendsSendProgress, new Error(friendsSendProgress.errorMessage || "All sends failed"));
+    } else {
+      markProgressDone(friendsSendProgress);
+    }
   };
 
   const friendsTagExtract = async () => {

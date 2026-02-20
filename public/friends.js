@@ -2003,21 +2003,49 @@ function setupDetailReplyBox(contactId, messages) {
     try {
       var res;
       if (isIMessage) {
+        // iMessage: synchronous via AppleScript — response = actual result
         res = await adminFetch("/api/friends/send-imessage", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ phone: imessagePhone, message: msg }),
         });
+        if (!res.ok) {
+          var errData = await res.json().catch(function() { return {}; });
+          throw new Error(errData.error || "Send failed");
+        }
       } else {
+        // WhatsApp: async — API returns immediately, poll for actual delivery
         res = await adminFetch("/api/friends/send", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ contactIds: [contactId], message: msg }),
         });
-      }
-      if (!res.ok) {
-        var errData = await res.json().catch(function() { return {}; });
-        throw new Error(errData.error || "Send failed");
+        if (!res.ok) {
+          var errData2 = await res.json().catch(function() { return {}; });
+          throw new Error(errData2.error || "Send failed");
+        }
+        // Poll send-status until done/error (max 15 seconds)
+        replyStatus.textContent = "Delivering via WhatsApp...";
+        var delivered = false;
+        for (var attempt = 0; attempt < 8; attempt++) {
+          await new Promise(function(r) { setTimeout(r, 2000); });
+          try {
+            var statusRes = await adminFetch("/api/friends/send-status");
+            if (statusRes.ok) {
+              var status = await statusRes.json();
+              if (status.phase === "done" || status.phase === "idle") {
+                if (status.failed > 0) throw new Error(status.errorMessage || "WhatsApp delivery failed");
+                delivered = true;
+                break;
+              } else if (status.phase === "error") {
+                throw new Error(status.errorMessage || "WhatsApp delivery failed");
+              }
+            }
+          } catch (pollErr) {
+            if (pollErr.message && pollErr.message !== "Failed") throw pollErr;
+          }
+        }
+        if (!delivered) throw new Error("Delivery timed out — check WhatsApp connection");
       }
 
       // Success — clear input and show sent message in conversation
@@ -2028,7 +2056,7 @@ function setupDetailReplyBox(contactId, messages) {
       replyStatus.textContent = "Sent!";
       setTimeout(function() { replyStatus.style.display = "none"; }, 3000);
 
-      // Append the sent message to conversation log immediately
+      // Append the sent message to conversation log
       var container = $("detail-messages");
       if (container) {
         var now = new Date();
