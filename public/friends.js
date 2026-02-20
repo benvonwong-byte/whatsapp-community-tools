@@ -575,6 +575,7 @@ async function loadDashboard() {
   }
 
   // 4. Load secondary sections in parallel (don't block main render)
+  loadDashboardStatusBar();
   loadTopFriends();
   loadNeglected(); // Refresh with correct window (dashboard bundles 30d default)
   loadDashboardTags();
@@ -651,19 +652,112 @@ async function loadImessageMonitor() {
   }
 }
 
+// ── Dashboard Status Bar ──
+
+async function loadDashboardStatusBar() {
+  var serverDot = $("dash-server-dot");
+  var serverLabel = $("dash-server-status");
+  var imsgDot = $("dash-imsg-dot");
+  var imsgLabel = $("dash-imsg-status");
+  var imsgDetail = $("dash-imsg-detail");
+  if (!serverDot) return;
+
+  // 1. Server health check
+  try {
+    var res = await adminFetch("/api/friends/health");
+    if (res.ok) {
+      serverDot.style.background = "#4caf50";
+      serverLabel.lastChild.textContent = " Server";
+    } else {
+      serverDot.style.background = "#f44336";
+      serverLabel.lastChild.textContent = " Server offline";
+    }
+  } catch (e) {
+    serverDot.style.background = "#f44336";
+    serverLabel.lastChild.textContent = " Server offline";
+    imsgDot.style.background = "#888";
+    imsgLabel.lastChild.textContent = " iMessage unknown";
+    if (imsgDetail) imsgDetail.textContent = "";
+    return;
+  }
+
+  // 2. iMessage + Bridge status
+  var bridgeDot = $("dash-bridge-dot");
+  var bridgeLabel = $("dash-bridge-status");
+  try {
+    var imRes = await adminFetch("/api/friends/imessage/status");
+    if (!imRes.ok) throw new Error("status " + imRes.status);
+    var data = await imRes.json();
+    if (!data.syncKeyConfigured) {
+      imsgDot.style.background = "#888";
+      imsgLabel.lastChild.textContent = " iMessage not configured";
+      if (imsgDetail) imsgDetail.textContent = "";
+    } else if (data.syncLog.length === 0) {
+      imsgDot.style.background = "#ff9800";
+      imsgLabel.lastChild.textContent = " iMessage awaiting sync";
+      if (imsgDetail) imsgDetail.textContent = "";
+    } else {
+      var lastEntry = data.syncLog[0];
+      if (lastEntry.error) {
+        imsgDot.style.background = "#f44336";
+        imsgLabel.lastChild.textContent = " iMessage error";
+        if (imsgDetail) imsgDetail.textContent = lastEntry.error;
+      } else {
+        imsgDot.style.background = "#4caf50";
+        imsgLabel.lastChild.textContent = " iMessage active";
+        var lastSync = new Date(lastEntry.time);
+        if (imsgDetail) imsgDetail.textContent = "Last sync: " + timeAgo(Math.floor(lastSync.getTime() / 1000));
+      }
+    }
+    // Bridge status
+    if (bridgeDot && bridgeLabel) {
+      if (data.bridgeOnline) {
+        bridgeDot.style.background = "#4caf50";
+        bridgeLabel.lastChild.textContent = " Bridge";
+      } else if (data.bridgeLastSeen) {
+        bridgeDot.style.background = "#ff9800";
+        bridgeLabel.lastChild.textContent = " Bridge offline";
+      } else {
+        bridgeDot.style.background = "#888";
+        bridgeLabel.lastChild.textContent = " Bridge not seen";
+      }
+    }
+  } catch (e) {
+    imsgDot.style.background = "#888";
+    imsgLabel.lastChild.textContent = " iMessage unknown";
+    if (imsgDetail) imsgDetail.textContent = "";
+    if (bridgeDot) bridgeDot.style.background = "#888";
+    if (bridgeLabel) bridgeLabel.lastChild.textContent = " Bridge unknown";
+  }
+}
+
 // ── Dashboard Tag Cloud ──
 
 let dashTagFilter = null; // currently selected tag name or null
 
 async function loadDashboardTags() {
+  const tagTierParam = dashboardTierFilter !== null ? "?tier=" + encodeURIComponent(dashboardTierFilter) : "";
+  const lsKey = "_dashTags" + tagTierParam;
+
+  // 1. Instant render from localStorage (stale data, shown immediately)
+  var hadCached = false;
   try {
-    const tagTierParam = dashboardTierFilter !== null ? "?tier=" + encodeURIComponent(dashboardTierFilter) : "";
+    var cached = localStorage.getItem(lsKey);
+    if (cached) {
+      hadCached = true;
+      renderDashboardTagCloud(JSON.parse(cached));
+    }
+  } catch (e) { /* ignore parse errors */ }
+
+  // 2. Fetch fresh data in background, re-render when ready
+  try {
     const res = await cachedFetch("/api/friends/tags" + tagTierParam);
     if (!res.ok) return;
     const tags = await res.json();
     renderDashboardTagCloud(tags);
+    try { localStorage.setItem(lsKey, JSON.stringify(tags)); } catch (e) { /* quota */ }
   } catch (err) {
-    console.error("Failed to load tags:", err);
+    if (!hadCached) console.error("Failed to load tags:", err);
   }
 }
 
@@ -1148,9 +1242,22 @@ async function loadTopFriends() {
   const container = $("top-friends-list");
   const rangeEl = $("tf-date-range");
   const nextBtn = $("tf-next");
+  const tfTierParam = dashboardTierFilter !== null ? "&tier=" + encodeURIComponent(dashboardTierFilter) : "";
+  const lsKey = "_topFriends:" + tfWindowDays + ":" + tfOffsetDays + tfTierParam;
 
+  // 1. Instant render from localStorage (stale data, shown immediately)
   try {
-    const tfTierParam = dashboardTierFilter !== null ? "&tier=" + encodeURIComponent(dashboardTierFilter) : "";
+    var cached = localStorage.getItem(lsKey);
+    if (cached) {
+      var stale = JSON.parse(cached);
+      if (rangeEl && stale.dateRange) rangeEl.textContent = stale.dateRange.start + " \u2192 " + stale.dateRange.end;
+      if (nextBtn) nextBtn.disabled = tfOffsetDays <= 0;
+      renderTopFriends(stale.friends);
+    }
+  } catch (e) { /* ignore parse errors */ }
+
+  // 2. Fetch fresh data in background, re-render when ready
+  try {
     const res = await cachedFetch("/api/friends/top-friends?days=" + tfWindowDays + "&offset=" + tfOffsetDays + "&limit=10" + tfTierParam);
     if (!res.ok) throw new Error("Failed");
     const data = await res.json();
@@ -1164,8 +1271,9 @@ async function loadTopFriends() {
     if (nextBtn) nextBtn.disabled = tfOffsetDays <= 0;
 
     renderTopFriends(data.friends);
+    try { localStorage.setItem(lsKey, JSON.stringify(data)); } catch (e) { /* quota */ }
   } catch (err) {
-    if (container) container.innerHTML = '<div class="chart-empty">Failed to load.</div>';
+    if (!cached && container) container.innerHTML = '<div class="chart-empty">Failed to load.</div>';
   }
 }
 
@@ -1819,7 +1927,7 @@ function setupDetailReplyBox(contactId, messages) {
     try {
       var res;
       if (isIMessage) {
-        // iMessage: synchronous via AppleScript — response = actual result
+        // iMessage: queue via bridge, then poll for result
         res = await adminFetch("/api/friends/send-imessage", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1829,6 +1937,38 @@ function setupDetailReplyBox(contactId, messages) {
           var errData = await res.json().catch(function() { return {}; });
           throw new Error(errData.error || "Send failed");
         }
+        var queueData = await res.json();
+        if (!queueData.queued || !queueData.taskId) {
+          throw new Error("Failed to queue message");
+        }
+        // Poll bridge status until done/error (max 45 seconds — bridge polls every 15s)
+        replyStatus.textContent = "Sending via iMessage bridge...";
+        var taskDone = false;
+        for (var attempt = 0; attempt < 45; attempt++) {
+          await new Promise(function(r) { setTimeout(r, 1000); });
+          try {
+            var statusRes = await adminFetch("/api/friends/imessage/bridge/status/" + queueData.taskId);
+            if (statusRes.ok) {
+              var bridgeStatus = await statusRes.json();
+              if (!bridgeStatus.bridgeOnline && attempt === 0) {
+                replyStatus.textContent = "Waiting for iMessage bridge (is your Mac online?)...";
+              }
+              if (bridgeStatus.status === "done") {
+                taskDone = true;
+                break;
+              } else if (bridgeStatus.status === "error") {
+                throw new Error(bridgeStatus.error || "iMessage send failed");
+              } else if (bridgeStatus.status === "expired") {
+                throw new Error("Message expired before bridge could process it");
+              } else if (bridgeStatus.status === "claimed") {
+                replyStatus.textContent = "Bridge is sending...";
+              }
+            }
+          } catch (pollErr) {
+            if (pollErr.message && !pollErr.message.includes("Failed to fetch")) throw pollErr;
+          }
+        }
+        if (!taskDone) throw new Error("Bridge timed out (45s) \u2014 is your Mac running the iMessage bridge?");
       } else {
         // WhatsApp: async — API returns immediately, poll for actual delivery
         res = await adminFetch("/api/friends/send", {

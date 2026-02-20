@@ -1743,6 +1743,25 @@
     <!-- ==================== Dashboard Tab ==================== -->
     <div id="tab-dashboard" class="tab-content active">
 
+      <!-- Server & iMessage Status Bar -->
+      <div id="dash-status-bar" style="display:flex;align-items:center;gap:12px;padding:6px 12px;margin-bottom:10px;border-radius:8px;background:var(--surface2);font-size:11px;color:var(--text-dim);">
+        <span id="dash-server-status" style="display:flex;align-items:center;gap:5px;">
+          <span id="dash-server-dot" style="width:7px;height:7px;border-radius:50%;background:#888;display:inline-block;"></span>
+          Server
+        </span>
+        <span style="opacity:.3;">|</span>
+        <span id="dash-imsg-status" style="display:flex;align-items:center;gap:5px;">
+          <span id="dash-imsg-dot" style="width:7px;height:7px;border-radius:50%;background:#888;display:inline-block;"></span>
+          iMessage
+        </span>
+        <span style="opacity:.3;">|</span>
+        <span id="dash-bridge-status" style="display:flex;align-items:center;gap:5px;">
+          <span id="dash-bridge-dot" style="width:7px;height:7px;border-radius:50%;background:#888;display:inline-block;"></span>
+          Bridge
+        </span>
+        <span id="dash-imsg-detail" style="margin-left:auto;font-size:10px;opacity:.6;"></span>
+      </div>
+
       <!-- AI Search -->
       <div class="ai-search-section">
         <div class="ai-search-bar">

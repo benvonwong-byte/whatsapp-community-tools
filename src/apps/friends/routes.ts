@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express";
-import { execFile } from "child_process";
+import crypto from "crypto";
 import { FriendsStore } from "./store";
 
 export interface SendProgress {
@@ -26,6 +26,37 @@ export function createFriendsRouter(
   tagConsolidateTrigger?: () => Promise<{ merged: number; deleted: number; remaining: number }>
 ): Router {
   const router = Router();
+
+  // ── iMessage Bridge Task Queue ──
+  interface BridgeTask {
+    id: string;
+    phone: string;
+    message: string;
+    status: "pending" | "claimed" | "done" | "error";
+    error?: string;
+    createdAt: number;
+    claimedAt?: number;
+    completedAt?: number;
+  }
+
+  const bridgeTasks = new Map<string, BridgeTask>();
+  const BRIDGE_TASK_TTL = 60_000; // 60 seconds (bridge polls every 15s)
+  let bridgeLastSeen = 0;
+
+  // Cleanup expired tasks every 10 seconds
+  const bridgeCleanup = setInterval(() => {
+    const now = Date.now();
+    for (const [id, task] of bridgeTasks) {
+      if (now - task.createdAt > BRIDGE_TASK_TTL) bridgeTasks.delete(id);
+    }
+  }, 10_000);
+  if (bridgeCleanup.unref) bridgeCleanup.unref(); // don't keep process alive
+
+  function verifySyncKey(req: Request): boolean {
+    const syncKey = req.headers["x-sync-key"] as string;
+    const expectedKey = process.env.IMESSAGE_SYNC_KEY;
+    return !!(expectedKey && syncKey === expectedKey);
+  }
 
   /** Parse a range string like "7d", "30d", "90d", "1y", "all" into startTs/endTs */
   function parseRange(range?: string): { startTs?: number; endTs?: number } {
@@ -93,7 +124,10 @@ export function createFriendsRouter(
     res.json({ contacts, days });
   });
 
-  // ── Top Friends (time-browsable) ──
+  // ── Top Friends (time-browsable, with server-side cache) ──
+
+  let _topFriendsCache: { data: any; time: number; key: string } | null = null;
+  const TF_CACHE_TTL = 60000; // 60 seconds
 
   router.get("/top-friends", (req: Request, res: Response) => {
     const days = parseInt(req.query.days as string) || 30;
@@ -103,20 +137,29 @@ export function createFriendsRouter(
     let tierId: number | null | undefined = undefined;
     if (tierParam === "none") tierId = null;
     else if (tierParam && !isNaN(parseInt(tierParam))) tierId = parseInt(tierParam);
+
+    const cacheKey = `${days}:${offset}:${limit}:${tierId ?? "all"}`;
+    if (_topFriendsCache && _topFriendsCache.key === cacheKey && (Date.now() - _topFriendsCache.time) < TF_CACHE_TTL) {
+      res.json(_topFriendsCache.data);
+      return;
+    }
+
     const topFriends = store.getTopFriends(Math.min(limit, 20), days, offset, tierId);
 
     // Compute date labels for the window
     const now = new Date();
     const windowEnd = new Date(now.getTime() - offset * 86400000);
     const windowStart = new Date(windowEnd.getTime() - days * 86400000);
-    res.json({
+    const responseData = {
       friends: topFriends,
       window: { days, offset },
       dateRange: {
         start: windowStart.toISOString().slice(0, 10),
         end: windowEnd.toISOString().slice(0, 10),
       },
-    });
+    };
+    _topFriendsCache = { data: responseData, time: Date.now(), key: cacheKey };
+    res.json(responseData);
   });
 
   // ── Contacts ──
@@ -196,6 +239,8 @@ export function createFriendsRouter(
     const hidden = store.hideMultipleContacts(idsToHide);
     _dashCache = null;
     _graphCache = null;
+    _topFriendsCache = null;
+    _tagsCache = null;
     res.json({ ok: true, hidden });
   });
 
@@ -304,6 +349,8 @@ export function createFriendsRouter(
     store.hideContact(decodeURIComponent(req.params.id as string));
     _dashCache = null;
     _graphCache = null;
+    _topFriendsCache = null;
+    _tagsCache = null;
     res.json({ ok: true });
   });
 
@@ -311,6 +358,8 @@ export function createFriendsRouter(
     store.unhideContact(decodeURIComponent(req.params.id as string));
     _dashCache = null;
     _graphCache = null;
+    _topFriendsCache = null;
+    _tagsCache = null;
     res.json({ ok: true });
   });
 
@@ -335,6 +384,7 @@ export function createFriendsRouter(
     }
     const timestamp = Math.floor(Date.now() / 1000);
     store.addContactTag(contactId, name.trim(), timestamp, 1.0);
+    _tagsCache = null;
     const tags = store.getContactTags(contactId);
     res.json(tags);
   });
@@ -344,6 +394,7 @@ export function createFriendsRouter(
     const tagId = parseInt(req.params.tagId as string);
     if (isNaN(tagId)) { res.status(400).json({ error: "Invalid tag ID" }); return; }
     store.removeContactTag(contactId, tagId);
+    _tagsCache = null;
     const tags = store.getContactTags(contactId);
     res.json(tags);
   });
@@ -465,7 +516,7 @@ export function createFriendsRouter(
     res.json(sendProgress);
   });
 
-  // Send iMessage via AppleScript (macOS only)
+  // Send iMessage via bridge (queues task for local Mac bridge to execute)
   router.post("/send-imessage", (req: Request, res: Response) => {
     const { phone, message } = req.body;
     if (!phone || !message) {
@@ -480,23 +531,78 @@ export function createFriendsRouter(
       return;
     }
 
-    // AppleScript to send iMessage
-    const script = `
-      tell application "Messages"
-        set targetService to 1st account whose service type = iMessage
-        set targetBuddy to participant "${cleanPhone}" of targetService
-        send "${message.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n")}" to targetBuddy
-      end tell
-    `;
+    const taskId = crypto.randomUUID();
+    bridgeTasks.set(taskId, {
+      id: taskId,
+      phone: cleanPhone,
+      message,
+      status: "pending",
+      createdAt: Date.now(),
+    });
 
-    execFile("osascript", ["-e", script], { timeout: 15000 }, (err, stdout, stderr) => {
-      if (err) {
-        console.error("[imessage-send] Error:", err.message, stderr);
-        res.status(500).json({ error: "Failed to send iMessage: " + (stderr || err.message) });
-        return;
+    console.log(`[imessage-bridge] Task ${taskId} queued: send to ${cleanPhone}`);
+    res.json({ queued: true, taskId });
+  });
+
+  // ── iMessage Bridge Endpoints ──
+
+  // Bridge polls this for pending send tasks
+  router.get("/imessage/bridge/pending", (req: Request, res: Response) => {
+    if (!verifySyncKey(req)) {
+      res.status(401).json({ error: "Invalid sync key" });
+      return;
+    }
+
+    const pending: BridgeTask[] = [];
+    const now = Date.now();
+    for (const task of bridgeTasks.values()) {
+      if (task.status === "pending") {
+        task.status = "claimed";
+        task.claimedAt = now;
+        pending.push({ ...task });
       }
-      console.log("[imessage-send] Sent to", cleanPhone);
-      res.json({ ok: true });
+    }
+
+    bridgeLastSeen = now;
+    res.json({ tasks: pending });
+  });
+
+  // Bridge reports task result
+  router.post("/imessage/bridge/result", (req: Request, res: Response) => {
+    if (!verifySyncKey(req)) {
+      res.status(401).json({ error: "Invalid sync key" });
+      return;
+    }
+
+    const { taskId, ok, error } = req.body;
+    const task = bridgeTasks.get(taskId);
+    if (!task) {
+      res.status(404).json({ error: "Task not found or expired" });
+      return;
+    }
+
+    task.status = ok ? "done" : "error";
+    task.error = error || undefined;
+    task.completedAt = Date.now();
+    console.log(`[imessage-bridge] Task ${taskId} ${ok ? "succeeded" : "failed"}${error ? ": " + error : ""}`);
+    res.json({ ok: true });
+  });
+
+  // Frontend polls this for send result
+  router.get("/imessage/bridge/status/:taskId", (req: Request, res: Response) => {
+    const task = bridgeTasks.get(req.params.taskId as string);
+    const bridgeOnline = (Date.now() - bridgeLastSeen) < 30_000;
+
+    if (!task) {
+      res.json({ status: "expired", error: "Task not found or expired", bridgeOnline });
+      return;
+    }
+
+    res.json({
+      taskId: task.id,
+      status: task.status,
+      error: task.error,
+      bridgeOnline,
     });
   });
 
@@ -571,14 +677,26 @@ export function createFriendsRouter(
     res.json(store.getVoiceStatsAll());
   });
 
-  // ── Tags ──
+  // ── Tags (with server-side cache) ──
+
+  let _tagsCache: { data: any; time: number; key: string } | null = null;
+  const TAGS_CACHE_TTL = 60000; // 60 seconds
 
   router.get("/tags", (req: Request, res: Response) => {
     const tierParam = req.query.tier as string | undefined;
     let tierId: number | null | undefined = undefined;
     if (tierParam === "none") tierId = null;
     else if (tierParam && !isNaN(parseInt(tierParam))) tierId = parseInt(tierParam);
-    res.json(store.getAllTags(tierId));
+
+    const cacheKey = String(tierId ?? "all");
+    if (_tagsCache && _tagsCache.key === cacheKey && (Date.now() - _tagsCache.time) < TAGS_CACHE_TTL) {
+      res.json(_tagsCache.data);
+      return;
+    }
+
+    const data = store.getAllTags(tierId);
+    _tagsCache = { data, time: Date.now(), key: cacheKey };
+    res.json(data);
   });
 
   router.post("/tags/extract", async (_req: Request, res: Response) => {
@@ -588,6 +706,7 @@ export function createFriendsRouter(
     }
     try {
       const count = await tagExtractTrigger();
+      _tagsCache = null;
       res.json({ ok: true, contactsProcessed: count });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || "Tag extraction failed" });
@@ -607,6 +726,7 @@ export function createFriendsRouter(
       totalReassigned += store.mergeTags(m.sourceIds, m.canonicalId);
     }
     const remaining = store.getAllTags();
+    _tagsCache = null;
     res.json({ ok: true, reassigned: totalReassigned, remainingTags: remaining.length });
   });
 
@@ -616,6 +736,7 @@ export function createFriendsRouter(
     const { name } = req.body;
     if (isNaN(tagId) || !name) { res.status(400).json({ error: "Tag ID and name required" }); return; }
     store.renameTag(tagId, name);
+    _tagsCache = null;
     res.json({ ok: true });
   });
 
@@ -636,6 +757,7 @@ export function createFriendsRouter(
       deleted++;
     }
     const remaining = store.getAllTags();
+    _tagsCache = null;
     res.json({ ok: true, deleted, remainingTags: remaining.length });
   });
 
@@ -647,6 +769,7 @@ export function createFriendsRouter(
     }
     try {
       const result = await tagConsolidateTrigger();
+      _tagsCache = null;
       res.json({ ok: true, ...result });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || "Consolidation failed" });
@@ -971,6 +1094,8 @@ User query: "${query.replace(/"/g, '\\"')}"`);
       ...stats,
       syncLog: imessageSyncLog.slice().reverse(), // newest first
       syncKeyConfigured: !!process.env.IMESSAGE_SYNC_KEY,
+      bridgeOnline: (Date.now() - bridgeLastSeen) < 30_000,
+      bridgeLastSeen: bridgeLastSeen > 0 ? new Date(bridgeLastSeen).toISOString() : null,
     });
   });
 
