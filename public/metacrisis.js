@@ -20,6 +20,9 @@ let composerShowMember = true;
 let composerShowEvents = true;
 let composerShowResources = true;
 let composerShowPulse = true;
+let composerShowBuckets = true;
+let composerShowHighlights = true;
+let composerBuckets = {};     // { senderName: boolean } — which discussion buckets are checked
 
 // ── Init ──
 
@@ -90,6 +93,10 @@ async function loadDashboard() {
         composerShowEvents = true;
         composerShowResources = true;
         composerShowPulse = true;
+        composerShowBuckets = true;
+        composerShowHighlights = true;
+        composerBuckets = {};
+        (draft.discussionBuckets || []).forEach(function(b) { composerBuckets[b.sender] = true; });
         var pulseEl = document.getElementById("composer-pulse-text");
         if (pulseEl) pulseEl.value = draft.communityPulse || "";
       } else {
@@ -655,10 +662,15 @@ function setupComposer() {
   var memToggle = document.getElementById("composer-member-toggle");
   var pulseToggle = document.getElementById("composer-pulse-toggle");
 
+  var bucketsToggle = document.getElementById("composer-buckets-toggle");
+  var highlightsToggle = document.getElementById("composer-highlights-toggle");
+
   if (evtToggle) evtToggle.addEventListener("change", function() { composerShowEvents = evtToggle.checked; updateComposerPreview(); });
   if (resToggle) resToggle.addEventListener("change", function() { composerShowResources = resToggle.checked; updateComposerPreview(); });
   if (memToggle) memToggle.addEventListener("change", function() { composerShowMember = memToggle.checked; updateComposerPreview(); });
   if (pulseToggle) pulseToggle.addEventListener("change", function() { composerShowPulse = pulseToggle.checked; updateComposerPreview(); });
+  if (bucketsToggle) bucketsToggle.addEventListener("change", function() { composerShowBuckets = bucketsToggle.checked; updateComposerPreview(); });
+  if (highlightsToggle) highlightsToggle.addEventListener("change", function() { composerShowHighlights = highlightsToggle.checked; updateComposerPreview(); });
 
   // Pulse text edit
   var pulseText = document.getElementById("composer-pulse-text");
@@ -764,6 +776,64 @@ function renderComposer() {
     pulseEl.value = weeklyDraft.communityPulse || "";
   }
 
+  // Discussion Buckets — messages with links grouped by sender
+  var bucketsList = document.getElementById("composer-buckets-list");
+  if (bucketsList) {
+    var buckets = weeklyDraft.discussionBuckets || [];
+    if (buckets.length === 0) {
+      bucketsList.innerHTML = '<div style="font-size:12px;color:var(--text-dim);padding-left:22px;">No shared links this week.</div>';
+    } else {
+      bucketsList.innerHTML = buckets.map(function(bucket) {
+        var senderKey = bucket.sender;
+        var checked = composerBuckets[senderKey] !== false ? "checked" : "";
+        var itemsHtml = bucket.items.map(function(item) {
+          var linkTitle = item.link_title || truncateUrl(item.url, 40);
+          var contextSnippet = item.body ? item.body.replace(/https?:\/\/[^\s]+/g, "").trim() : "";
+          if (contextSnippet.length > 100) contextSnippet = contextSnippet.slice(0, 100) + "…";
+          return '<div class="composer-bucket-item">' +
+            '<span>→</span>' +
+            '<div>' +
+              '<a href="' + escapeAttr(item.url) + '" target="_blank" rel="noopener">' + escapeHtml(linkTitle) + '</a>' +
+              (contextSnippet ? '<div style="color:var(--text-dim);font-size:11px;margin-top:1px;">' + escapeHtml(contextSnippet) + '</div>' : '') +
+            '</div>' +
+          '</div>';
+        }).join("");
+        return '<div class="composer-bucket">' +
+          '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;" class="composer-bucket-sender">' +
+            '<input type="checkbox" data-bucket-sender="' + escapeAttr(senderKey) + '" ' + checked + '>' +
+            escapeHtml(senderKey) + ' <span style="color:var(--text-dim);font-weight:400;font-size:11px;">(' + bucket.items.length + ' link' + (bucket.items.length > 1 ? 's' : '') + ')</span>' +
+          '</label>' +
+          itemsHtml +
+        '</div>';
+      }).join("");
+
+      // Attach bucket toggle listeners
+      bucketsList.querySelectorAll("input[data-bucket-sender]").forEach(function(cb) {
+        cb.addEventListener("change", function() {
+          composerBuckets[cb.dataset.bucketSender] = cb.checked;
+          updateComposerPreview();
+        });
+      });
+    }
+  }
+
+  // Highlights — trending topics
+  var highlightsList = document.getElementById("composer-highlights-list");
+  if (highlightsList) {
+    var highlights = weeklyDraft.highlights || [];
+    if (highlights.length === 0) {
+      highlightsList.innerHTML = '<div style="font-size:12px;color:var(--text-dim);padding-left:22px;">No trending topics this week.</div>';
+    } else {
+      highlightsList.innerHTML = highlights.map(function(h) {
+        return '<div class="composer-highlight-row">' +
+          '<span style="color:#00cec9;">•</span> ' +
+          '<span>' + escapeHtml(h.topic) + '</span>' +
+          '<span class="composer-highlight-count">' + h.mention_count + ' mention' + (h.mention_count > 1 ? 's' : '') + '</span>' +
+        '</div>';
+      }).join("");
+    }
+  }
+
   updateComposerPreview();
 }
 
@@ -823,6 +893,42 @@ function buildComposerMessage() {
     if (pulseText) {
       lines.push("*Community Pulse*");
       lines.push(pulseText);
+      lines.push("");
+    }
+  }
+
+  // Discussion Highlights (buckets)
+  if (composerShowBuckets && weeklyDraft.discussionBuckets) {
+    var activeBuckets = (weeklyDraft.discussionBuckets || []).filter(function(b) { return composerBuckets[b.sender] !== false; });
+    if (activeBuckets.length > 0) {
+      lines.push("*What People Shared*");
+      activeBuckets.forEach(function(bucket) {
+        lines.push("");
+        lines.push("*" + bucket.sender + "*:");
+        bucket.items.forEach(function(item) {
+          var title = item.link_title || truncateUrl(item.url, 40);
+          var context = item.body ? item.body.replace(/https?:\/\/[^\s]+/g, "").trim() : "";
+          if (context.length > 120) context = context.slice(0, 120) + "…";
+          if (context) {
+            lines.push("→ " + title + " — " + context);
+          } else {
+            lines.push("→ " + title);
+          }
+          lines.push("  " + item.url);
+        });
+      });
+      lines.push("");
+    }
+  }
+
+  // Trending topics (highlights)
+  if (composerShowHighlights && weeklyDraft.highlights) {
+    var highlights = weeklyDraft.highlights || [];
+    if (highlights.length > 0) {
+      lines.push("*Trending Topics*");
+      highlights.forEach(function(h) {
+        lines.push("• " + h.topic + " (" + h.mention_count + " mention" + (h.mention_count > 1 ? "s" : "") + ")");
+      });
       lines.push("");
     }
   }

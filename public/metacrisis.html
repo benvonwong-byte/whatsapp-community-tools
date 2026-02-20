@@ -766,6 +766,50 @@
       font-size: 11px;
     }
 
+    .composer-bucket {
+      padding: 8px 0 8px 22px;
+      border-bottom: 1px solid rgba(255,255,255,0.03);
+    }
+
+    .composer-bucket:last-child { border-bottom: none; }
+
+    .composer-bucket-sender {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 4px;
+    }
+
+    .composer-bucket-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+      padding: 2px 0;
+      font-size: 11px;
+      color: var(--text-dim);
+      line-height: 1.4;
+    }
+
+    .composer-bucket-item a {
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 11px;
+    }
+
+    .composer-highlight-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 3px 0 3px 22px;
+      font-size: 12px;
+      color: var(--text);
+    }
+
+    .composer-highlight-count {
+      color: var(--text-dim);
+      font-size: 11px;
+    }
+
     .hidden { display: none !important; }
 
     /* Responsive */
@@ -880,6 +924,24 @@
             <span style="font-size:13px;font-weight:600;color:var(--yellow);">Community Pulse</span>
           </label>
           <textarea id="composer-pulse-text" style="width:100%;min-height:80px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:12px;font-family:inherit;resize:vertical;line-height:1.5;" placeholder="AI-generated summary of who said what this week..."></textarea>
+        </div>
+
+        <!-- Discussion Buckets section -->
+        <div class="composer-block" id="composer-buckets-block">
+          <label style="display:flex;align-items:center;gap:6px;margin-bottom:8px;cursor:pointer;">
+            <input type="checkbox" id="composer-buckets-toggle" checked>
+            <span style="font-size:13px;font-weight:600;color:#e17055;">Discussion Highlights</span>
+          </label>
+          <div id="composer-buckets-list"></div>
+        </div>
+
+        <!-- Highlights section -->
+        <div class="composer-block" id="composer-highlights-block">
+          <label style="display:flex;align-items:center;gap:6px;margin-bottom:8px;cursor:pointer;">
+            <input type="checkbox" id="composer-highlights-toggle" checked>
+            <span style="font-size:13px;font-weight:600;color:#00cec9;">Trending Topics</span>
+          </label>
+          <div id="composer-highlights-list"></div>
         </div>
 
         <!-- Preview -->
