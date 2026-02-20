@@ -1866,11 +1866,127 @@ async function openContactDetail(contactId) {
         });
       }
     }
+
+    // Reply box — show for WhatsApp contacts only (iMessage is receive-only)
+    setupDetailReplyBox(contactId, cachedMessages || []);
   } catch (err) {
     console.error("Failed to load contact detail:", err, "ID:", contactId);
     const nameDisplay = $("detail-name");
     if (nameDisplay) nameDisplay.textContent = "Error loading contact";
   }
+}
+
+// ── Detail Reply Box ──
+
+function setupDetailReplyBox(contactId, messages) {
+  const replyBox = $("detail-reply-box");
+  const replyInput = $("detail-reply-input");
+  const replyBtn = $("detail-reply-send");
+  const replyPlatform = $("detail-reply-platform");
+  const replyStatus = $("detail-reply-status");
+  if (!replyBox) return;
+
+  // Determine platform from contact ID and message history
+  var isWhatsApp = contactId.endsWith("@c.us") || contactId.endsWith("@s.whatsapp.net") || contactId.endsWith("@lid");
+  var isIMessage = contactId.endsWith("@imessage");
+
+  // Check most recent message source as fallback
+  if (!isWhatsApp && !isIMessage && messages.length > 0) {
+    var lastMsg = messages[0]; // messages are newest-first
+    if (lastMsg.source === "whatsapp") isWhatsApp = true;
+    else if (lastMsg.source === "imessage") isIMessage = true;
+  }
+
+  if (isIMessage) {
+    // iMessage is receive-only — show info but no input
+    replyBox.style.display = "";
+    replyPlatform.innerHTML = '<span style="color:#3478F6;">iMessage</span> — send-only not available (receive only)';
+    replyInput.style.display = "none";
+    replyBtn.style.display = "none";
+    replyStatus.style.display = "none";
+    return;
+  }
+
+  if (!isWhatsApp) {
+    replyBox.style.display = "none";
+    return;
+  }
+
+  // WhatsApp — show reply box
+  replyBox.style.display = "";
+  replyInput.style.display = "";
+  replyBtn.style.display = "";
+  replyInput.value = "";
+  replyStatus.style.display = "none";
+  replyPlatform.innerHTML = 'Reply via <span style="color:#25D366;">WhatsApp</span>';
+
+  // Auto-resize textarea
+  replyInput.oninput = function() {
+    replyInput.style.height = "auto";
+    replyInput.style.height = Math.min(replyInput.scrollHeight, 80) + "px";
+  };
+
+  // Send on Enter (Shift+Enter for newline)
+  replyInput.onkeydown = function(e) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      replyBtn.click();
+    }
+  };
+
+  // Clone to remove old listeners
+  var newBtn = replyBtn.cloneNode(true);
+  replyBtn.parentNode.replaceChild(newBtn, replyBtn);
+
+  newBtn.addEventListener("click", async function() {
+    var msg = replyInput.value.trim();
+    if (!msg) return;
+
+    newBtn.disabled = true;
+    newBtn.textContent = "Sending...";
+    replyStatus.style.display = "";
+    replyStatus.style.color = "var(--text-dim)";
+    replyStatus.textContent = "Sending message...";
+
+    try {
+      var res = await adminFetch("/api/friends/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contactIds: [contactId], message: msg }),
+      });
+      if (!res.ok) {
+        var errData = await res.json().catch(function() { return {}; });
+        throw new Error(errData.error || "Send failed");
+      }
+
+      // Success — clear input and show sent message in conversation
+      replyInput.value = "";
+      replyInput.style.height = "auto";
+      replyStatus.style.color = "#25D366";
+      replyStatus.textContent = "Sent!";
+      setTimeout(function() { replyStatus.style.display = "none"; }, 3000);
+
+      // Append the sent message to conversation log immediately
+      var container = $("detail-messages");
+      if (container) {
+        var now = new Date();
+        var timeStr = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        var bubble = '<div class="msg-row sent">' +
+          '<div class="msg-bubble sent">' +
+            esc(msg) +
+            '<span class="msg-time"><span class="msg-source whatsapp">WA</span>' + esc(timeStr) + '</span>' +
+          '</div></div>';
+        container.insertAdjacentHTML("beforeend", bubble);
+        container.scrollTop = container.scrollHeight;
+      }
+    } catch (err) {
+      replyStatus.style.color = "#f44";
+      replyStatus.textContent = "Failed: " + err.message;
+    } finally {
+      newBtn.disabled = false;
+      newBtn.textContent = "Send";
+    }
+  });
 }
 
 // ── Conversation Log ──

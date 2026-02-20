@@ -900,6 +900,14 @@
 
     /* Conversation log */
     .detail-conversation { margin-top: 16px; }
+    .detail-reply-box {
+      margin-top: 8px;
+      padding: 8px 0;
+      border-top: 1px solid var(--border);
+    }
+    .detail-reply-box textarea:focus { border-color: var(--accent); }
+    .detail-reply-box button:hover { opacity: 0.85; }
+    .detail-reply-box button:disabled { opacity: 0.4; cursor: not-allowed; }
     .detail-messages-container {
       max-height: 400px;
       overflow-y: auto;
@@ -2275,6 +2283,14 @@
         <div class="section-title">Conversation</div>
         <button id="load-more-messages" class="load-more-btn" style="display:none;">Load More</button>
         <div id="detail-messages" class="detail-messages-container"></div>
+        <div id="detail-reply-box" class="detail-reply-box" style="display:none;">
+          <div id="detail-reply-platform" style="font-size:10px;color:var(--text-dim);margin-bottom:4px;"></div>
+          <div style="display:flex;gap:6px;align-items:flex-end;">
+            <textarea id="detail-reply-input" placeholder="Type a message..." rows="1" style="flex:1;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:12px;font-family:inherit;outline:none;resize:none;max-height:80px;"></textarea>
+            <button id="detail-reply-send" style="background:var(--accent);color:#000;border:none;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">Send</button>
+          </div>
+          <div id="detail-reply-status" style="font-size:10px;margin-top:4px;display:none;"></div>
+        </div>
       </div>
 
       <div class="detail-notes">
