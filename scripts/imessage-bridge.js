@@ -122,10 +122,11 @@ async function sendImessage(phone, message) {
     log("Sent via iMessage to " + phone);
     return result;
   } catch (imsgErr) {
-    log("iMessage failed (" + imsgErr.message.split("\n")[0] + "), trying SMS...");
+    log("iMessage failed (" + imsgErr.message.split("\n")[0] + "), trying RCS/SMS...");
   }
 
-  // Fall back to SMS (for Android contacts — requires iPhone with Text Message Forwarding)
+  // Fall back to RCS/SMS (for Android contacts — requires iPhone with Text Message Forwarding)
+  // macOS Messages uses RCS automatically when supported, falls back to SMS otherwise
   const smsScript = `
     tell application "Messages"
       set targetService to 1st account whose service type = SMS
@@ -135,7 +136,7 @@ async function sendImessage(phone, message) {
   `;
 
   const result = await runAppleScript(smsScript);
-  log("Sent via SMS to " + phone);
+  log("Sent via RCS/SMS to " + phone);
   return result;
 }
 
