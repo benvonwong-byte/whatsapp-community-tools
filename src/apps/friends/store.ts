@@ -511,6 +511,181 @@ export class FriendsStore extends SettingsStore {
     return this.db.prepare(`SELECT id, COALESCE(display_name, name) as name FROM friends_contacts WHERE hidden = 1 ORDER BY name`).all() as any[];
   }
 
+  hideMultipleContacts(ids: string[]): number {
+    const stmt = this.db.prepare(`UPDATE friends_contacts SET hidden = 1 WHERE id = ?`);
+    const txn = this.db.transaction(() => {
+      let count = 0;
+      for (const id of ids) {
+        const result = stmt.run(id);
+        count += result.changes;
+      }
+      return count;
+    });
+    return txn();
+  }
+
+  detectBotContacts(threshold = 60): Array<{
+    id: string; name: string; total_messages: number; sent_messages: number;
+    received_messages: number; otp_count: number; delivery_count: number;
+    automated_count: number; avg_char_count: number; distinct_days: number;
+    bot_score: number; reasons: string[];
+  }> {
+    const rows = this.db.prepare(`
+      SELECT
+        c.id,
+        COALESCE(c.display_name, c.name) as name,
+        COALESCE(stats.total_messages, 0) as total_messages,
+        COALESCE(stats.sent_messages, 0) as sent_messages,
+        COALESCE(stats.received_messages, 0) as received_messages,
+        COALESCE(stats.otp_count, 0) as otp_count,
+        COALESCE(stats.delivery_count, 0) as delivery_count,
+        COALESCE(stats.automated_count, 0) as automated_count,
+        COALESCE(stats.avg_char_count, 0) as avg_char_count,
+        COALESCE(stats.distinct_days, 0) as distinct_days
+      FROM friends_contacts c
+      JOIN friends_chats ch ON ch.chat_id = c.id AND ch.is_group = 0
+      LEFT JOIN (
+        SELECT
+          fm.chat_id,
+          COUNT(*) as total_messages,
+          SUM(CASE WHEN fm.is_from_me = 1 THEN 1 ELSE 0 END) as sent_messages,
+          SUM(CASE WHEN fm.is_from_me = 0 THEN 1 ELSE 0 END) as received_messages,
+          SUM(CASE WHEN fm.is_from_me = 0 AND (
+            LOWER(fm.body) LIKE '%verification code%'
+            OR LOWER(fm.body) LIKE '%your code is%'
+            OR LOWER(fm.body) LIKE '%your code:%'
+            OR LOWER(fm.body) LIKE '%otp%'
+            OR LOWER(fm.body) LIKE '%one-time%'
+            OR LOWER(fm.body) LIKE '%one time password%'
+            OR LOWER(fm.body) LIKE '%security code%'
+            OR LOWER(fm.body) LIKE '%login code%'
+            OR LOWER(fm.body) LIKE '%2fa%'
+          ) THEN 1 ELSE 0 END) as otp_count,
+          SUM(CASE WHEN fm.is_from_me = 0 AND (
+            LOWER(fm.body) LIKE '%has been delivered%'
+            OR LOWER(fm.body) LIKE '%has been shipped%'
+            OR LOWER(fm.body) LIKE '%tracking number%'
+            OR LOWER(fm.body) LIKE '%track your%'
+            OR LOWER(fm.body) LIKE '%out for delivery%'
+            OR LOWER(fm.body) LIKE '%package%delivered%'
+            OR LOWER(fm.body) LIKE '%shipment%'
+            OR LOWER(fm.body) LIKE '%order confirmed%'
+            OR LOWER(fm.body) LIKE '%order has been%'
+          ) THEN 1 ELSE 0 END) as delivery_count,
+          SUM(CASE WHEN fm.is_from_me = 0 AND (
+            LOWER(fm.body) LIKE '%do not reply%'
+            OR LOWER(fm.body) LIKE '%don''t reply%'
+            OR LOWER(fm.body) LIKE '%no-reply%'
+            OR LOWER(fm.body) LIKE '%unsubscribe%'
+            OR LOWER(fm.body) LIKE '%automated message%'
+            OR LOWER(fm.body) LIKE '%this is an automated%'
+            OR LOWER(fm.body) LIKE '%auto-generated%'
+            OR LOWER(fm.body) LIKE '%noreply%'
+            OR LOWER(fm.body) LIKE '%your appointment%'
+            OR LOWER(fm.body) LIKE '%reminder:%'
+            OR LOWER(fm.body) LIKE '%your booking%'
+            OR LOWER(fm.body) LIKE '%payment received%'
+            OR LOWER(fm.body) LIKE '%transaction%alert%'
+            OR LOWER(fm.body) LIKE '%your bill%'
+            OR LOWER(fm.body) LIKE '%account alert%'
+          ) THEN 1 ELSE 0 END) as automated_count,
+          AVG(CASE WHEN fm.is_from_me = 0 THEN fm.char_count ELSE NULL END) as avg_char_count,
+          COUNT(DISTINCT date(datetime(fm.timestamp, 'unixepoch'))) as distinct_days
+        FROM friends_messages fm
+        JOIN friends_chats ch2 ON ch2.chat_id = fm.chat_id AND ch2.is_group = 0
+        WHERE fm.chat_id NOT LIKE '%@broadcast'
+        GROUP BY fm.chat_id
+      ) stats ON stats.chat_id = c.id
+      WHERE c.id NOT LIKE '%@broadcast'
+        AND COALESCE(c.hidden, 0) = 0
+        AND stats.total_messages > 0
+      ORDER BY c.last_seen DESC
+    `).all() as any[];
+
+    const candidates: any[] = [];
+    for (const row of rows) {
+      const received = row.received_messages || 1;
+      const sent = row.sent_messages || 0;
+      let score = 0;
+      const reasons: string[] = [];
+
+      // OTP/verification
+      const otpRatio = row.otp_count / received;
+      if (row.otp_count >= 1 && otpRatio >= 0.3) {
+        score += 40;
+        reasons.push(`${row.otp_count} OTP/verification msgs (${Math.round(otpRatio * 100)}%)`);
+      } else if (row.otp_count >= 1) {
+        score += 15;
+        reasons.push(`${row.otp_count} OTP/verification msgs`);
+      }
+
+      // Delivery/shipping
+      const deliveryRatio = row.delivery_count / received;
+      if (row.delivery_count >= 1 && deliveryRatio >= 0.3) {
+        score += 30;
+        reasons.push(`${row.delivery_count} delivery/shipping msgs (${Math.round(deliveryRatio * 100)}%)`);
+      } else if (row.delivery_count >= 1) {
+        score += 10;
+        reasons.push(`${row.delivery_count} delivery/shipping msgs`);
+      }
+
+      // Automated markers
+      const autoRatio = row.automated_count / received;
+      if (row.automated_count >= 1 && autoRatio >= 0.3) {
+        score += 35;
+        reasons.push(`${row.automated_count} automated msgs (${Math.round(autoRatio * 100)}%)`);
+      } else if (row.automated_count >= 1) {
+        score += 10;
+        reasons.push(`${row.automated_count} automated msg markers`);
+      }
+
+      // One-way communication
+      if (sent === 0 && row.received_messages >= 1) {
+        score += 20;
+        reasons.push("One-way: you never replied");
+      } else if (sent > 0 && sent <= 2 && row.received_messages >= 5) {
+        score += 5;
+        reasons.push(`Low engagement: ${sent} sent vs ${row.received_messages} received`);
+      }
+
+      // Low message count with bot content
+      if (row.total_messages <= 5 && (row.otp_count + row.delivery_count + row.automated_count) > 0) {
+        score += 15;
+        reasons.push(`Low msg count (${row.total_messages}) with bot-like content`);
+      }
+
+      // Single-day one-way
+      if (row.distinct_days === 1 && sent === 0 && row.received_messages <= 3) {
+        score += 10;
+        reasons.push("Single day, one-way, very few msgs");
+      }
+
+      // Penalty for real interaction
+      if (sent >= 5) {
+        score -= 30;
+        reasons.push(`You sent ${sent} msgs (likely real person)`);
+      } else if (sent >= 3) {
+        score -= 15;
+        reasons.push(`You sent ${sent} msgs`);
+      }
+
+      score = Math.max(0, Math.min(100, score));
+
+      if (score >= threshold) {
+        candidates.push({
+          id: row.id, name: row.name,
+          total_messages: row.total_messages, sent_messages: row.sent_messages,
+          received_messages: row.received_messages, otp_count: row.otp_count,
+          delivery_count: row.delivery_count, automated_count: row.automated_count,
+          avg_char_count: Math.round(row.avg_char_count || 0),
+          distinct_days: row.distinct_days, bot_score: score, reasons,
+        });
+      }
+    }
+
+    return candidates.sort((a: any, b: any) => b.bot_score - a.bot_score);
+  }
+
   // ── Message methods ──
 
   saveMessage(msg: FriendsMessageInput) {
@@ -723,19 +898,19 @@ export class FriendsStore extends SettingsStore {
     const total = this.db.prepare(`
       SELECT COUNT(*) as c FROM friends_contacts c
       JOIN friends_chats ch ON ch.chat_id = c.id AND ch.is_group = 0
-      WHERE c.id NOT LIKE '%@broadcast'${tf}
+      WHERE c.id NOT LIKE '%@broadcast' AND COALESCE(c.hidden, 0) = 0${tf}
     `).get() as any;
     const active = this.db.prepare(`
       SELECT COUNT(*) as c FROM friends_contacts c
       JOIN friends_chats ch ON ch.chat_id = c.id AND ch.is_group = 0
-      WHERE c.last_seen >= ? AND c.id NOT LIKE '%@broadcast'${tf}
+      WHERE c.last_seen >= ? AND c.id NOT LIKE '%@broadcast' AND COALESCE(c.hidden, 0) = 0${tf}
     `).get(thirtyDaysAgo) as any;
     const groups = this.db.prepare(`SELECT COUNT(*) as c FROM friends_groups`).get() as any;
     const weekMsgs = this.db.prepare(
-      `SELECT COUNT(*) as c FROM friends_messages m JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0 ${tierId !== undefined ? 'JOIN friends_contacts c ON c.id = m.chat_id' : ''} WHERE m.chat_id NOT LIKE '%@broadcast' AND m.timestamp >= ?${tf}`
+      `SELECT COUNT(*) as c FROM friends_messages m JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0 JOIN friends_contacts c ON c.id = m.chat_id WHERE m.chat_id NOT LIKE '%@broadcast' AND COALESCE(c.hidden, 0) = 0 AND m.timestamp >= ?${tf}`
     ).get(weekAgo) as any;
     const totalMsgs = this.db.prepare(
-      `SELECT COUNT(*) as c FROM friends_messages m JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0 ${tierId !== undefined ? 'JOIN friends_contacts c ON c.id = m.chat_id' : ''} WHERE m.chat_id NOT LIKE '%@broadcast'${tf}`
+      `SELECT COUNT(*) as c FROM friends_messages m JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0 JOIN friends_contacts c ON c.id = m.chat_id WHERE m.chat_id NOT LIKE '%@broadcast' AND COALESCE(c.hidden, 0) = 0${tf}`
     ).get() as any;
 
     return {
@@ -758,8 +933,8 @@ export class FriendsStore extends SettingsStore {
         SUM(CASE WHEN m.is_from_me = 0 THEN 1 ELSE 0 END) as received
       FROM friends_messages m
       JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0
-      ${tierId !== undefined ? 'JOIN friends_contacts c ON c.id = m.chat_id' : ''}
-      WHERE m.timestamp >= ? AND m.chat_id NOT LIKE '%@broadcast'${tf}
+      JOIN friends_contacts c ON c.id = m.chat_id
+      WHERE m.timestamp >= ? AND m.chat_id NOT LIKE '%@broadcast' AND COALESCE(c.hidden, 0) = 0${tf}
       GROUP BY week
       ORDER BY week ASC
     `).all(startTs) as any[];
@@ -790,6 +965,7 @@ export class FriendsStore extends SettingsStore {
       ) msg_stats ON msg_stats.chat_id = c.id
       WHERE c.last_seen < ? AND c.last_seen > 0
         AND c.id NOT LIKE '%@broadcast'
+        AND COALESCE(c.hidden, 0) = 0
         AND COALESCE(c.hidden_from_neglected, 0) = 0${tf}
       ORDER BY c.last_seen ASC
       LIMIT 100
@@ -837,7 +1013,7 @@ export class FriendsStore extends SettingsStore {
       FROM initiations i
       JOIN contact_map cm ON cm.chat_id = i.chat_id
       JOIN friends_contacts fc ON fc.id = cm.contact_id
-      WHERE 1=1${tf}
+      WHERE COALESCE(fc.hidden, 0) = 0${tf}
       GROUP BY cm.contact_id
       ORDER BY (my_initiations + their_initiations) DESC
       LIMIT ?
@@ -1193,8 +1369,8 @@ export class FriendsStore extends SettingsStore {
     const row = this.db.prepare(`
       SELECT COUNT(*) as total_notes, COALESCE(SUM(v.duration_estimate) / 60.0, 0) as total_minutes
       FROM friends_voice_notes v
-      ${tierId !== undefined ? 'JOIN friends_contacts c ON c.id = v.contact_id' : ''}
-      WHERE 1=1${tf}
+      JOIN friends_contacts c ON c.id = v.contact_id
+      WHERE COALESCE(c.hidden, 0) = 0${tf}
     `).get() as any;
     return { total_notes: row?.total_notes || 0, total_minutes: Math.round((row?.total_minutes || 0) * 10) / 10 };
   }
@@ -1469,7 +1645,7 @@ export class FriendsStore extends SettingsStore {
       JOIN friends_messages m ON m.chat_id = c.id
       LEFT JOIN friends_tiers t ON t.id = c.tier_id
       WHERE m.timestamp >= ?
-        AND c.id NOT LIKE '%@broadcast'${tf}
+        AND c.id NOT LIKE '%@broadcast' AND COALESCE(c.hidden, 0) = 0${tf}
       GROUP BY c.id
       ORDER BY messages DESC
       LIMIT ?
@@ -1493,7 +1669,7 @@ export class FriendsStore extends SettingsStore {
       FROM friends_contacts c
       JOIN friends_chats ch ON ch.chat_id = c.id AND ch.is_group = 0
       JOIN friends_messages m ON m.chat_id = c.id
-      WHERE c.id NOT LIKE '%@broadcast'${tf}
+      WHERE c.id NOT LIKE '%@broadcast' AND COALESCE(c.hidden, 0) = 0${tf}
       GROUP BY c.id
       HAVING (sent + received) > 10
       ORDER BY (sent + received) DESC
@@ -1509,7 +1685,7 @@ export class FriendsStore extends SettingsStore {
     const contacts = this.db.prepare(`
       SELECT c.id, COALESCE(c.display_name, c.name) as name FROM friends_contacts c
       JOIN friends_chats ch ON ch.chat_id = c.id AND ch.is_group = 0
-      WHERE c.id NOT LIKE '%@broadcast'${tf}
+      WHERE c.id NOT LIKE '%@broadcast' AND COALESCE(c.hidden, 0) = 0${tf}
       ORDER BY c.last_seen DESC LIMIT 50
     `).all() as any[];
     const results: Array<{ id: string; name: string; current_streak: number; longest_streak: number }> = [];
@@ -1553,8 +1729,8 @@ export class FriendsStore extends SettingsStore {
         COUNT(*) as count
       FROM friends_messages m
       JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0
-      ${tierId !== undefined ? 'JOIN friends_contacts c ON c.id = m.chat_id' : ''}
-      WHERE m.chat_id NOT LIKE '%@broadcast'${tf}
+      JOIN friends_contacts c ON c.id = m.chat_id
+      WHERE m.chat_id NOT LIKE '%@broadcast' AND COALESCE(c.hidden, 0) = 0${tf}
       GROUP BY hour
       ORDER BY hour ASC
     `).all() as any[];
@@ -1565,7 +1741,7 @@ export class FriendsStore extends SettingsStore {
     const now = Math.floor(Date.now() / 1000);
     const ninetyDaysAgo = now - 90 * 86400;
     const tf = this.tierClause(tierId).replace(/\bc\./g, 'friends_contacts.');
-    const contacts = this.db.prepare(`SELECT id, COALESCE(display_name, name) as name FROM friends_contacts WHERE last_seen >= ?${tf} ORDER BY last_seen DESC`).all(ninetyDaysAgo) as any[];
+    const contacts = this.db.prepare(`SELECT id, COALESCE(display_name, name) as name FROM friends_contacts WHERE last_seen >= ? AND COALESCE(hidden, 0) = 0${tf} ORDER BY last_seen DESC`).all(ninetyDaysAgo) as any[];
     const results: Array<{ id: string; name: string; avg_response_sec: number }> = [];
     for (const c of contacts) {
       const resp = this.getResponseTimesForContact(c.id, ninetyDaysAgo, now);

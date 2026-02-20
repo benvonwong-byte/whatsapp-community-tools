@@ -2194,6 +2194,36 @@
         </ul>
       </div>
 
+      <!-- Bot Detection Section -->
+      <div class="section">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+          <div class="section-title" style="margin-bottom:0;">Bot & Notification Detection</div>
+          <button id="detect-bots-btn" class="header-btn secondary" style="font-size:11px;padding:5px 14px;">Scan for Bots</button>
+        </div>
+        <p style="font-size:11px;color:var(--text-dim);margin-bottom:12px;">
+          Detect and hide automated contacts (OTP senders, delivery notifications, system messages).
+        </p>
+        <div id="bot-results" style="display:none;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <span id="bot-count" style="font-size:12px;color:var(--text-dim);"></span>
+            <div style="display:flex;gap:6px;">
+              <button id="bot-select-all" class="header-btn secondary" style="font-size:10px;padding:3px 10px;">Select All</button>
+              <button id="bot-hide-selected" class="header-btn" style="font-size:10px;padding:3px 10px;">Hide Selected</button>
+            </div>
+          </div>
+          <div id="bot-list" style="max-height:400px;overflow-y:auto;"></div>
+        </div>
+      </div>
+
+      <!-- Hidden Contacts Section -->
+      <div class="section">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+          <div class="section-title" style="margin-bottom:0;">Hidden Contacts</div>
+          <button id="load-hidden-btn" class="header-btn secondary" style="font-size:11px;padding:5px 14px;">Show Hidden</button>
+        </div>
+        <div id="hidden-list" style="display:none;max-height:300px;overflow-y:auto;"></div>
+      </div>
+
     </div>
 
   </div>

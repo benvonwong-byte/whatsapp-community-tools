@@ -95,6 +95,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupAISearch();
   setupGraphHandlers();
   setupCallsTab();
+  setupBotDetection();
   _initNameEditHandlers();
 
   // Load initial tab — show skeleton immediately
@@ -4382,4 +4383,128 @@ function fileToBase64(file) {
     reader.onerror = () => reject(new Error("Failed to read file"));
     reader.readAsDataURL(file);
   });
+}
+
+// ── Bot Detection ──
+
+function setupBotDetection() {
+  const detectBtn = $("detect-bots-btn");
+  if (!detectBtn) return;
+
+  detectBtn.addEventListener("click", async () => {
+    detectBtn.disabled = true;
+    detectBtn.textContent = "Scanning...";
+    try {
+      const res = await adminFetch("/api/friends/contacts/detect-bots");
+      if (!res.ok) throw new Error("Detection failed");
+      const data = await res.json();
+      renderBotResults(data.candidates);
+    } catch (err) {
+      alert("Bot detection failed: " + err.message);
+    } finally {
+      detectBtn.disabled = false;
+      detectBtn.textContent = "Scan for Bots";
+    }
+  });
+
+  $("bot-select-all")?.addEventListener("click", () => {
+    document.querySelectorAll(".bot-checkbox").forEach(cb => cb.checked = true);
+  });
+
+  $("bot-hide-selected")?.addEventListener("click", async () => {
+    const selected = [];
+    document.querySelectorAll(".bot-checkbox:checked").forEach(cb => {
+      selected.push(cb.dataset.contactId);
+    });
+    if (selected.length === 0) { alert("No contacts selected."); return; }
+    if (!confirm("Hide " + selected.length + " contacts? You can unhide them later from this page.")) return;
+
+    try {
+      const res = await adminFetch("/api/friends/contacts/auto-hide-bots", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contactIds: selected }),
+      });
+      if (!res.ok) throw new Error("Hide failed");
+      const data = await res.json();
+      alert("Hidden " + data.hidden + " contacts.");
+      // Re-scan to refresh list
+      $("detect-bots-btn")?.click();
+      invalidateCache("/api/friends");
+    } catch (err) {
+      alert("Failed to hide: " + err.message);
+    }
+  });
+
+  $("load-hidden-btn")?.addEventListener("click", loadHiddenContacts);
+}
+
+function renderBotResults(candidates) {
+  const container = $("bot-results");
+  const list = $("bot-list");
+  const countEl = $("bot-count");
+  if (!container || !list) return;
+
+  container.style.display = "";
+  countEl.textContent = candidates.length === 0
+    ? "No bots detected."
+    : "Found " + candidates.length + " likely bot/automated contacts:";
+
+  if (candidates.length === 0) {
+    list.innerHTML = '<div style="color:var(--text-dim);font-size:12px;padding:12px;">All clear! No automated contacts detected.</div>';
+    return;
+  }
+
+  list.innerHTML = candidates.map(function(c) {
+    return '<div style="display:flex;align-items:flex-start;gap:10px;padding:8px;background:var(--surface2);border-radius:6px;margin-bottom:4px;">' +
+      '<input type="checkbox" class="bot-checkbox" data-contact-id="' + esc(c.id) + '" checked style="margin-top:3px;">' +
+      '<div style="flex:1;min-width:0;">' +
+        '<div style="font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(c.name || c.id) + '</div>' +
+        '<div style="font-size:10px;color:var(--text-dim);">' +
+          c.total_messages + ' msgs (' + c.sent_messages + ' sent, ' + c.received_messages + ' received) · Score: ' + c.bot_score +
+        '</div>' +
+        '<div style="font-size:10px;color:#FFD54F;margin-top:2px;">' +
+          c.reasons.map(function(r) { return esc(r); }).join(" · ") +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }).join("");
+}
+
+async function loadHiddenContacts() {
+  const list = $("hidden-list");
+  if (!list) return;
+  list.style.display = "";
+  list.innerHTML = '<div style="color:var(--text-dim);font-size:12px;">Loading...</div>';
+
+  try {
+    const res = await adminFetch("/api/friends/contacts/hidden");
+    if (!res.ok) throw new Error("Failed to load");
+    const contacts = await res.json();
+    if (contacts.length === 0) {
+      list.innerHTML = '<div style="color:var(--text-dim);font-size:12px;padding:8px;">No hidden contacts.</div>';
+      return;
+    }
+    list.innerHTML = contacts.map(function(c) {
+      return '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;background:var(--surface2);border-radius:4px;margin-bottom:3px;">' +
+        '<span style="font-size:12px;">' + esc(c.name || c.id) + '</span>' +
+        '<button class="unhide-btn" data-contact-id="' + esc(c.id) + '" style="font-size:10px;padding:2px 8px;background:none;border:1px solid var(--border);color:var(--text-dim);border-radius:4px;cursor:pointer;">Unhide</button>' +
+      '</div>';
+    }).join("");
+
+    list.querySelectorAll(".unhide-btn").forEach(function(btn) {
+      btn.addEventListener("click", async function() {
+        const contactId = btn.dataset.contactId;
+        try {
+          await adminFetch("/api/friends/contacts/" + encodeURIComponent(contactId) + "/unhide", { method: "POST" });
+          loadHiddenContacts();
+          invalidateCache("/api/friends");
+        } catch (err) {
+          alert("Failed to unhide: " + err.message);
+        }
+      });
+    });
+  } catch (err) {
+    list.innerHTML = '<div style="color:#f44;font-size:12px;">Failed to load hidden contacts.</div>';
+  }
 }

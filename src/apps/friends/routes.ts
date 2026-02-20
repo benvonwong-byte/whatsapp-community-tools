@@ -168,6 +168,33 @@ export function createFriendsRouter(
     res.json(contacts);
   });
 
+  // Static /contacts/* routes MUST come before /contacts/:id
+  router.get("/contacts/hidden", (_req: Request, res: Response) => {
+    res.json(store.getHiddenContacts());
+  });
+
+  router.get("/contacts/detect-bots", (req: Request, res: Response) => {
+    const threshold = Math.max(10, Math.min(100, parseInt(req.query.threshold as string) || 60));
+    const candidates = store.detectBotContacts(threshold);
+    res.json({ candidates, count: candidates.length, threshold });
+  });
+
+  router.post("/contacts/auto-hide-bots", (req: Request, res: Response) => {
+    const { contactIds, threshold } = req.body;
+    let idsToHide: string[];
+    if (Array.isArray(contactIds) && contactIds.length > 0) {
+      idsToHide = contactIds;
+    } else {
+      const t = typeof threshold === "number" ? threshold : 60;
+      const candidates = store.detectBotContacts(t);
+      idsToHide = candidates.map((c: any) => c.id);
+    }
+    const hidden = store.hideMultipleContacts(idsToHide);
+    _dashCache = null;
+    _graphCache = null;
+    res.json({ ok: true, hidden });
+  });
+
   router.get("/contacts/:id", (req: Request, res: Response) => {
     const contact = store.getContact(decodeURIComponent(req.params.id as string));
     if (!contact) { res.status(404).json({ error: "Contact not found" }); return; }
@@ -271,16 +298,16 @@ export function createFriendsRouter(
   // Hide/unhide contacts
   router.post("/contacts/:id/hide", (req: Request, res: Response) => {
     store.hideContact(decodeURIComponent(req.params.id as string));
+    _dashCache = null;
+    _graphCache = null;
     res.json({ ok: true });
   });
 
   router.post("/contacts/:id/unhide", (req: Request, res: Response) => {
     store.unhideContact(decodeURIComponent(req.params.id as string));
+    _dashCache = null;
+    _graphCache = null;
     res.json({ ok: true });
-  });
-
-  router.get("/contacts/hidden", (_req: Request, res: Response) => {
-    res.json(store.getHiddenContacts());
   });
 
   router.get("/contacts/:id/voice", (req: Request, res: Response) => {
