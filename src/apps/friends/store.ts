@@ -899,22 +899,20 @@ export class FriendsStore extends SettingsStore {
     }));
   }
 
-  /** Get active days, word count, and voice note count per contact for graph metrics */
-  getGraphMetrics(): { chat_id: string; active_days: number; total_words: number; voice_notes: number }[] {
+  /** Get active days, word count (text msgs only), and voice note count per contact for graph metrics */
+  getGraphMetrics(): { chat_id: string; active_days: number; total_chars_text: number; voice_notes: number }[] {
     return this.db.prepare(`
       SELECT fm.chat_id,
         COUNT(DISTINCT date(fm.timestamp, 'unixepoch')) as active_days,
         COALESCE(SUM(
-          CASE WHEN COALESCE(fm.body, '') != '' THEN
-            LENGTH(TRIM(fm.body)) - LENGTH(REPLACE(TRIM(fm.body), ' ', '')) + 1
-          ELSE 0 END
-        ), 0) as total_words,
+          CASE WHEN fm.message_type IN ('text', 'chat') THEN fm.char_count ELSE 0 END
+        ), 0) as total_chars_text,
         SUM(CASE WHEN fm.message_type = 'ptt' OR fm.message_type = 'audio' THEN 1 ELSE 0 END) as voice_notes
       FROM friends_messages fm
       JOIN friends_chats ch ON ch.chat_id = fm.chat_id AND ch.is_group = 0
       WHERE fm.chat_id NOT LIKE '%@broadcast'
       GROUP BY fm.chat_id
-    `).all() as { chat_id: string; active_days: number; total_words: number; voice_notes: number }[];
+    `).all() as { chat_id: string; active_days: number; total_chars_text: number; voice_notes: number }[];
   }
 
   /** Resolve all DM chat_ids for a contact (handles both sender_id and chat_id lookups for iMessage) */

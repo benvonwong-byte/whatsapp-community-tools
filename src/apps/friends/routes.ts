@@ -596,10 +596,10 @@ export function createFriendsRouter(
     // Build tier list for frontend
     const tiers = store.getTiers();
 
-    // Batch query: active days, word count, voice notes per contact
-    const metricsMap: Record<string, { activeDays: number; totalWords: number; voiceNotes: number }> = {};
+    // Batch query: active days, char count (text only), voice notes per contact
+    const metricsMap: Record<string, { activeDays: number; totalCharsText: number; voiceNotes: number }> = {};
     for (const r of store.getGraphMetrics()) {
-      metricsMap[r.chat_id] = { activeDays: r.active_days, totalWords: r.total_words, voiceNotes: r.voice_notes };
+      metricsMap[r.chat_id] = { activeDays: r.active_days, totalCharsText: r.total_chars_text, voiceNotes: r.voice_notes };
     }
 
     const nodes = allContacts.map(c => {
@@ -617,8 +617,11 @@ export function createFriendsRouter(
       }
       const msgsPerDay = daysKnown > 0 ? Math.round((c.total_messages / daysKnown) * 100) / 100 : 0;
       const recentPerDay = Math.round((c.messages_30d / 30) * 100) / 100;
-      const gm = metricsMap[c.id] || { activeDays: 1, totalWords: 0, voiceNotes: 0 };
-      const wordsPerActiveDay = gm.activeDays > 0 ? Math.round((gm.totalWords / gm.activeDays) * 100) / 100 : 0;
+      const gm = metricsMap[c.id] || { activeDays: 0, totalCharsText: 0, voiceNotes: 0 };
+      // Words ≈ chars/5, only from text messages, require 3+ active days to avoid outliers
+      const wordsPerActiveDay = gm.activeDays >= 3
+        ? Math.round((gm.totalCharsText / 5 / gm.activeDays) * 100) / 100
+        : 0;
       return {
         id: c.id, name: displayName,
         // Raw metrics
