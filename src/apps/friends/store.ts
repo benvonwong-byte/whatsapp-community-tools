@@ -899,13 +899,16 @@ export class FriendsStore extends SettingsStore {
     }));
   }
 
-  /** Get active days, word count (text msgs only), and voice note count per contact for graph metrics */
+  /** Get active days, word count (text msgs only), and voice note count per contact */
   getGraphMetrics(): { chat_id: string; active_days: number; total_chars_text: number; voice_notes: number }[] {
     return this.db.prepare(`
       SELECT fm.chat_id,
         COUNT(DISTINCT date(fm.timestamp, 'unixepoch')) as active_days,
         COALESCE(SUM(
-          CASE WHEN fm.message_type IN ('text', 'chat') THEN fm.char_count ELSE 0 END
+          CASE WHEN fm.message_type IN ('text', 'chat')
+            AND fm.id NOT IN ('true_226752966172695@lid_3B8329651F4FF4C6C4B6', 'true_226752966172695@lid_3BB9FE67B25C0E3F7C98')
+          THEN COALESCE(NULLIF(fm.char_count, 0), LENGTH(COALESCE(fm.body, '')))
+          ELSE 0 END
         ), 0) as total_chars_text,
         SUM(CASE WHEN fm.message_type = 'ptt' OR fm.message_type = 'audio' THEN 1 ELSE 0 END) as voice_notes
       FROM friends_messages fm
