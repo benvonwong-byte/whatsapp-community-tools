@@ -15,7 +15,6 @@ let activeTopicPeriod = "week";
 // Composer state
 let weeklyDraft = null;
 let composerLinks = {};      // { index: boolean } — which links are selected
-let composerSummaries = {};  // { index: boolean } — which daily summaries are selected
 
 // ── Init ──
 
@@ -80,8 +79,6 @@ async function loadDashboard() {
         weeklyDraft = draft;
         composerLinks = {};
         (draft.links || []).forEach(function(_, i) { composerLinks[i] = true; });
-        composerSummaries = {};
-        (draft.dailyDigests || []).forEach(function(_, i) { composerSummaries[i] = true; });
       } else {
         weeklyDraft = draft;
       }
@@ -637,6 +634,13 @@ function safeJsonParse(json) {
 
 // ── Weekly Update Composer ──
 
+function categoryEmoji(cat) {
+  if (cat === "event") return "\uD83D\uDCC5";   // 📅
+  if (cat === "video") return "\uD83C\uDFA5";    // 🎥
+  if (cat === "podcast") return "\uD83C\uDFA7";  // 🎧
+  return "\uD83D\uDCF0";                          // 📰 (article/other)
+}
+
 function setupComposer() {
   // Copy button
   var copyBtn = document.getElementById("composer-copy");
@@ -664,18 +668,6 @@ function setupComposer() {
     (weeklyDraft.links || []).forEach(function(_, i) { composerLinks[i] = false; });
     renderComposer();
   });
-
-  // Select All / None for summaries
-  var summariesAll = document.getElementById("composer-summaries-all");
-  var summariesNone = document.getElementById("composer-summaries-none");
-  if (summariesAll) summariesAll.addEventListener("click", function() {
-    (weeklyDraft.dailyDigests || []).forEach(function(_, i) { composerSummaries[i] = true; });
-    renderComposer();
-  });
-  if (summariesNone) summariesNone.addEventListener("click", function() {
-    (weeklyDraft.dailyDigests || []).forEach(function(_, i) { composerSummaries[i] = false; });
-    renderComposer();
-  });
 }
 
 function renderComposer() {
@@ -694,14 +686,22 @@ function renderComposer() {
     } else {
       linksList.innerHTML = links.map(function(link, i) {
         var checked = composerLinks[i] !== false ? "checked" : "";
+        var emoji = categoryEmoji(link.category);
         var title = link.title && link.title !== "(untitled)" && link.title !== "(error)" ? link.title : truncateUrl(link.url, 50);
         var summary = link.description || "";
+        var eventDateStr = "";
+        if (link.category === "event" && link.event_date) {
+          var ed = new Date(link.event_date + "T00:00:00");
+          eventDateStr = ed.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+        }
         return '<div class="composer-link-row">' +
           '<input type="checkbox" data-link-idx="' + i + '" ' + checked + '>' +
+          '<span style="font-size:16px;flex-shrink:0;margin-top:1px;">' + emoji + '</span>' +
           '<div class="composer-link-info">' +
             '<div class="composer-link-title"><a href="' + escapeAttr(link.url) + '" target="_blank" rel="noopener">' + escapeHtml(title) + '</a></div>' +
+            (eventDateStr ? '<div style="font-size:11px;color:var(--accent);font-weight:500;">' + escapeHtml(eventDateStr) + '</div>' : '') +
             (summary ? '<div class="composer-link-summary">' + escapeHtml(summary) + '</div>' : '') +
-            '<div class="composer-link-meta">Shared by ' + escapeHtml(link.sender_name || "Unknown") + ' · ' + escapeHtml(link.category) + '</div>' +
+            '<div class="composer-link-meta">Shared by ' + escapeHtml(link.sender_name || "Unknown") + '</div>' +
           '</div>' +
         '</div>';
       }).join("");
@@ -715,37 +715,22 @@ function renderComposer() {
     }
   }
 
-  // Summaries list
-  var summariesList = document.getElementById("composer-summaries-list");
-  if (summariesList) {
-    var digests = weeklyDraft.dailyDigests || [];
-    if (digests.length === 0) {
-      summariesList.innerHTML = '<div style="font-size:12px;color:var(--text-dim);">No daily summaries available.</div>';
+  // Weekly topics summary
+  var topicsEl = document.getElementById("composer-topics-summary");
+  if (topicsEl) {
+    var topics = weeklyDraft.weeklyTopics || [];
+    var participants = weeklyDraft.participants || [];
+    var totalMsgs = weeklyDraft.totalMessages || 0;
+    if (topics.length === 0) {
+      topicsEl.innerHTML = '<span style="color:var(--text-dim);">No topic data this week.</span>';
     } else {
-      summariesList.innerHTML = digests.map(function(d, i) {
-        var checked = composerSummaries[i] !== false ? "checked" : "";
-        var dateStr = new Date(d.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
-        var topics = (d.topics || []).slice(0, 5).join(", ");
-        var who = (d.whoSaidWhat || []).map(function(w) { return w.sender; }).join(", ");
-        var summaryText = d.summary || "";
-        if (summaryText.length > 300) summaryText = summaryText.slice(0, 300) + "…";
-        return '<div class="composer-summary-row">' +
-          '<div class="composer-summary-header">' +
-            '<input type="checkbox" data-summary-idx="' + i + '" ' + checked + '>' +
-            '<span class="composer-summary-date">' + escapeHtml(dateStr) + '</span>' +
-            '<span class="composer-summary-topics">' + escapeHtml(topics) + '</span>' +
-          '</div>' +
-          (summaryText ? '<div class="composer-summary-body">' + escapeHtml(summaryText) + '</div>' : '') +
-          (who ? '<div class="composer-summary-who">Participants: ' + escapeHtml(who) + '</div>' : '') +
-        '</div>';
+      var topicsHtml = topics.map(function(t) {
+        return '<span style="display:inline-block;background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:2px 10px;margin:2px;font-size:11px;">' +
+          escapeHtml(t.topic) + ' <span style="color:var(--text-dim);">(' + t.count + ')</span></span>';
       }).join("");
-
-      summariesList.querySelectorAll("input[data-summary-idx]").forEach(function(cb) {
-        cb.addEventListener("change", function() {
-          composerSummaries[parseInt(cb.dataset.summaryIdx)] = cb.checked;
-          updateComposerPreview();
-        });
-      });
+      var statsLine = totalMsgs + ' messages from ' + participants.length + ' participants';
+      topicsEl.innerHTML = '<div style="margin-bottom:6px;">' + topicsHtml + '</div>' +
+        '<div style="font-size:10px;color:var(--text-dim);">' + escapeHtml(statsLine) + '</div>';
     }
   }
 
@@ -764,40 +749,32 @@ function buildComposerMessage() {
   var selectedLinks = (weeklyDraft.links || []).filter(function(_, i) { return composerLinks[i] !== false; });
   if (selectedLinks.length > 0) {
     lines.push("*Top Resources*");
+    lines.push("");
     selectedLinks.forEach(function(link) {
+      var emoji = categoryEmoji(link.category);
       var title = link.title && link.title !== "(untitled)" && link.title !== "(error)" ? link.title : truncateUrl(link.url, 40);
       var summary = link.description || "";
-      if (summary) {
-        lines.push("- *" + title + "*");
-        lines.push("  " + summary);
-      } else {
-        lines.push("- " + title);
+      var eventInfo = "";
+      if (link.category === "event" && link.event_date) {
+        var ed = new Date(link.event_date + "T00:00:00");
+        eventInfo = " — " + ed.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
       }
-      lines.push("  " + link.url);
+      lines.push(emoji + " *" + title + "*" + eventInfo);
+      if (summary) lines.push(summary);
+      lines.push(link.url);
       lines.push("");
     });
   }
 
-  // Discussion Summaries (selected daily digests)
-  var selectedDigests = (weeklyDraft.dailyDigests || []).filter(function(_, i) { return composerSummaries[i] !== false; });
-  if (selectedDigests.length > 0) {
-    lines.push("*Discussion Summaries*");
-    selectedDigests.forEach(function(d) {
-      var dateStr = new Date(d.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
-      lines.push("");
-      lines.push("_" + dateStr + "_");
-      if (d.summary) {
-        lines.push(d.summary);
-      }
-      var topics = (d.topics || []).slice(0, 5);
-      if (topics.length > 0) {
-        lines.push("Topics: " + topics.join(", "));
-      }
-      var who = (d.whoSaidWhat || []).map(function(w) { return w.sender; });
-      if (who.length > 0) {
-        lines.push("Participants: " + who.join(", "));
-      }
-    });
+  // Discussion Summary
+  var topics = weeklyDraft.weeklyTopics || [];
+  if (topics.length > 0) {
+    lines.push("*Discussion Summary*");
+    lines.push("Topics covered: " + topics.map(function(t) { return t.topic; }).join(", "));
+    var participants = weeklyDraft.participants || [];
+    if (participants.length > 0) {
+      lines.push("Active participants: " + participants.join(", "));
+    }
     lines.push("");
   }
 

@@ -198,11 +198,15 @@ export class MetacrisisStore extends SettingsStore {
       CREATE INDEX IF NOT EXISTS idx_meta_topics_topic ON metacrisis_topics(topic);
     `);
 
-    // Migrate links table: add description column if missing
+    // Migrate links table: add description and event_date columns if missing
     const linkCols = this.db.prepare("PRAGMA table_info(metacrisis_links)").all() as any[];
     if (linkCols.length > 0 && !linkCols.find((c: any) => c.name === "description")) {
       this.db.exec(`ALTER TABLE metacrisis_links ADD COLUMN description TEXT DEFAULT ''`);
       console.log("[metacrisis-store] Migrated metacrisis_links: added description column");
+    }
+    if (linkCols.length > 0 && !linkCols.find((c: any) => c.name === "event_date")) {
+      this.db.exec(`ALTER TABLE metacrisis_links ADD COLUMN event_date TEXT DEFAULT NULL`);
+      console.log("[metacrisis-store] Migrated metacrisis_links: added event_date column");
     }
 
     // Insert default settings if they don't exist
@@ -403,26 +407,37 @@ export class MetacrisisStore extends SettingsStore {
     `).all(limit) as any[];
   }
 
-  /** Update a link's scraped title and description */
-  updateLinkMeta(id: number, title: string, description: string) {
-    this.db.prepare(`UPDATE metacrisis_links SET title = ?, description = ? WHERE id = ?`)
-      .run(title, description, id);
+  /** Update a link's scraped title, description, and optionally event_date + category */
+  updateLinkMeta(id: number, title: string, description: string, eventDate?: string | null, category?: string) {
+    if (eventDate !== undefined || category) {
+      this.db.prepare(`UPDATE metacrisis_links SET title = ?, description = ?, event_date = ?, category = COALESCE(?, category) WHERE id = ?`)
+        .run(title, description, eventDate || null, category || null, id);
+    } else {
+      this.db.prepare(`UPDATE metacrisis_links SET title = ?, description = ? WHERE id = ?`)
+        .run(title, description, id);
+    }
   }
 
-  /** Get all links from the last N days with scraped metadata, for the composer */
-  getRecentLinks(days: number = 7): Array<{
+  /** Get composer links: articles/videos from last 7 days + future events */
+  getComposerLinks(): Array<{
     id: number; url: string; title: string; description: string;
     category: string; sender_name: string; timestamp: number;
+    event_date: string | null;
   }> {
-    const cutoff = Math.floor(Date.now() / 1000) - days * 86400;
+    const cutoff = Math.floor(Date.now() / 1000) - 7 * 86400;
+    const today = new Date().toISOString().split("T")[0];
     return this.db.prepare(`
       SELECT id, url, COALESCE(title, '') as title,
              COALESCE(description, '') as description,
-             category, sender_name, timestamp
+             category, sender_name, timestamp, event_date
       FROM metacrisis_links
-      WHERE timestamp >= ?
-      ORDER BY timestamp DESC
-    `).all(cutoff) as any[];
+      WHERE
+        (category IN ('article', 'video', 'podcast', 'other') AND timestamp >= ?)
+        OR (category = 'event' AND (event_date IS NULL OR event_date >= ?))
+      ORDER BY
+        CASE WHEN category = 'event' THEN 0 ELSE 1 END,
+        timestamp DESC
+    `).all(cutoff, today) as any[];
   }
 
   // ── Summaries ──

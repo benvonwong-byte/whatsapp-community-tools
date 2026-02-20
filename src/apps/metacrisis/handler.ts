@@ -1,6 +1,7 @@
 import { Message } from "../../whatsapp";
 import { MetacrisisStore } from "./store";
 import { config } from "../../config";
+import { scrapeLinksMeta } from "./summarizer";
 
 /** URL regex to extract links from message body */
 const URL_REGEX = /https?:\/\/[^\s<>"')\]]+/gi;
@@ -116,7 +117,7 @@ export function createMetacrisisHandler(store: MetacrisisStore) {
       `[metacrisis] Captured #${captureCount}: ${senderName}: ${msg.body.slice(0, 80)}...`
     );
 
-    // Extract and save URLs
+    // Extract and save URLs, then scrape in background
     const urls = msg.body.match(URL_REGEX);
     if (urls) {
       for (const url of urls) {
@@ -130,6 +131,10 @@ export function createMetacrisisHandler(store: MetacrisisStore) {
         });
         console.log(`[metacrisis] Link saved [${category}]: ${url}`);
       }
+      // Scrape newly saved links in background (don't block message processing)
+      scrapeLinksMeta(store).catch((err) =>
+        console.error(`[metacrisis] Background scrape failed:`, err?.message || err)
+      );
     }
   };
 

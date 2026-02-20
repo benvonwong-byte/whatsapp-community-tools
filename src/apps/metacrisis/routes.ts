@@ -199,25 +199,39 @@ export function createMetacrisisRouter(
       const weekAgo = new Date(now.getTime() - 7 * 86400000);
       const dateRange = `${weekAgo.toLocaleDateString("en-US", { month: "short", day: "numeric" })} → ${now.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
 
-      // Links: all scraped links from the last 7 days
-      const links = store.getRecentLinks(7);
+      // Links: articles/videos from last 7 days + future events
+      const links = store.getComposerLinks();
 
-      // Daily digests: summaries with who-said-what and topics
-      const dailyDigests = store.getRecentDailyDigests(7).map((d) => {
-        let whoSaidWhat: { sender: string; summary: string }[] = [];
-        let topics: string[] = [];
-        try { whoSaidWhat = JSON.parse(d.who_said_what_json || "[]"); } catch {}
-        try { topics = JSON.parse(d.key_topics_json || "[]"); } catch {}
-        return {
-          date: d.date,
-          summary: d.summary,
-          whoSaidWhat,
-          topics,
-          messageCount: d.message_count,
-        };
+      // Weekly topic summary: aggregate topics from all daily digests this week
+      const dailyDigests = store.getRecentDailyDigests(7);
+      const topicCounts: Record<string, number> = {};
+      const allParticipants = new Set<string>();
+      for (const d of dailyDigests) {
+        try {
+          const topics: string[] = JSON.parse(d.key_topics_json || "[]");
+          for (const t of topics) {
+            const key = t.toLowerCase().trim();
+            if (key) topicCounts[key] = (topicCounts[key] || 0) + 1;
+          }
+        } catch {}
+        try {
+          const who = JSON.parse(d.who_said_what_json || "[]");
+          if (Array.isArray(who)) who.forEach((w: any) => { if (w.sender) allParticipants.add(w.sender); });
+        } catch {}
+      }
+      // Sort topics by frequency
+      const weeklyTopics = Object.entries(topicCounts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 15)
+        .map(([topic, count]) => ({ topic, count }));
+
+      res.json({
+        dateRange,
+        links,
+        weeklyTopics,
+        participants: [...allParticipants],
+        totalMessages: dailyDigests.reduce((sum, d) => sum + (d.message_count || 0), 0),
       });
-
-      res.json({ dateRange, links, dailyDigests });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || "Failed to build weekly draft" });
     }

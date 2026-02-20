@@ -335,8 +335,8 @@ export async function processEventLinks(store: MetacrisisStore): Promise<number>
 }
 
 /**
- * Scrape unscraped links: fetch page content, extract title, then AI-summarize.
- * Returns the number of links successfully scraped.
+ * Scrape unscraped links: fetch page, AI-summarize in 2 sentences,
+ * detect category (article/video/event), extract event dates.
  */
 export async function scrapeLinksMeta(store: MetacrisisStore): Promise<number> {
   const unscraped = store.getUnscrapedLinks(30);
@@ -354,25 +354,47 @@ export async function scrapeLinksMeta(store: MetacrisisStore): Promise<number> {
       }
 
       const title = extractTitle(html);
-
-      // Use AI to summarize the page content
       const pageText = htmlToPlainText(html).slice(0, 4000);
+
+      // AI: summarize + classify + extract event date in one call
       let summary = "";
+      let aiCategory: string | undefined;
+      let eventDate: string | null = null;
       try {
         const model = getModel();
         const result = await model.generateContent(
-          `Summarize this web page in under 400 characters. Be concise and informative. Focus on what the content is about and why it's relevant. Do NOT use markdown or formatting. Just plain text.\n\nURL: ${link.url}\nTitle: ${title}\n\nContent:\n${pageText}`
+          `Analyze this web page and respond with ONLY a JSON object (no markdown fences):
+{
+  "summary": "A 2-sentence summary of the content. Keep it concise and informative.",
+  "category": "article" or "video" or "event" or "podcast" or "other",
+  "event_date": "YYYY-MM-DD" or null (only if this is an event page, extract the event date)
+}
+
+URL: ${link.url}
+Title: ${title}
+URL-based category hint: ${link.category}
+
+Content:
+${pageText}`
         );
-        summary = result.response.text().trim().slice(0, 400);
+        const text = result.response.text().trim();
+        const parsed = parseGeminiJson(text);
+        summary = (parsed.summary || "").slice(0, 400);
+        if (parsed.category && ["article", "video", "event", "podcast", "other"].includes(parsed.category)) {
+          aiCategory = parsed.category;
+        }
+        if (parsed.event_date && /^\d{4}-\d{2}-\d{2}/.test(parsed.event_date)) {
+          eventDate = parsed.event_date.slice(0, 10);
+        }
       } catch (aiErr: any) {
-        // Fall back to meta description if AI fails
-        summary = extractDescription(html);
-        console.log(`[metacrisis-scraper] AI summary failed for ${link.url}, using meta description`);
+        summary = extractDescription(html) || title;
+        console.log(`[metacrisis-scraper] AI failed for ${link.url}, using meta description`);
       }
 
-      store.updateLinkMeta(link.id, title, summary);
+      store.updateLinkMeta(link.id, title, summary, eventDate, aiCategory);
       scraped++;
-      console.log(`[metacrisis-scraper] Scraped: ${title.slice(0, 60)} — ${link.url}`);
+      const catLabel = aiCategory || link.category;
+      console.log(`[metacrisis-scraper] Scraped [${catLabel}]: ${title.slice(0, 50)} — ${link.url}${eventDate ? ` (event: ${eventDate})` : ""}`);
     } catch (err: any) {
       console.error(`[metacrisis-scraper] Error scraping ${link.url}:`, err?.message || err);
       store.updateLinkMeta(link.id, "(error)", "");
