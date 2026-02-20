@@ -409,6 +409,22 @@ export class MetacrisisStore extends SettingsStore {
       .run(title, description, id);
   }
 
+  /** Get all links from the last N days with scraped metadata, for the composer */
+  getRecentLinks(days: number = 7): Array<{
+    id: number; url: string; title: string; description: string;
+    category: string; sender_name: string; timestamp: number;
+  }> {
+    const cutoff = Math.floor(Date.now() / 1000) - days * 86400;
+    return this.db.prepare(`
+      SELECT id, url, COALESCE(title, '') as title,
+             COALESCE(description, '') as description,
+             category, sender_name, timestamp
+      FROM metacrisis_links
+      WHERE timestamp >= ?
+      ORDER BY timestamp DESC
+    `).all(cutoff) as any[];
+  }
+
   // ── Summaries ──
 
   saveSummary(

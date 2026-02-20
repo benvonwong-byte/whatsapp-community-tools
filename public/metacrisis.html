@@ -739,75 +739,97 @@
 
     /* Composer blocks */
     .composer-block {
-      padding: 12px 0;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      padding: 14px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
     }
 
     .composer-block:last-of-type { border-bottom: none; }
 
-    .composer-event-row,
-    .composer-resource-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 4px 0 4px 22px;
-      font-size: 12px;
-      color: var(--text);
-    }
-
-    .composer-event-row input[type="checkbox"],
-    .composer-resource-row input[type="checkbox"] {
-      flex-shrink: 0;
-    }
-
-    .composer-event-meta,
-    .composer-resource-meta {
-      color: var(--text-dim);
-      font-size: 11px;
-    }
-
-    .composer-bucket {
-      padding: 8px 0 8px 22px;
-      border-bottom: 1px solid rgba(255,255,255,0.03);
-    }
-
-    .composer-bucket:last-child { border-bottom: none; }
-
-    .composer-bucket-sender {
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text);
-      margin-bottom: 4px;
-    }
-
-    .composer-bucket-item {
+    .composer-link-row {
       display: flex;
       align-items: flex-start;
-      gap: 6px;
-      padding: 2px 0;
+      gap: 8px;
+      padding: 8px 4px;
+      border-bottom: 1px solid rgba(255,255,255,0.03);
+      transition: background 0.15s;
+    }
+
+    .composer-link-row:hover { background: rgba(255,255,255,0.02); }
+    .composer-link-row:last-child { border-bottom: none; }
+
+    .composer-link-row input[type="checkbox"] {
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    .composer-link-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .composer-link-title {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text);
+      margin-bottom: 2px;
+    }
+
+    .composer-link-title a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    .composer-link-summary {
       font-size: 11px;
       color: var(--text-dim);
       line-height: 1.4;
     }
 
-    .composer-bucket-item a {
-      color: var(--accent);
-      text-decoration: none;
-      font-size: 11px;
+    .composer-link-meta {
+      font-size: 10px;
+      color: var(--text-dim);
+      opacity: 0.6;
+      margin-top: 3px;
     }
 
-    .composer-highlight-row {
+    .composer-summary-row {
+      padding: 10px 4px;
+      border-bottom: 1px solid rgba(255,255,255,0.03);
+    }
+
+    .composer-summary-row:last-child { border-bottom: none; }
+
+    .composer-summary-header {
       display: flex;
       align-items: center;
       gap: 8px;
-      padding: 3px 0 3px 22px;
+      margin-bottom: 6px;
+    }
+
+    .composer-summary-date {
       font-size: 12px;
+      font-weight: 600;
       color: var(--text);
     }
 
-    .composer-highlight-count {
-      color: var(--text-dim);
+    .composer-summary-topics {
+      font-size: 10px;
+      color: var(--accent);
+    }
+
+    .composer-summary-body {
       font-size: 11px;
+      color: var(--text-dim);
+      line-height: 1.5;
+      padding-left: 24px;
+    }
+
+    .composer-summary-who {
+      font-size: 10px;
+      color: var(--text-dim);
+      opacity: 0.7;
+      padding-left: 24px;
+      margin-top: 4px;
     }
 
     .hidden { display: none !important; }
@@ -887,61 +909,30 @@
             <div class="section-title" style="margin-bottom:2px;">Weekly Update Composer</div>
             <div id="composer-date-range" style="font-size:11px;color:var(--text-dim);"></div>
           </div>
-          <button id="composer-regenerate" class="summarize-btn" style="font-size:11px;padding:4px 12px;">Regenerate Pulse</button>
         </div>
 
-        <!-- Events section -->
-        <div class="composer-block" id="composer-events-block">
-          <label style="display:flex;align-items:center;gap:6px;margin-bottom:8px;cursor:pointer;">
-            <input type="checkbox" id="composer-events-toggle" checked>
-            <span style="font-size:13px;font-weight:600;color:var(--accent);">Upcoming Events</span>
-          </label>
-          <div id="composer-events-list"></div>
+        <!-- Links section -->
+        <div class="composer-block">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+            <span style="font-size:13px;font-weight:600;color:var(--accent);">Links</span>
+            <div style="display:flex;gap:8px;">
+              <button id="composer-links-all" style="font-size:10px;padding:2px 8px;background:var(--surface2);color:var(--text-dim);border:1px solid var(--border);border-radius:4px;cursor:pointer;">All</button>
+              <button id="composer-links-none" style="font-size:10px;padding:2px 8px;background:var(--surface2);color:var(--text-dim);border:1px solid var(--border);border-radius:4px;cursor:pointer;">None</button>
+            </div>
+          </div>
+          <div id="composer-links-list"></div>
         </div>
 
-        <!-- Top Resources section -->
-        <div class="composer-block" id="composer-resources-block">
-          <label style="display:flex;align-items:center;gap:6px;margin-bottom:8px;cursor:pointer;">
-            <input type="checkbox" id="composer-resources-toggle" checked>
-            <span style="font-size:13px;font-weight:600;color:#6c5ce7;">Top Resources</span>
-          </label>
-          <div id="composer-resources-list"></div>
-        </div>
-
-        <!-- Most Active Member section -->
-        <div class="composer-block" id="composer-member-block">
-          <label style="display:flex;align-items:center;gap:6px;margin-bottom:8px;cursor:pointer;">
-            <input type="checkbox" id="composer-member-toggle" checked>
-            <span style="font-size:13px;font-weight:600;color:var(--green);">Most Active Member</span>
-          </label>
-          <div id="composer-member-content" style="font-size:13px;color:var(--text-dim);padding-left:22px;"></div>
-        </div>
-
-        <!-- Community Pulse section -->
-        <div class="composer-block" id="composer-pulse-block">
-          <label style="display:flex;align-items:center;gap:6px;margin-bottom:8px;cursor:pointer;">
-            <input type="checkbox" id="composer-pulse-toggle" checked>
-            <span style="font-size:13px;font-weight:600;color:var(--yellow);">Community Pulse</span>
-          </label>
-          <textarea id="composer-pulse-text" style="width:100%;min-height:80px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:12px;font-family:inherit;resize:vertical;line-height:1.5;" placeholder="AI-generated summary of who said what this week..."></textarea>
-        </div>
-
-        <!-- Discussion Buckets section -->
-        <div class="composer-block" id="composer-buckets-block">
-          <label style="display:flex;align-items:center;gap:6px;margin-bottom:8px;cursor:pointer;">
-            <input type="checkbox" id="composer-buckets-toggle" checked>
-            <span style="font-size:13px;font-weight:600;color:#e17055;">Discussion Highlights</span>
-          </label>
-          <div id="composer-buckets-list"></div>
-        </div>
-
-        <!-- Highlights section -->
-        <div class="composer-block" id="composer-highlights-block">
-          <label style="display:flex;align-items:center;gap:6px;margin-bottom:8px;cursor:pointer;">
-            <input type="checkbox" id="composer-highlights-toggle" checked>
-            <span style="font-size:13px;font-weight:600;color:#00cec9;">Trending Topics</span>
-          </label>
-          <div id="composer-highlights-list"></div>
+        <!-- Summaries section -->
+        <div class="composer-block">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+            <span style="font-size:13px;font-weight:600;color:#6c5ce7;">Discussion Summaries</span>
+            <div style="display:flex;gap:8px;">
+              <button id="composer-summaries-all" style="font-size:10px;padding:2px 8px;background:var(--surface2);color:var(--text-dim);border:1px solid var(--border);border-radius:4px;cursor:pointer;">All</button>
+              <button id="composer-summaries-none" style="font-size:10px;padding:2px 8px;background:var(--surface2);color:var(--text-dim);border:1px solid var(--border);border-radius:4px;cursor:pointer;">None</button>
+            </div>
+          </div>
+          <div id="composer-summaries-list"></div>
         </div>
 
         <!-- Preview -->

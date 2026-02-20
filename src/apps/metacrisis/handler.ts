@@ -5,6 +5,11 @@ import { config } from "../../config";
 /** URL regex to extract links from message body */
 const URL_REGEX = /https?:\/\/[^\s<>"')\]]+/gi;
 
+/** Override map for sender IDs that fail contact lookup (raw @lid IDs → display name) */
+const SENDER_NAME_OVERRIDES: Record<string, string> = {
+  "116084476788850:76@lid": "Benjamin Von Wong",
+};
+
 /** Categorize a URL based on its domain */
 export function categorizeUrl(url: string): string {
   const lower = url.toLowerCase();
@@ -90,9 +95,10 @@ export function createMetacrisisHandler(store: MetacrisisStore) {
     // Only process text messages with content
     if (!msg.body || msg.body.trim() === "") return;
 
-    // Get sender info
+    // Get sender info (check override map first for known @lid IDs)
+    const rawSender = msg.author || msg.from;
     const contact = await msg.getContact();
-    const senderName = contact?.pushname || contact?.name || msg.author || "";
+    const senderName = SENDER_NAME_OVERRIDES[rawSender] || contact?.pushname || contact?.name || msg.author || "";
 
     // Save the message
     store.saveMessage({

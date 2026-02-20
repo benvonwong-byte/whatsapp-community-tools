@@ -14,15 +14,8 @@ let activeTopicPeriod = "week";
 
 // Composer state
 let weeklyDraft = null;
-let composerEvents = {};    // { index: boolean } — which events are checked
-let composerResources = {}; // { index: boolean } — which resources are checked
-let composerShowMember = true;
-let composerShowEvents = true;
-let composerShowResources = true;
-let composerShowPulse = true;
-let composerShowBuckets = true;
-let composerShowHighlights = true;
-let composerBuckets = {};     // { senderName: boolean } — which discussion buckets are checked
+let composerLinks = {};      // { index: boolean } — which links are selected
+let composerSummaries = {};  // { index: boolean } — which daily summaries are selected
 
 // ── Init ──
 
@@ -85,22 +78,11 @@ async function loadDashboard() {
       // Only reset composer state on first load (when weeklyDraft is null)
       if (!weeklyDraft) {
         weeklyDraft = draft;
-        composerEvents = {};
-        (draft.events || []).forEach(function(_, i) { composerEvents[i] = true; });
-        composerResources = {};
-        (draft.topResources || []).forEach(function(_, i) { composerResources[i] = true; });
-        composerShowMember = true;
-        composerShowEvents = true;
-        composerShowResources = true;
-        composerShowPulse = true;
-        composerShowBuckets = true;
-        composerShowHighlights = true;
-        composerBuckets = {};
-        (draft.discussionBuckets || []).forEach(function(b) { composerBuckets[b.sender] = true; });
-        var pulseEl = document.getElementById("composer-pulse-text");
-        if (pulseEl) pulseEl.value = draft.communityPulse || "";
+        composerLinks = {};
+        (draft.links || []).forEach(function(_, i) { composerLinks[i] = true; });
+        composerSummaries = {};
+        (draft.dailyDigests || []).forEach(function(_, i) { composerSummaries[i] = true; });
       } else {
-        // Refresh data but keep user's toggle state
         weeklyDraft = draft;
       }
     }
@@ -656,26 +638,6 @@ function safeJsonParse(json) {
 // ── Weekly Update Composer ──
 
 function setupComposer() {
-  // Section toggles
-  var evtToggle = document.getElementById("composer-events-toggle");
-  var resToggle = document.getElementById("composer-resources-toggle");
-  var memToggle = document.getElementById("composer-member-toggle");
-  var pulseToggle = document.getElementById("composer-pulse-toggle");
-
-  var bucketsToggle = document.getElementById("composer-buckets-toggle");
-  var highlightsToggle = document.getElementById("composer-highlights-toggle");
-
-  if (evtToggle) evtToggle.addEventListener("change", function() { composerShowEvents = evtToggle.checked; updateComposerPreview(); });
-  if (resToggle) resToggle.addEventListener("change", function() { composerShowResources = resToggle.checked; updateComposerPreview(); });
-  if (memToggle) memToggle.addEventListener("change", function() { composerShowMember = memToggle.checked; updateComposerPreview(); });
-  if (pulseToggle) pulseToggle.addEventListener("change", function() { composerShowPulse = pulseToggle.checked; updateComposerPreview(); });
-  if (bucketsToggle) bucketsToggle.addEventListener("change", function() { composerShowBuckets = bucketsToggle.checked; updateComposerPreview(); });
-  if (highlightsToggle) highlightsToggle.addEventListener("change", function() { composerShowHighlights = highlightsToggle.checked; updateComposerPreview(); });
-
-  // Pulse text edit
-  var pulseText = document.getElementById("composer-pulse-text");
-  if (pulseText) pulseText.addEventListener("input", function() { updateComposerPreview(); });
-
   // Copy button
   var copyBtn = document.getElementById("composer-copy");
   if (copyBtn) copyBtn.addEventListener("click", function() {
@@ -691,9 +653,29 @@ function setupComposer() {
   var pushBtn = document.getElementById("composer-push");
   if (pushBtn) pushBtn.addEventListener("click", handleComposerPush);
 
-  // Regenerate button
-  var regenBtn = document.getElementById("composer-regenerate");
-  if (regenBtn) regenBtn.addEventListener("click", handleRegeneratePulse);
+  // Select All / None for links
+  var linksAll = document.getElementById("composer-links-all");
+  var linksNone = document.getElementById("composer-links-none");
+  if (linksAll) linksAll.addEventListener("click", function() {
+    (weeklyDraft.links || []).forEach(function(_, i) { composerLinks[i] = true; });
+    renderComposer();
+  });
+  if (linksNone) linksNone.addEventListener("click", function() {
+    (weeklyDraft.links || []).forEach(function(_, i) { composerLinks[i] = false; });
+    renderComposer();
+  });
+
+  // Select All / None for summaries
+  var summariesAll = document.getElementById("composer-summaries-all");
+  var summariesNone = document.getElementById("composer-summaries-none");
+  if (summariesAll) summariesAll.addEventListener("click", function() {
+    (weeklyDraft.dailyDigests || []).forEach(function(_, i) { composerSummaries[i] = true; });
+    renderComposer();
+  });
+  if (summariesNone) summariesNone.addEventListener("click", function() {
+    (weeklyDraft.dailyDigests || []).forEach(function(_, i) { composerSummaries[i] = false; });
+    renderComposer();
+  });
 }
 
 function renderComposer() {
@@ -703,138 +685,67 @@ function renderComposer() {
   var rangeEl = document.getElementById("composer-date-range");
   if (rangeEl) rangeEl.textContent = weeklyDraft.dateRange || "";
 
-  // Events list with individual checkboxes
-  var eventsList = document.getElementById("composer-events-list");
-  if (eventsList) {
-    var events = weeklyDraft.events || [];
-    if (events.length === 0) {
-      eventsList.innerHTML = '<div style="font-size:12px;color:var(--text-dim);padding-left:22px;">No upcoming events.</div>';
+  // Links list
+  var linksList = document.getElementById("composer-links-list");
+  if (linksList) {
+    var links = weeklyDraft.links || [];
+    if (links.length === 0) {
+      linksList.innerHTML = '<div style="font-size:12px;color:var(--text-dim);">No links shared this week.</div>';
     } else {
-      eventsList.innerHTML = events.map(function(evt, i) {
-        var checked = composerEvents[i] !== false ? "checked" : "";
-        var dateStr = evt.date ? new Date(evt.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "TBA";
-        var details = [dateStr];
-        if (evt.start_time) details.push(evt.start_time);
-        if (evt.location) details.push(evt.location);
-        return '<div class="composer-event-row">' +
-          '<input type="checkbox" data-event-idx="' + i + '" ' + checked + '>' +
-          '<span>' + escapeHtml(evt.name || "Untitled") + '</span>' +
-          '<span class="composer-event-meta">' + escapeHtml(details.join(" · ")) + '</span>' +
+      linksList.innerHTML = links.map(function(link, i) {
+        var checked = composerLinks[i] !== false ? "checked" : "";
+        var title = link.title && link.title !== "(untitled)" && link.title !== "(error)" ? link.title : truncateUrl(link.url, 50);
+        var summary = link.description || "";
+        return '<div class="composer-link-row">' +
+          '<input type="checkbox" data-link-idx="' + i + '" ' + checked + '>' +
+          '<div class="composer-link-info">' +
+            '<div class="composer-link-title"><a href="' + escapeAttr(link.url) + '" target="_blank" rel="noopener">' + escapeHtml(title) + '</a></div>' +
+            (summary ? '<div class="composer-link-summary">' + escapeHtml(summary) + '</div>' : '') +
+            '<div class="composer-link-meta">Shared by ' + escapeHtml(link.sender_name || "Unknown") + ' · ' + escapeHtml(link.category) + '</div>' +
+          '</div>' +
         '</div>';
       }).join("");
 
-      // Attach change listeners
-      eventsList.querySelectorAll("input[data-event-idx]").forEach(function(cb) {
+      linksList.querySelectorAll("input[data-link-idx]").forEach(function(cb) {
         cb.addEventListener("change", function() {
-          composerEvents[parseInt(cb.dataset.eventIdx)] = cb.checked;
+          composerLinks[parseInt(cb.dataset.linkIdx)] = cb.checked;
           updateComposerPreview();
         });
       });
     }
   }
 
-  // Resources list
-  var resourcesList = document.getElementById("composer-resources-list");
-  if (resourcesList) {
-    var resources = weeklyDraft.topResources || [];
-    if (resources.length === 0) {
-      resourcesList.innerHTML = '<div style="font-size:12px;color:var(--text-dim);padding-left:22px;">No resources shared this week.</div>';
+  // Summaries list
+  var summariesList = document.getElementById("composer-summaries-list");
+  if (summariesList) {
+    var digests = weeklyDraft.dailyDigests || [];
+    if (digests.length === 0) {
+      summariesList.innerHTML = '<div style="font-size:12px;color:var(--text-dim);">No daily summaries available.</div>';
     } else {
-      resourcesList.innerHTML = resources.map(function(res, i) {
-        var checked = composerResources[i] !== false ? "checked" : "";
-        var displayUrl = truncateUrl(res.url, 50);
-        return '<div class="composer-resource-row">' +
-          '<input type="checkbox" data-resource-idx="' + i + '" ' + checked + '>' +
-          '<a href="' + escapeAttr(res.url) + '" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none;font-size:12px;">' + escapeHtml(res.title || displayUrl) + '</a>' +
-          '<span class="composer-resource-meta">(' + (res.share_count || 1) + 'x' + (res.shared_by ? ' by ' + escapeHtml(res.shared_by) : '') + ')</span>' +
+      summariesList.innerHTML = digests.map(function(d, i) {
+        var checked = composerSummaries[i] !== false ? "checked" : "";
+        var dateStr = new Date(d.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+        var topics = (d.topics || []).slice(0, 5).join(", ");
+        var who = (d.whoSaidWhat || []).map(function(w) { return w.sender; }).join(", ");
+        var summaryText = d.summary || "";
+        if (summaryText.length > 300) summaryText = summaryText.slice(0, 300) + "…";
+        return '<div class="composer-summary-row">' +
+          '<div class="composer-summary-header">' +
+            '<input type="checkbox" data-summary-idx="' + i + '" ' + checked + '>' +
+            '<span class="composer-summary-date">' + escapeHtml(dateStr) + '</span>' +
+            '<span class="composer-summary-topics">' + escapeHtml(topics) + '</span>' +
+          '</div>' +
+          (summaryText ? '<div class="composer-summary-body">' + escapeHtml(summaryText) + '</div>' : '') +
+          (who ? '<div class="composer-summary-who">Participants: ' + escapeHtml(who) + '</div>' : '') +
         '</div>';
       }).join("");
 
-      resourcesList.querySelectorAll("input[data-resource-idx]").forEach(function(cb) {
+      summariesList.querySelectorAll("input[data-summary-idx]").forEach(function(cb) {
         cb.addEventListener("change", function() {
-          composerResources[parseInt(cb.dataset.resourceIdx)] = cb.checked;
+          composerSummaries[parseInt(cb.dataset.summaryIdx)] = cb.checked;
           updateComposerPreview();
         });
       });
-    }
-  }
-
-  // Most active member
-  var memberContent = document.getElementById("composer-member-content");
-  if (memberContent) {
-    var member = weeklyDraft.topMember;
-    if (member) {
-      memberContent.textContent = member.sender_name + " — " + member.message_count + " messages this week";
-    } else {
-      memberContent.textContent = "No member data this week.";
-    }
-  }
-
-  // Pulse text (only set if not user-edited)
-  var pulseEl = document.getElementById("composer-pulse-text");
-  if (pulseEl && !pulseEl.dataset.userEdited) {
-    pulseEl.value = weeklyDraft.communityPulse || "";
-  }
-
-  // Discussion Buckets — messages with links grouped by sender
-  var bucketsList = document.getElementById("composer-buckets-list");
-  if (bucketsList) {
-    var buckets = weeklyDraft.discussionBuckets || [];
-    if (buckets.length === 0) {
-      bucketsList.innerHTML = '<div style="font-size:12px;color:var(--text-dim);padding-left:22px;">No shared links this week.</div>';
-    } else {
-      bucketsList.innerHTML = buckets.map(function(bucket) {
-        var senderKey = bucket.sender;
-        var checked = composerBuckets[senderKey] !== false ? "checked" : "";
-        var itemsHtml = bucket.items.map(function(item) {
-          var linkTitle = item.link_title || truncateUrl(item.url, 40);
-          var desc = item.link_description || "";
-          var contextSnippet = item.body ? item.body.replace(/https?:\/\/[^\s]+/g, "").trim() : "";
-          if (contextSnippet.length > 100) contextSnippet = contextSnippet.slice(0, 100) + "…";
-          // Prefer scraped description over raw message context
-          var displayDesc = desc || contextSnippet;
-          if (displayDesc.length > 150) displayDesc = displayDesc.slice(0, 150) + "…";
-          return '<div class="composer-bucket-item">' +
-            '<span>→</span>' +
-            '<div>' +
-              '<a href="' + escapeAttr(item.url) + '" target="_blank" rel="noopener">' + escapeHtml(linkTitle) + '</a>' +
-              (displayDesc ? '<div style="color:var(--text-dim);font-size:11px;margin-top:1px;">' + escapeHtml(displayDesc) + '</div>' : '') +
-            '</div>' +
-          '</div>';
-        }).join("");
-        return '<div class="composer-bucket">' +
-          '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;" class="composer-bucket-sender">' +
-            '<input type="checkbox" data-bucket-sender="' + escapeAttr(senderKey) + '" ' + checked + '>' +
-            escapeHtml(senderKey) + ' <span style="color:var(--text-dim);font-weight:400;font-size:11px;">(' + bucket.items.length + ' link' + (bucket.items.length > 1 ? 's' : '') + ')</span>' +
-          '</label>' +
-          itemsHtml +
-        '</div>';
-      }).join("");
-
-      // Attach bucket toggle listeners
-      bucketsList.querySelectorAll("input[data-bucket-sender]").forEach(function(cb) {
-        cb.addEventListener("change", function() {
-          composerBuckets[cb.dataset.bucketSender] = cb.checked;
-          updateComposerPreview();
-        });
-      });
-    }
-  }
-
-  // Highlights — trending topics
-  var highlightsList = document.getElementById("composer-highlights-list");
-  if (highlightsList) {
-    var highlights = weeklyDraft.highlights || [];
-    if (highlights.length === 0) {
-      highlightsList.innerHTML = '<div style="font-size:12px;color:var(--text-dim);padding-left:22px;">No trending topics this week.</div>';
-    } else {
-      highlightsList.innerHTML = highlights.map(function(h) {
-        return '<div class="composer-highlight-row">' +
-          '<span style="color:#00cec9;">•</span> ' +
-          '<span>' + escapeHtml(h.topic) + '</span>' +
-          '<span class="composer-highlight-count">' + h.mention_count + ' mention' + (h.mention_count > 1 ? 's' : '') + '</span>' +
-        '</div>';
-      }).join("");
     }
   }
 
@@ -849,95 +760,45 @@ function buildComposerMessage() {
   lines.push("*" + (weeklyDraft.dateRange || "") + "*");
   lines.push("");
 
-  // Events
-  if (composerShowEvents) {
-    var events = (weeklyDraft.events || []).filter(function(_, i) { return composerEvents[i] !== false; });
-    if (events.length > 0) {
-      lines.push("*Upcoming Events*");
-      events.forEach(function(evt) {
-        var line = "- " + (evt.name || "Untitled");
-        if (evt.date) {
-          var d = new Date(evt.date + "T00:00:00");
-          line += " — " + d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
-        }
-        if (evt.start_time) line += " at " + evt.start_time;
-        if (evt.location) line += " | " + evt.location;
-        lines.push(line);
-        if (evt.url) lines.push("  " + evt.url);
-      });
-      lines.push("");
-    }
-  }
-
-  // Resources
-  if (composerShowResources) {
-    var resources = (weeklyDraft.topResources || []).filter(function(_, i) { return composerResources[i] !== false; });
-    if (resources.length > 0) {
-      lines.push("*Top Resources*");
-      resources.forEach(function(res) {
-        var title = res.title || truncateUrl(res.url, 40);
+  // Top Resources (selected links)
+  var selectedLinks = (weeklyDraft.links || []).filter(function(_, i) { return composerLinks[i] !== false; });
+  if (selectedLinks.length > 0) {
+    lines.push("*Top Resources*");
+    selectedLinks.forEach(function(link) {
+      var title = link.title && link.title !== "(untitled)" && link.title !== "(error)" ? link.title : truncateUrl(link.url, 40);
+      var summary = link.description || "";
+      if (summary) {
+        lines.push("- *" + title + "*");
+        lines.push("  " + summary);
+      } else {
         lines.push("- " + title);
-        lines.push("  " + res.url);
-      });
+      }
+      lines.push("  " + link.url);
       lines.push("");
-    }
+    });
   }
 
-  // Most active member
-  if (composerShowMember && weeklyDraft.topMember) {
-    lines.push("*Most Active Member*");
-    lines.push(weeklyDraft.topMember.sender_name + " — " + weeklyDraft.topMember.message_count + " messages");
+  // Discussion Summaries (selected daily digests)
+  var selectedDigests = (weeklyDraft.dailyDigests || []).filter(function(_, i) { return composerSummaries[i] !== false; });
+  if (selectedDigests.length > 0) {
+    lines.push("*Discussion Summaries*");
+    selectedDigests.forEach(function(d) {
+      var dateStr = new Date(d.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+      lines.push("");
+      lines.push("_" + dateStr + "_");
+      if (d.summary) {
+        lines.push(d.summary);
+      }
+      var topics = (d.topics || []).slice(0, 5);
+      if (topics.length > 0) {
+        lines.push("Topics: " + topics.join(", "));
+      }
+      var who = (d.whoSaidWhat || []).map(function(w) { return w.sender; });
+      if (who.length > 0) {
+        lines.push("Participants: " + who.join(", "));
+      }
+    });
     lines.push("");
-  }
-
-  // Community pulse
-  if (composerShowPulse) {
-    var pulseEl = document.getElementById("composer-pulse-text");
-    var pulseText = pulseEl ? pulseEl.value.trim() : "";
-    if (pulseText) {
-      lines.push("*Community Pulse*");
-      lines.push(pulseText);
-      lines.push("");
-    }
-  }
-
-  // Discussion Highlights (buckets)
-  if (composerShowBuckets && weeklyDraft.discussionBuckets) {
-    var activeBuckets = (weeklyDraft.discussionBuckets || []).filter(function(b) { return composerBuckets[b.sender] !== false; });
-    if (activeBuckets.length > 0) {
-      lines.push("*What People Shared*");
-      activeBuckets.forEach(function(bucket) {
-        lines.push("");
-        lines.push("*" + bucket.sender + "*:");
-        bucket.items.forEach(function(item) {
-          var title = item.link_title || truncateUrl(item.url, 40);
-          var desc = item.link_description || "";
-          var context = item.body ? item.body.replace(/https?:\/\/[^\s]+/g, "").trim() : "";
-          if (context.length > 120) context = context.slice(0, 120) + "…";
-          var summary = desc || context;
-          if (summary.length > 150) summary = summary.slice(0, 150) + "…";
-          if (summary) {
-            lines.push("→ " + title + " — " + summary);
-          } else {
-            lines.push("→ " + title);
-          }
-          lines.push("  " + item.url);
-        });
-      });
-      lines.push("");
-    }
-  }
-
-  // Trending topics (highlights)
-  if (composerShowHighlights && weeklyDraft.highlights) {
-    var highlights = weeklyDraft.highlights || [];
-    if (highlights.length > 0) {
-      lines.push("*Trending Topics*");
-      highlights.forEach(function(h) {
-        lines.push("• " + h.topic + " (" + h.mention_count + " mention" + (h.mention_count > 1 ? "s" : "") + ")");
-      });
-      lines.push("");
-    }
   }
 
   return lines.join("\n").trim();
@@ -982,30 +843,3 @@ async function handleComposerPush() {
   }
 }
 
-async function handleRegeneratePulse() {
-  var btn = document.getElementById("composer-regenerate");
-  if (btn) { btn.disabled = true; btn.textContent = "Generating..."; }
-
-  try {
-    // Trigger daily digest to regenerate the community pulse
-    var res = await adminFetch("/api/metacrisis/daily-digest", { method: "POST" });
-    if (!res.ok) throw new Error("Digest failed");
-
-    // Re-fetch the draft
-    var draftRes = await adminFetch("/api/metacrisis/weekly-draft");
-    if (draftRes.ok) {
-      weeklyDraft = await draftRes.json();
-      var pulseEl = document.getElementById("composer-pulse-text");
-      if (pulseEl) {
-        pulseEl.value = weeklyDraft.communityPulse || "";
-        pulseEl.dataset.userEdited = "";
-      }
-      renderComposer();
-    }
-  } catch (err) {
-    console.error("Regenerate failed:", err);
-    alert("Failed to regenerate: " + err.message);
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = "Regenerate Pulse"; }
-  }
-}

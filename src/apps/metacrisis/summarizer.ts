@@ -335,7 +335,7 @@ export async function processEventLinks(store: MetacrisisStore): Promise<number>
 }
 
 /**
- * Scrape unscraped links to extract title and description from page HTML.
+ * Scrape unscraped links: fetch page content, extract title, then AI-summarize.
  * Returns the number of links successfully scraped.
  */
 export async function scrapeLinksMeta(store: MetacrisisStore): Promise<number> {
@@ -349,14 +349,28 @@ export async function scrapeLinksMeta(store: MetacrisisStore): Promise<number> {
     try {
       const html = await fetchRawHtml(link.url);
       if (!html) {
-        // Mark as scraped with empty values so we don't retry
-        store.updateLinkMeta(link.id, "(untitled)", "");
+        store.updateLinkMeta(link.id, "(untitled)", "Could not fetch page content.");
         continue;
       }
 
       const title = extractTitle(html);
-      const description = extractDescription(html);
-      store.updateLinkMeta(link.id, title, description);
+
+      // Use AI to summarize the page content
+      const pageText = htmlToPlainText(html).slice(0, 4000);
+      let summary = "";
+      try {
+        const model = getModel();
+        const result = await model.generateContent(
+          `Summarize this web page in under 400 characters. Be concise and informative. Focus on what the content is about and why it's relevant. Do NOT use markdown or formatting. Just plain text.\n\nURL: ${link.url}\nTitle: ${title}\n\nContent:\n${pageText}`
+        );
+        summary = result.response.text().trim().slice(0, 400);
+      } catch (aiErr: any) {
+        // Fall back to meta description if AI fails
+        summary = extractDescription(html);
+        console.log(`[metacrisis-scraper] AI summary failed for ${link.url}, using meta description`);
+      }
+
+      store.updateLinkMeta(link.id, title, summary);
       scraped++;
       console.log(`[metacrisis-scraper] Scraped: ${title.slice(0, 60)} — ${link.url}`);
     } catch (err: any) {
@@ -367,6 +381,16 @@ export async function scrapeLinksMeta(store: MetacrisisStore): Promise<number> {
 
   console.log(`[metacrisis-scraper] Scraped ${scraped}/${unscraped.length} links.`);
   return scraped;
+}
+
+/** Strip HTML tags to get plain text for AI summarization */
+function htmlToPlainText(html: string): string {
+  return html
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /** Fetch raw HTML from a URL with timeout */

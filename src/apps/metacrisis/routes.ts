@@ -194,64 +194,30 @@ export function createMetacrisisRouter(
     try {
       // Auto-scrape any unscraped links before building the draft
       try { await scrapeLinksMeta(store); } catch (e) { console.error("[metacrisis] Auto-scrape failed:", e); }
-      store.markPastEvents();
-      const events = store.getUpcomingEvents();
-      const topResources = store.getTopResources(7, 5);
-      const topMember = store.getWeeklyTopMember(7);
-      const dailyDigests = store.getRecentDailyDigests(7);
-
-      // Build community pulse from daily digests' who-said-what
-      const whoEntries: { sender: string; summary: string }[] = [];
-      for (const d of dailyDigests) {
-        try {
-          const parsed = JSON.parse(d.who_said_what_json || "[]");
-          if (Array.isArray(parsed)) {
-            for (const entry of parsed) {
-              const name = entry.sender || entry.name || "Unknown";
-              const existing = whoEntries.find((e: any) => e.sender === name);
-              if (!existing) {
-                whoEntries.push({ sender: name, summary: entry.summary || entry.contribution || "" });
-              }
-            }
-          }
-        } catch {}
-      }
-      let communityPulse = "";
-      if (whoEntries.length > 0) {
-        communityPulse = whoEntries.map((e) => `*${e.sender}*: ${e.summary}`).join("\n");
-      }
 
       const now = new Date();
       const weekAgo = new Date(now.getTime() - 7 * 86400000);
       const dateRange = `${weekAgo.toLocaleDateString("en-US", { month: "short", day: "numeric" })} → ${now.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
 
-      // Discussion buckets: messages with links, grouped by person
-      const messagesWithLinks = store.getMessagesWithLinks(7, 30);
-      const discussionBuckets: Record<string, { sender: string; items: { body: string; url: string; link_title: string; link_description: string; category: string; timestamp: number }[] }> = {};
-      for (const m of messagesWithLinks) {
-        if (!discussionBuckets[m.sender_name]) {
-          discussionBuckets[m.sender_name] = { sender: m.sender_name, items: [] };
-        }
-        discussionBuckets[m.sender_name].items.push({
-          body: m.body, url: m.url, link_title: m.link_title,
-          link_description: m.link_description,
-          category: m.category, timestamp: m.timestamp,
-        });
-      }
+      // Links: all scraped links from the last 7 days
+      const links = store.getRecentLinks(7);
 
-      // Highlights: top discussed topics
-      const highlights = store.getWeeklyHighlights(7);
-
-      res.json({
-        events,
-        topResources,
-        topMember: topMember || null,
-        communityPulse,
-        dateRange,
-        weeklyLeaderboard: store.getLeaderboard(5),
-        discussionBuckets: Object.values(discussionBuckets),
-        highlights,
+      // Daily digests: summaries with who-said-what and topics
+      const dailyDigests = store.getRecentDailyDigests(7).map((d) => {
+        let whoSaidWhat: { sender: string; summary: string }[] = [];
+        let topics: string[] = [];
+        try { whoSaidWhat = JSON.parse(d.who_said_what_json || "[]"); } catch {}
+        try { topics = JSON.parse(d.key_topics_json || "[]"); } catch {}
+        return {
+          date: d.date,
+          summary: d.summary,
+          whoSaidWhat,
+          topics,
+          messageCount: d.message_count,
+        };
       });
+
+      res.json({ dateRange, links, dailyDigests });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || "Failed to build weekly draft" });
     }
