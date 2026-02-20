@@ -43,7 +43,8 @@ let activeTagFilters = new Set();
 let tagFilterMode = "OR";
 let calYear = new Date().getFullYear();
 let calMonth = new Date().getMonth() + 1;
-let negWindowDays = 30;
+let negWindowDays = 90;
+let negOffsetPeriods = 0;
 let neglectedData = [];
 let negNavBound = false;
 let dashboardTierFilter = null; // null = all, number = tier_id, "none" = unassigned
@@ -558,6 +559,8 @@ function renderDashboardData(data) {
   neglectedData = data.neglected || [];
   populateNeglectedFilters(neglectedData);
   filterAndRenderNeglected();
+  var negRangeEl = $("neg-date-range");
+  if (negRangeEl) negRangeEl.textContent = negDateRangeLabel();
   renderInitiatorsList(data.topInitiators);
   renderTierPills(data.tierDistribution);
 }
@@ -594,6 +597,7 @@ async function loadDashboard() {
 
   // 4. Load secondary sections in parallel (don't block main render)
   loadTopFriends();
+  loadNeglected(); // Refresh with correct window (dashboard bundles 30d default)
   loadDashboardTags();
   loadCalendar();
   loadImessageMonitor();
@@ -931,24 +935,73 @@ function renderWeeklyChart(data) {
 function setupNeglectedNav() {
   if (negNavBound) return;
   negNavBound = true;
+
+  // Range buttons (3m, 6m, 1y)
   document.querySelectorAll(".neg-window-btn").forEach(btn => {
     btn.addEventListener("click", () => {
       negWindowDays = parseInt(btn.dataset.days);
+      negOffsetPeriods = 0;
       document.querySelectorAll(".neg-window-btn").forEach(b => b.classList.remove("active"));
       btn.classList.add("active");
       loadNeglected();
     });
   });
+
+  // Prev/Next arrows
+  var prevBtn = $("neg-prev");
+  var nextBtn = $("neg-next");
+  if (prevBtn) {
+    prevBtn.addEventListener("click", () => {
+      negOffsetPeriods++;
+      loadNeglected();
+    });
+  }
+  if (nextBtn) {
+    nextBtn.addEventListener("click", () => {
+      negOffsetPeriods = Math.max(0, negOffsetPeriods - 1);
+      loadNeglected();
+    });
+  }
+
+  // Keyboard navigation
+  var section = $("neglected-section");
+  if (section) {
+    section.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowLeft") { e.preventDefault(); negOffsetPeriods++; loadNeglected(); }
+      else if (e.key === "ArrowRight") { e.preventDefault(); negOffsetPeriods = Math.max(0, negOffsetPeriods - 1); loadNeglected(); }
+    });
+    section.addEventListener("mouseenter", () => section.focus());
+  }
+}
+
+function negDateRangeLabel() {
+  var now = Date.now();
+  var periodEnd = new Date(now - negOffsetPeriods * negWindowDays * 86400000);
+  var periodStart = new Date(now - (negOffsetPeriods + 1) * negWindowDays * 86400000);
+  var fmt = function(d) { return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); };
+  return fmt(periodStart) + " \u2192 " + fmt(periodEnd);
 }
 
 async function loadNeglected() {
   try {
-    const res = await adminFetch("/api/friends/neglected?days=" + negWindowDays);
+    var now = Math.floor(Date.now() / 1000);
+    var beforeTs = now - negOffsetPeriods * negWindowDays * 86400;
+    var url = "/api/friends/neglected?days=" + negWindowDays + "&before=" + beforeTs;
+    var negTierParam = dashboardTierFilter !== null ? "&tier=" + encodeURIComponent(dashboardTierFilter) : "";
+    var res = await adminFetch(url + negTierParam);
     if (!res.ok) throw new Error("Failed");
-    const data = await res.json();
+    var data = await res.json();
     neglectedData = data.contacts || [];
     populateNeglectedFilters(neglectedData);
     filterAndRenderNeglected();
+
+    // Update date range label
+    var rangeEl = $("neg-date-range");
+    if (rangeEl) rangeEl.textContent = negDateRangeLabel();
+
+    // Disable next button at current period
+    var nextBtn = $("neg-next");
+    if (nextBtn) nextBtn.disabled = negOffsetPeriods === 0;
   } catch (err) {
     console.error("Failed to load neglected:", err);
   }

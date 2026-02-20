@@ -82,11 +82,12 @@ export function createFriendsRouter(
 
   router.get("/neglected", (req: Request, res: Response) => {
     const days = parseInt(req.query.days as string) || 30;
+    const before = parseInt(req.query.before as string) || 0;
     const tierParam = req.query.tier as string | undefined;
     let tierId: number | null | undefined = undefined;
     if (tierParam === "none") tierId = null;
     else if (tierParam && !isNaN(parseInt(tierParam))) tierId = parseInt(tierParam);
-    const contacts = store.getNeglectedContacts(days, tierId);
+    const contacts = store.getNeglectedContacts(days, tierId, before || undefined);
     res.json({ contacts, days });
   });
 

@@ -1881,17 +1881,20 @@
       </div>
 
       <!-- Neglected friends -->
-      <div class="section" id="neglected-section">
+      <div class="section" id="neglected-section" tabindex="0" style="outline:none;">
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
-          <div class="section-title" style="margin:0;">Neglected Friends</div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <button id="neg-prev" class="tf-nav-btn" title="Previous period">&larr;</button>
+            <div class="section-title" style="margin:0;">Neglected Friends</div>
+            <button id="neg-next" class="tf-nav-btn" title="Next period">&rarr;</button>
+          </div>
           <div class="neg-window-btns" id="neg-window-btns">
-            <button class="neg-window-btn" data-days="7">7d</button>
-            <button class="neg-window-btn" data-days="14">14d</button>
-            <button class="neg-window-btn active" data-days="30">30d</button>
-            <button class="neg-window-btn" data-days="60">60d</button>
-            <button class="neg-window-btn" data-days="90">90d</button>
+            <button class="neg-window-btn active" data-days="90">3m</button>
+            <button class="neg-window-btn" data-days="180">6m</button>
+            <button class="neg-window-btn" data-days="365">1y</button>
           </div>
         </div>
+        <div id="neg-date-range" style="font-size:10px;color:var(--muted);margin-bottom:6px;"></div>
         <div id="neg-filters" style="display:flex;gap:4px;margin-bottom:6px;flex-wrap:wrap;">
           <select id="neg-sort" style="font-size:10px;padding:2px 4px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;">
             <option value="days-silent">Days Silent (Most)</option>

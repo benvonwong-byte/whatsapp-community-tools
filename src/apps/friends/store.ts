@@ -940,9 +940,10 @@ export class FriendsStore extends SettingsStore {
     `).all(startTs) as any[];
   }
 
-  getNeglectedContacts(daysSilent: number, tierId?: number | null): any[] {
-    const cutoff = Math.floor(Date.now() / 1000) - daysSilent * 86400;
+  getNeglectedContacts(daysSilent: number, tierId?: number | null, beforeTs?: number): any[] {
+    const cutoff = (beforeTs || Math.floor(Date.now() / 1000)) - daysSilent * 86400;
     const tf = this.tierClause(tierId);
+    const upperBound = beforeTs ? ` AND c.last_seen < ${Number(beforeTs)}` : "";
     return this.db.prepare(`
       SELECT
         c.id, COALESCE(c.display_name, c.name) as name,
@@ -963,7 +964,7 @@ export class FriendsStore extends SettingsStore {
         JOIN friends_chats ch ON ch.chat_id = m.chat_id AND ch.is_group = 0
         GROUP BY m.chat_id
       ) msg_stats ON msg_stats.chat_id = c.id
-      WHERE c.last_seen < ? AND c.last_seen > 0
+      WHERE c.last_seen < ? AND c.last_seen > 0${upperBound}
         AND c.id NOT LIKE '%@broadcast'
         AND COALESCE(c.hidden, 0) = 0
         AND COALESCE(c.hidden_from_neglected, 0) = 0${tf}
