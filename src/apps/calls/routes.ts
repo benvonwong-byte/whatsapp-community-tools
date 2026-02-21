@@ -70,7 +70,7 @@ export function createCallsRouter(store: FriendsStore): Router {
       });
     } catch (err: any) {
       console.error("[calls] Transcription failed:", err);
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: "Transcription failed" });
     }
   });
 
@@ -98,7 +98,7 @@ export function createCallsRouter(store: FriendsStore): Router {
       res.json({ ok: true, id });
     } catch (err: any) {
       console.error("[calls] Save error:", err);
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: "Save failed" });
     }
   });
 

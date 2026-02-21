@@ -1,4 +1,5 @@
 import { Router, Request, Response } from "express";
+import rateLimit from "express-rate-limit";
 import { MetacrisisStore } from "./store";
 import { MetacrisisHandlerDiagnostics } from "./handler";
 import { scrapeLinksMeta, scrapeUrlForQuickShare } from "./summarizer";
@@ -16,6 +17,11 @@ export function createMetacrisisRouter(
   sendRawToAdjacentEvents?: (message: string) => Promise<void>
 ): Router {
   const router = Router();
+  const MAX_MESSAGE_LENGTH = 10000; // WhatsApp max is ~65k but keep reasonable
+
+  // Rate limiters for expensive/sensitive operations
+  const scrapeLimiter = rateLimit({ windowMs: 60 * 1000, max: 10, message: { error: "Too many scrape requests. Try again in a minute." } });
+  const pushLimiter = rateLimit({ windowMs: 60 * 1000, max: 5, message: { error: "Too many push requests. Try again in a minute." } });
 
   // GET /api/metacrisis/summaries?days=30&type=daily|weekly
   router.get("/summaries", (req: Request, res: Response) => {
@@ -130,7 +136,8 @@ export function createMetacrisisRouter(
       await weeklySummarizeTrigger();
       res.json({ ok: true });
     } catch (err: any) {
-      res.status(500).json({ error: err?.message || "Summarization failed" });
+      console.error("[metacrisis] Summarization failed:", err);
+      res.status(500).json({ error: "Summarization failed" });
     }
   });
 
@@ -140,7 +147,8 @@ export function createMetacrisisRouter(
       await dailyDigestTrigger();
       res.json({ ok: true });
     } catch (err: any) {
-      res.status(500).json({ error: err?.message || "Daily digest failed" });
+      console.error("[metacrisis] Daily digest failed:", err);
+      res.status(500).json({ error: "Daily digest failed" });
     }
   });
 
@@ -150,7 +158,8 @@ export function createMetacrisisRouter(
       const count = await processEventsTrigger();
       res.json({ ok: true, processed: count });
     } catch (err: any) {
-      res.status(500).json({ error: err?.message || "Event processing failed" });
+      console.error("[metacrisis] Event processing failed:", err);
+      res.status(500).json({ error: "Event processing failed" });
     }
   });
 
@@ -167,7 +176,8 @@ export function createMetacrisisRouter(
       store.markPushed(date, "weekly");
       res.json({ ok: true, date, pushed: true });
     } catch (err: any) {
-      res.status(500).json({ error: err?.message || "Push failed" });
+      console.error("[metacrisis] Push failed:", err);
+      res.status(500).json({ error: "Push failed" });
     }
   });
 
@@ -177,28 +187,31 @@ export function createMetacrisisRouter(
       const count = await backfillTrigger();
       res.json({ ok: true, messagesImported: count });
     } catch (err: any) {
-      res.status(500).json({ error: err?.message || "Backfill failed" });
+      console.error("[metacrisis] Backfill failed:", err);
+      res.status(500).json({ error: "Backfill failed" });
     }
   });
 
   // POST /api/metacrisis/scrape-links — scrape unscraped link titles/descriptions
-  router.post("/scrape-links", async (_req: Request, res: Response) => {
+  router.post("/scrape-links", scrapeLimiter, async (_req: Request, res: Response) => {
     try {
       const count = await scrapeLinksMeta(store);
       res.json({ ok: true, scraped: count });
     } catch (err: any) {
-      res.status(500).json({ error: err?.message || "Link scraping failed" });
+      console.error("[metacrisis] Link scraping failed:", err);
+      res.status(500).json({ error: "Link scraping failed" });
     }
   });
 
   // POST /api/metacrisis/rescrape-links — force re-scrape all links with improved scraper
-  router.post("/rescrape-links", async (_req: Request, res: Response) => {
+  router.post("/rescrape-links", scrapeLimiter, async (_req: Request, res: Response) => {
     try {
       const cleared = store.clearAllLinkMeta();
       const count = await scrapeLinksMeta(store);
       res.json({ ok: true, cleared, scraped: count });
     } catch (err: any) {
-      res.status(500).json({ error: err?.message || "Re-scraping failed" });
+      console.error("[metacrisis] Re-scraping failed:", err);
+      res.status(500).json({ error: "Re-scraping failed" });
     }
   });
 
@@ -254,16 +267,21 @@ export function createMetacrisisRouter(
         lastUpdateSent,
       });
     } catch (err: any) {
-      res.status(500).json({ error: err?.message || "Failed to build weekly draft" });
+      console.error("[metacrisis] Weekly draft failed:", err);
+      res.status(500).json({ error: "Failed to build weekly draft" });
     }
   });
 
   // POST /api/metacrisis/push-weekly — push a composed message to WhatsApp announcement chat
-  router.post("/push-weekly", async (req: Request, res: Response) => {
+  router.post("/push-weekly", pushLimiter, async (req: Request, res: Response) => {
     try {
       const { message } = req.body;
       if (!message || typeof message !== "string") {
         res.status(400).json({ error: "message (string) is required" });
+        return;
+      }
+      if (message.length > MAX_MESSAGE_LENGTH) {
+        res.status(400).json({ error: `Message too long (max ${MAX_MESSAGE_LENGTH} chars)` });
         return;
       }
       if (!sendRawToAnnouncement) {
@@ -280,31 +298,50 @@ export function createMetacrisisRouter(
       store.markPushed(today, "weekly");
       res.json({ ok: true, date: today });
     } catch (err: any) {
-      res.status(500).json({ error: err?.message || "Push failed" });
+      res.status(500).json({ error: "Push failed" });
     }
   });
 
   // POST /api/metacrisis/scrape-url — scrape a single URL for quick share
-  router.post("/scrape-url", async (req: Request, res: Response) => {
+  router.post("/scrape-url", scrapeLimiter, async (req: Request, res: Response) => {
     try {
       const { url } = req.body;
       if (!url || typeof url !== "string") {
         res.status(400).json({ error: "url (string) is required" });
         return;
       }
+      // Validate URL protocol
+      try {
+        const parsed = new URL(url);
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+          res.status(400).json({ error: "Only http and https URLs are allowed" });
+          return;
+        }
+      } catch {
+        res.status(400).json({ error: "Invalid URL" });
+        return;
+      }
+      if (url.length > 2048) {
+        res.status(400).json({ error: "URL too long" });
+        return;
+      }
       const data = await scrapeUrlForQuickShare(url);
       res.json(data);
     } catch (err: any) {
-      res.status(500).json({ error: err?.message || "Scraping failed" });
+      res.status(500).json({ error: "Scraping failed" });
     }
   });
 
   // POST /api/metacrisis/push-to-chat — push a message to Community Chat
-  router.post("/push-to-chat", async (req: Request, res: Response) => {
+  router.post("/push-to-chat", pushLimiter, async (req: Request, res: Response) => {
     try {
       const { message } = req.body;
       if (!message || typeof message !== "string") {
         res.status(400).json({ error: "message (string) is required" });
+        return;
+      }
+      if (message.length > MAX_MESSAGE_LENGTH) {
+        res.status(400).json({ error: `Message too long (max ${MAX_MESSAGE_LENGTH} chars)` });
         return;
       }
       if (!sendRawToCommunity) {
@@ -314,16 +351,20 @@ export function createMetacrisisRouter(
       await sendRawToCommunity(message);
       res.json({ ok: true });
     } catch (err: any) {
-      res.status(500).json({ error: err?.message || "Push failed" });
+      res.status(500).json({ error: "Push failed" });
     }
   });
 
   // POST /api/metacrisis/push-to-adjacent — push a message to Adjacent Events chat
-  router.post("/push-to-adjacent", async (req: Request, res: Response) => {
+  router.post("/push-to-adjacent", pushLimiter, async (req: Request, res: Response) => {
     try {
       const { message } = req.body;
       if (!message || typeof message !== "string") {
         res.status(400).json({ error: "message (string) is required" });
+        return;
+      }
+      if (message.length > MAX_MESSAGE_LENGTH) {
+        res.status(400).json({ error: `Message too long (max ${MAX_MESSAGE_LENGTH} chars)` });
         return;
       }
       if (!sendRawToAdjacentEvents) {
@@ -333,7 +374,7 @@ export function createMetacrisisRouter(
       await sendRawToAdjacentEvents(message);
       res.json({ ok: true });
     } catch (err: any) {
-      res.status(500).json({ error: err?.message || "Push failed" });
+      res.status(500).json({ error: "Push failed" });
     }
   });
 

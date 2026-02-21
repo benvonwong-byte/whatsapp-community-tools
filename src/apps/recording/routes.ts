@@ -86,7 +86,7 @@ export function createRecordingRouter(
       });
     } catch (err: any) {
       console.error("[recording] Transcription failed:", err);
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: "Transcription failed" });
     }
   });
 

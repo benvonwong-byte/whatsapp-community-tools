@@ -618,11 +618,38 @@ function buildPageContext(html: string, url: string): string {
   return parts.join("\n\n---\n\n");
 }
 
+/** Check if a hostname resolves to a private/internal IP */
+function isPrivateOrReserved(hostname: string): boolean {
+  // Block obvious hostnames
+  if (hostname === "localhost" || hostname.endsWith(".local") || hostname.endsWith(".internal")) return true;
+
+  // Check if it's a raw IP address
+  const ipv4 = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (ipv4) {
+    const [, a, b, c, d] = ipv4.map(Number);
+    if (a === 127) return true;                                   // 127.0.0.0/8 loopback
+    if (a === 10) return true;                                    // 10.0.0.0/8 private
+    if (a === 172 && b >= 16 && b <= 31) return true;             // 172.16.0.0/12 private
+    if (a === 192 && b === 168) return true;                      // 192.168.0.0/16 private
+    if (a === 169 && b === 254) return true;                      // 169.254.0.0/16 link-local + cloud metadata
+    if (a === 0) return true;                                     // 0.0.0.0/8
+    if (a >= 224) return true;                                    // multicast + reserved
+  }
+
+  // Block IPv6 loopback and link-local
+  if (hostname === "::1" || hostname === "[::1]") return true;
+  if (hostname.startsWith("fe80:") || hostname.startsWith("[fe80:")) return true;
+
+  return false;
+}
+
 /** Fetch raw HTML from a URL with timeout */
 async function fetchRawHtml(url: string): Promise<string | null> {
   try {
-    const { hostname } = new URL(url);
-    if (hostname === "localhost" || hostname === "127.0.0.1" || hostname.endsWith(".local")) return null;
+    const parsed = new URL(url);
+    // Only allow http and https protocols
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    if (isPrivateOrReserved(parsed.hostname)) return null;
   } catch { return null; }
 
   try {
