@@ -2012,31 +2012,10 @@ function setupDetailReplyBox(contactId, messages) {
         if (!delivered) throw new Error("Delivery timed out — check WhatsApp connection");
       }
 
-      // Success — clear input and show sent message in conversation
+      // Success — close the panel
       replyInput.value = "";
       replyInput.style.height = "auto";
-      var successColor = isIMessage ? "#3478F6" : "#25D366";
-      replyStatus.style.color = successColor;
-      replyStatus.textContent = "Sent!";
-      setTimeout(function() { replyStatus.style.display = "none"; }, 3000);
-
-      // Append the sent message to conversation log
-      var container = $("detail-messages");
-      if (container) {
-        var now = new Date();
-        var timeStr = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-        var sourceBadge = isIMessage
-          ? '<span class="msg-source imessage">iM</span>'
-          : '<span class="msg-source whatsapp">WA</span>';
-        var bubbleClass = isIMessage ? "msg-bubble sent imessage" : "msg-bubble sent";
-        var bubble = '<div class="msg-row sent">' +
-          '<div class="' + bubbleClass + '">' +
-            esc(msg) +
-            '<span class="msg-time">' + sourceBadge + esc(timeStr) + '</span>' +
-          '</div></div>';
-        container.insertAdjacentHTML("beforeend", bubble);
-        container.scrollTop = container.scrollHeight;
-      }
+      closeDetailPanel();
     } catch (err) {
       replyStatus.style.color = "#f44";
       replyStatus.textContent = "Failed: " + err.message;

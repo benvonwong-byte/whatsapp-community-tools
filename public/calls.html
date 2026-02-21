@@ -240,6 +240,25 @@
 
     .empty-state { color: var(--text-dim); font-size: 13px; text-align: center; padding: 20px; }
     .load-more { display: block; margin: 12px auto; }
+
+    /* Mobile */
+    @media (max-width: 600px) {
+      .container { padding: 16px 12px; }
+      .recorder-section { padding: 20px 16px; }
+      .contact-picker input { max-width: 100%; }
+      .contact-dropdown { width: 100%; left: 0; transform: none; }
+      .level-meter { width: 80%; }
+      .call-type-row { flex-wrap: wrap; }
+      .call-type-btn { padding: 6px 14px; font-size: 12px; }
+      .source-btn { padding: 8px 16px; font-size: 13px; }
+      .record-btn { width: 88px; height: 88px; }
+      .record-btn::after { width: 36px; height: 36px; }
+      .record-btn.recording::after { width: 28px; height: 28px; }
+      .call-card-actions button { padding: 6px 14px; font-size: 11px; }
+      .action-btn { padding: 10px 20px; font-size: 13px; }
+      .action-row { flex-direction: column; }
+      .action-row .action-btn { width: 100%; }
+    }
   </style>
 </head>
 <body>

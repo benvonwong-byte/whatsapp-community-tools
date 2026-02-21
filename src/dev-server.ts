@@ -76,7 +76,7 @@ async function main() {
     path: "/api/metacrisis",
     router: createMetacrisisRouter(
       metacrisisStore, notAvailable, notAvailable, notAvailable,
-      notAvailableNum, notAvailableNum, undefined, undefined
+      notAvailableNum, notAvailableNum, undefined, undefined, undefined
     ),
   });
 

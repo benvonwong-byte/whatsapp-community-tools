@@ -462,6 +462,13 @@ async function main() {
     console.log(`[metacrisis] Pushed composed message to ${config.metacrisisAnnouncementChat}`);
   };
 
+  const sendRawToCommunity = async (message: string) => {
+    const chat = await whatsapp.getChatByName(config.metacrisisChatName);
+    if (!chat) throw new Error(`Chat "${config.metacrisisChatName}" not found`);
+    await chat.sendMessage(message);
+    console.log(`[metacrisis] Pushed message to ${config.metacrisisChatName}`);
+  };
+
   appRouters.push({
     path: "/api/metacrisis",
     router: createMetacrisisRouter(
@@ -472,7 +479,8 @@ async function main() {
       metacrisisBackfill,
       () => processEventLinks(metacrisisStore),
       (metacrisisHandler as any).getDiagnostics,
-      sendRawToAnnouncement
+      sendRawToAnnouncement,
+      sendRawToCommunity
     ),
   });
 

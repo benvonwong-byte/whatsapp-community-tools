@@ -694,6 +694,87 @@ function decodeHtmlEntities(str: string): string {
     .replace(/&#x2F;/g, "/");
 }
 
+// ── Quick Share: scrape a single URL for the link sharer ──
+
+export async function scrapeUrlForQuickShare(url: string): Promise<{
+  title: string;
+  description: string;
+  category: string;
+  date: string | null;
+  time: string | null;
+  location: string | null;
+  url: string;
+}> {
+  const oembedData = await fetchOEmbed(url);
+  let oembedParsed: any = null;
+  if (oembedData) {
+    try { oembedParsed = JSON.parse(oembedData); } catch {}
+  }
+
+  const html = await fetchRawHtml(url);
+  if (!html && !oembedParsed) {
+    return { title: "(untitled)", description: "", category: "other", date: null, time: null, location: null, url };
+  }
+
+  let title = html ? extractTitle(html) : "(untitled)";
+  if ((title === "(untitled)" || !title) && oembedParsed?.title) {
+    title = oembedParsed.title;
+  }
+
+  let pageContext = html ? buildPageContext(html, url) : "";
+  if (oembedData) pageContext = `OEMBED DATA:\n${oembedData}\n\n---\n\n${pageContext}`;
+
+  if (pageContext.length < 100) {
+    return { title, description: "", category: "other", date: null, time: null, location: null, url };
+  }
+
+  try {
+    const model = getModel();
+    const today = new Date().toISOString().split("T")[0];
+    const result = await model.generateContent(
+      `You are summarizing a link for sharing in a community WhatsApp group. Today's date is ${today}.
+
+URL: ${url}
+Title: ${title}
+
+${pageContext}
+
+Respond with ONLY a JSON object (no markdown fences):
+{
+  "title": "clear, concise title",
+  "description": "2 sentence summary",
+  "category": "article" or "video" or "event" or "podcast" or "other",
+  "date": "YYYY-MM-DD" or null,
+  "time": "HH:MM" or null,
+  "location": "venue name and city" or null
+}
+
+RULES:
+- Title: use the page title if it's good, otherwise write a clear one.
+- Description: 2 concise sentences describing what this is. Be specific and informative.
+- For EVENTS: extract the exact date, time, and location. Resolve relative dates using today=${today}.
+- For non-events: date, time, and location should be null.
+- NEVER write generic descriptions like "This page contains an event". Be specific.
+
+JSON:`
+    );
+    const text = result.response.text().trim();
+    const parsed = parseGeminiJson(text);
+    return {
+      title: parsed.title || title,
+      description: (parsed.description || "").slice(0, 400),
+      category: parsed.category || "other",
+      date: parsed.date && /^\d{4}-\d{2}-\d{2}/.test(parsed.date) ? parsed.date.slice(0, 10) : null,
+      time: parsed.time || null,
+      location: parsed.location || null,
+      url,
+    };
+  } catch (err: any) {
+    const fallbackDesc = html ? extractDescription(html) : "";
+    return { title, description: fallbackDesc, category: "other", date: null, time: null, location: null, url };
+  }
+}
+
 // ── Legacy export for backward compatibility ──
 
 export function formatSummaryForWhatsApp(

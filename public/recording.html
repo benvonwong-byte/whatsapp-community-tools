@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Conversation Recorder</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -498,21 +498,11 @@
       }
     }
 
-    function authParam() {
-      return token ? '?token=' + encodeURIComponent(token) : '';
+    function authFetch(url, opts = {}) {
+      const headers = opts.headers ? { ...opts.headers } : {};
+      if (token) headers["Authorization"] = "Bearer " + token;
+      return fetch(API_BASE + url, { ...opts, headers });
     }
-
-    // Add token to nav links (skip login button)
-    function updateNavLinks() {
-      document.querySelectorAll('.nav-btn[href]').forEach(link => {
-        if (token) {
-          const url = new URL(link.href, window.location.origin);
-          url.searchParams.set('token', token);
-          link.href = url.toString();
-        }
-      });
-    }
-    updateNavLinks();
 
     // --- Login UI ---
     const statusDot = document.getElementById('status-dot');
@@ -537,7 +527,7 @@
     async function verifyToken() {
       if (!token) { updateLoginStatus(false); return; }
       try {
-        const res = await fetch(API_BASE + '/api/logs?limit=1&token=' + encodeURIComponent(token));
+        const res = await authFetch('/api/logs?limit=1');
         updateLoginStatus(res.ok);
         if (!res.ok) {
           token = null;
@@ -842,7 +832,7 @@
         const formData = new FormData();
         formData.append('audio', blob, `recording.${mimeType.includes('mp4') ? 'm4a' : 'webm'}`);
 
-        const res = await fetch(API_BASE + '/api/recording/transcribe' + authParam(), {
+        const res = await authFetch('/api/recording/transcribe', {
           method: 'POST',
           body: formData,
         });
@@ -989,7 +979,7 @@
           timestamp: Math.floor(now - (firstStartMs / 1000) + (u.start / 1000)),
         }));
 
-        const res = await fetch(API_BASE + '/api/recording/save-transcript' + authParam(), {
+        const res = await authFetch('/api/recording/save-transcript', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ utterances, source: 'in-person' }),

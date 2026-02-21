@@ -1756,10 +1756,32 @@ kbd {
 @media (max-width: 600px) {
   header { padding: 12px 16px 0; }
   main { padding: 16px; }
-  .cal-day { min-height: 60px; padding: 4px; }
-  .cal-day .day-number { font-size: 11px; }
-  .day-event-item:nth-child(n+2) { display: none; }
+  .cal-day { min-height: 74px; padding: 3px; }
+  .cal-day .day-number { font-size: 11px; margin-bottom: 2px; }
+  /* Show events as compact colored bars (text hidden — tap day for details) */
+  .day-events { gap: 1px; margin-top: 1px; }
+  .day-event-item {
+    font-size: 0;
+    line-height: 0;
+    padding: 0;
+    height: 5px;
+    border-left: 0;
+    border-radius: 2px;
+    background: var(--accent);
+  }
+  .day-event-item[data-category="somatic"]            { background: var(--cat-somatic); }
+  .day-event-item[data-category="dance_movement"]     { background: var(--cat-dance_movement); }
+  .day-event-item[data-category="systems_metacrisis"] { background: var(--cat-systems_metacrisis); }
+  .day-event-item[data-category="environment"]        { background: var(--cat-environment); }
+  .day-event-item[data-category="social_impact"]      { background: var(--cat-social_impact); }
+  .day-event-item[data-category="learning"]           { background: var(--cat-learning); }
+  .day-event-item[data-category="skills"]             { background: var(--cat-skills); }
+  .day-event-item[data-category="multiday"]           { background: var(--cat-multiday); }
+  .day-event-item[data-category="conference"]         { background: var(--cat-conference); }
+  .day-event-item[data-category="online"]             { background: var(--cat-online); }
+  .day-event-more { font-size: 8px; padding: 0 2px; }
   .cal-cat-tab { font-size: 10px; padding: 4px 8px; }
+  .calendar-controls h2 { font-size: 16px; }
   .dashboard-panel { padding: 0 16px 16px; }
   .dash-group-stats { gap: 8px; font-size: 11px; }
   .dash-group-cats { display: none; }

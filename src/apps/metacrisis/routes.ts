@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import { MetacrisisStore } from "./store";
 import { MetacrisisHandlerDiagnostics } from "./handler";
-import { scrapeLinksMeta } from "./summarizer";
+import { scrapeLinksMeta, scrapeUrlForQuickShare } from "./summarizer";
 
 export function createMetacrisisRouter(
   store: MetacrisisStore,
@@ -11,7 +11,8 @@ export function createMetacrisisRouter(
   backfillTrigger: () => Promise<number>,
   processEventsTrigger: () => Promise<number>,
   handlerDiagnostics?: () => MetacrisisHandlerDiagnostics,
-  sendRawToAnnouncement?: (message: string) => Promise<void>
+  sendRawToAnnouncement?: (message: string) => Promise<void>,
+  sendRawToCommunity?: (message: string) => Promise<void>
 ): Router {
   const router = Router();
 
@@ -277,6 +278,40 @@ export function createMetacrisisRouter(
       await sendRawToAnnouncement(message);
       store.markPushed(today, "weekly");
       res.json({ ok: true, date: today });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || "Push failed" });
+    }
+  });
+
+  // POST /api/metacrisis/scrape-url — scrape a single URL for quick share
+  router.post("/scrape-url", async (req: Request, res: Response) => {
+    try {
+      const { url } = req.body;
+      if (!url || typeof url !== "string") {
+        res.status(400).json({ error: "url (string) is required" });
+        return;
+      }
+      const data = await scrapeUrlForQuickShare(url);
+      res.json(data);
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || "Scraping failed" });
+    }
+  });
+
+  // POST /api/metacrisis/push-to-chat — push a message to Community Chat
+  router.post("/push-to-chat", async (req: Request, res: Response) => {
+    try {
+      const { message } = req.body;
+      if (!message || typeof message !== "string") {
+        res.status(400).json({ error: "message (string) is required" });
+        return;
+      }
+      if (!sendRawToCommunity) {
+        res.status(500).json({ error: "Community chat sending not configured" });
+        return;
+      }
+      await sendRawToCommunity(message);
+      res.json({ ok: true });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || "Push failed" });
     }

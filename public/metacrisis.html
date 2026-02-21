@@ -869,6 +869,99 @@
 
     .hidden { display: none !important; }
 
+    /* Quick Share */
+    .qs-input-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .qs-url-input {
+      flex: 1;
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 14px;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .qs-url-input:focus { border-color: var(--accent); }
+
+    .qs-url-input::placeholder { color: var(--text-dim); }
+
+    .qs-scrape-btn {
+      background: var(--accent);
+      color: #000;
+      border: none;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 10px 20px;
+      border-radius: 8px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: opacity 0.15s;
+    }
+
+    .qs-scrape-btn:hover { opacity: 0.85; }
+    .qs-scrape-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .qs-fields {
+      display: grid;
+      grid-template-columns: 80px 1fr;
+      gap: 8px 12px;
+      margin-bottom: 16px;
+      align-items: start;
+    }
+
+    .qs-field-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      padding-top: 8px;
+    }
+
+    .qs-field-input {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .qs-field-input:focus { border-color: var(--accent); }
+
+    .qs-field-textarea {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+      resize: vertical;
+      min-height: 60px;
+      transition: border-color 0.15s;
+    }
+
+    .qs-field-textarea:focus { border-color: var(--accent); }
+
+    .qs-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
     /* Responsive */
     @media (max-width: 600px) {
       .stats-grid {
@@ -1001,6 +1094,48 @@
           <button id="composer-push" class="summarize-btn" style="flex:1;">Push to Announcement Chat</button>
         </div>
         <div id="composer-status" style="font-size:11px;color:var(--text-dim);margin-top:6px;text-align:center;"></div>
+      </div>
+
+      <!-- Quick Link Sharer -->
+      <div class="section" id="quick-share-section" style="border-left:3px solid var(--green);">
+        <div class="section-title" style="color:var(--green);">Quick Link Sharer</div>
+
+        <!-- URL input -->
+        <div class="qs-input-row">
+          <input type="text" class="qs-url-input" id="qs-url" placeholder="Paste a link to scrape and share...">
+          <button class="qs-scrape-btn" id="qs-scrape-btn">Scrape</button>
+        </div>
+
+        <!-- Editable fields (hidden until scraped) -->
+        <div id="qs-fields-container" class="hidden">
+          <div class="qs-fields">
+            <span class="qs-field-label">Title</span>
+            <input type="text" class="qs-field-input" id="qs-title">
+
+            <span class="qs-field-label">Date</span>
+            <input type="text" class="qs-field-input" id="qs-date" placeholder="e.g. 2026-03-15 (leave blank if not event)">
+
+            <span class="qs-field-label">Time</span>
+            <input type="text" class="qs-field-input" id="qs-time" placeholder="e.g. 18:30 (leave blank if not event)">
+
+            <span class="qs-field-label">Location</span>
+            <input type="text" class="qs-field-input" id="qs-location" placeholder="e.g. Brooklyn Commons (leave blank if not event)">
+
+            <span class="qs-field-label">Description</span>
+            <textarea class="qs-field-textarea" id="qs-description" rows="3"></textarea>
+          </div>
+
+          <!-- WhatsApp Preview -->
+          <div style="font-size:12px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">WhatsApp Preview</div>
+          <pre id="qs-preview" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:14px;font-size:12px;color:var(--text);white-space:pre-wrap;word-wrap:break-word;line-height:1.6;max-height:300px;overflow-y:auto;font-family:inherit;"></pre>
+
+          <!-- Action buttons -->
+          <div class="qs-actions">
+            <button id="qs-copy" class="push-btn" style="flex:1;">Copy to Clipboard</button>
+            <button id="qs-push" class="summarize-btn" style="flex:1;background:var(--green);">Push to Community Chat</button>
+          </div>
+          <div id="qs-status" style="font-size:11px;color:var(--text-dim);margin-top:6px;text-align:center;"></div>
+        </div>
       </div>
 
       <!-- Daily Digest -->

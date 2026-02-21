@@ -33,6 +33,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupScheduleVisibility();
   setupTopicPeriodTabs();
   setupComposer();
+  setupQuickShare();
   loadDashboard();
 
   // Auto-refresh every 60 seconds
@@ -868,6 +869,170 @@ async function handleComposerPush() {
     alert("Push failed: " + err.message);
   } finally {
     if (pushBtn) { pushBtn.disabled = false; pushBtn.textContent = "Push to Announcement Chat"; }
+  }
+}
+
+// ── Quick Link Sharer ──
+
+var qsData = null; // scraped data
+
+function setupQuickShare() {
+  var scrapeBtn = document.getElementById("qs-scrape-btn");
+  var urlInput = document.getElementById("qs-url");
+  var copyBtn = document.getElementById("qs-copy");
+  var pushBtn = document.getElementById("qs-push");
+
+  if (scrapeBtn) scrapeBtn.addEventListener("click", handleQuickScrape);
+
+  // Allow Enter key in URL input to trigger scrape
+  if (urlInput) urlInput.addEventListener("keydown", function(e) {
+    if (e.key === "Enter") { e.preventDefault(); handleQuickScrape(); }
+  });
+
+  if (copyBtn) copyBtn.addEventListener("click", function() {
+    var preview = document.getElementById("qs-preview");
+    if (!preview || !preview.textContent) return;
+    navigator.clipboard.writeText(preview.textContent).then(function() {
+      var statusEl = document.getElementById("qs-status");
+      if (statusEl) { statusEl.textContent = "Copied to clipboard!"; setTimeout(function() { statusEl.textContent = ""; }, 2000); }
+    });
+  });
+
+  if (pushBtn) pushBtn.addEventListener("click", handleQuickSharePush);
+
+  // Live-update preview on field edits
+  ["qs-title", "qs-date", "qs-time", "qs-location", "qs-description"].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.addEventListener("input", updateQuickSharePreview);
+  });
+}
+
+async function handleQuickScrape() {
+  var urlInput = document.getElementById("qs-url");
+  var scrapeBtn = document.getElementById("qs-scrape-btn");
+  var fieldsContainer = document.getElementById("qs-fields-container");
+  var statusEl = document.getElementById("qs-status");
+
+  var url = (urlInput.value || "").trim();
+  if (!url) { urlInput.focus(); return; }
+
+  // Basic URL validation
+  if (!/^https?:\/\/.+/i.test(url)) {
+    url = "https://" + url;
+    urlInput.value = url;
+  }
+
+  scrapeBtn.disabled = true;
+  scrapeBtn.textContent = "Scraping...";
+  if (statusEl) statusEl.textContent = "";
+
+  try {
+    var res = await adminFetch("/api/metacrisis/scrape-url", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: url }),
+    });
+    if (!res.ok) {
+      var data = await res.json().catch(function() { return {}; });
+      throw new Error(data.error || "Server returned " + res.status);
+    }
+
+    qsData = await res.json();
+
+    // Populate fields
+    document.getElementById("qs-title").value = qsData.title || "";
+    document.getElementById("qs-date").value = qsData.date || "";
+    document.getElementById("qs-time").value = qsData.time || "";
+    document.getElementById("qs-location").value = qsData.location || "";
+    document.getElementById("qs-description").value = qsData.description || "";
+
+    // Show fields
+    fieldsContainer.classList.remove("hidden");
+    updateQuickSharePreview();
+  } catch (err) {
+    console.error("Scrape failed:", err);
+    if (statusEl) statusEl.textContent = "Scrape failed: " + err.message;
+  } finally {
+    scrapeBtn.disabled = false;
+    scrapeBtn.textContent = "Scrape";
+  }
+}
+
+function buildQuickShareMessage() {
+  var title = (document.getElementById("qs-title").value || "").trim();
+  var date = (document.getElementById("qs-date").value || "").trim();
+  var time = (document.getElementById("qs-time").value || "").trim();
+  var location = (document.getElementById("qs-location").value || "").trim();
+  var description = (document.getElementById("qs-description").value || "").trim();
+  var url = (document.getElementById("qs-url").value || "").trim();
+
+  if (!title && !description) return "";
+
+  var lines = [];
+
+  if (title) lines.push("*" + title + "*");
+
+  // Date/time line
+  if (date) {
+    var dateParts = date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    var dateStr = date;
+    if (dateParts) {
+      var d = new Date(date + "T00:00:00");
+      dateStr = d.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", year: "numeric" });
+    }
+    var timeLine = "\uD83D\uDDD3 " + dateStr;
+    if (time) timeLine += " at " + time;
+    lines.push(timeLine);
+  }
+
+  if (location) lines.push("\uD83D\uDCCD " + location);
+
+  if (url) lines.push("\uD83D\uDD17 " + url);
+
+  if (description) {
+    lines.push("");
+    lines.push(description);
+  }
+
+  return lines.join("\n");
+}
+
+function updateQuickSharePreview() {
+  var preview = document.getElementById("qs-preview");
+  if (!preview) return;
+  preview.textContent = buildQuickShareMessage();
+}
+
+async function handleQuickSharePush() {
+  var message = buildQuickShareMessage();
+  if (!message) {
+    alert("Nothing to push \u2014 scrape a URL first.");
+    return;
+  }
+
+  if (!confirm("Push this message to the Community Chat?")) return;
+
+  var pushBtn = document.getElementById("qs-push");
+  var statusEl = document.getElementById("qs-status");
+  if (pushBtn) { pushBtn.disabled = true; pushBtn.textContent = "Pushing..."; }
+
+  try {
+    var res = await adminFetch("/api/metacrisis/push-to-chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: message }),
+    });
+    if (!res.ok) {
+      var data = await res.json().catch(function() { return {}; });
+      throw new Error(data.error || "Server returned " + res.status);
+    }
+    if (statusEl) statusEl.textContent = "Pushed to Community Chat!";
+    setTimeout(function() { if (statusEl) statusEl.textContent = ""; }, 3000);
+  } catch (err) {
+    console.error("Push failed:", err);
+    alert("Push failed: " + err.message);
+  } finally {
+    if (pushBtn) { pushBtn.disabled = false; pushBtn.textContent = "Push to Community Chat"; }
   }
 }
 

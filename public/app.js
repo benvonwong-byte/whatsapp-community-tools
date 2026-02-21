@@ -1144,7 +1144,7 @@ function createCalDay(date, eventMap, otherMonth, isToday = false) {
       }
     });
 
-    const maxVisible = 3;
+    const maxVisible = 5;
     const eventsContainer = document.createElement("div");
     eventsContainer.className = "day-events";
 

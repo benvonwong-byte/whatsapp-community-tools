@@ -10,7 +10,7 @@ export const config = {
   adminEmail: process.env.ADMIN_EMAIL || "",
   adminPassword: process.env.ADMIN_PASSWORD || "",
   guestUsername: process.env.GUEST_USERNAME || "Hope",
-  guestPassword: process.env.GUEST_PASSWORD || "SparkleSparkle",
+  guestPassword: process.env.GUEST_PASSWORD || "",
   guestToken: process.env.GUEST_TOKEN || crypto.randomBytes(32).toString("hex"),
   dbPath: process.env.DB_PATH || path.resolve(process.cwd(), "events.db"),
   authDir: process.env.AUTH_DIR || path.resolve(process.cwd(), ".auth"),
