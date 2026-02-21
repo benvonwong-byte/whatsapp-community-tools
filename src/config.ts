@@ -29,6 +29,7 @@ export const config = {
   // Metacrisis app (optional — leave empty to disable)
   metacrisisChatName: process.env.METACRISIS_CHAT_NAME || "Metacrisis - Community Chat",
   metacrisisAnnouncementChat: process.env.METACRISIS_ANNOUNCEMENT_CHAT || "Metacrisis NYC",
+  metacrisisAdjacentEventsChat: process.env.METACRISIS_ADJACENT_EVENTS_CHAT || "Metacrisis NYC Adjacent Events",
   // Daily analysis/summary hour (0-23, local time)
   analysisHour: parseInt(process.env.ANALYSIS_HOUR || "0", 10),
 };

@@ -898,7 +898,10 @@ function setupQuickShare() {
     });
   });
 
-  if (pushBtn) pushBtn.addEventListener("click", handleQuickSharePush);
+  if (pushBtn) pushBtn.addEventListener("click", function() { handleQuickSharePush("community"); });
+
+  var pushAdjacentBtn = document.getElementById("qs-push-adjacent");
+  if (pushAdjacentBtn) pushAdjacentBtn.addEventListener("click", function() { handleQuickSharePush("adjacent"); });
 
   // Live-update preview on field edits
   ["qs-title", "qs-date", "qs-time", "qs-location", "qs-description"].forEach(function(id) {
@@ -1003,21 +1006,26 @@ function updateQuickSharePreview() {
   preview.textContent = buildQuickShareMessage();
 }
 
-async function handleQuickSharePush() {
+async function handleQuickSharePush(target) {
   var message = buildQuickShareMessage();
   if (!message) {
     alert("Nothing to push \u2014 scrape a URL first.");
     return;
   }
 
-  if (!confirm("Push this message to the Community Chat?")) return;
+  var isAdjacent = target === "adjacent";
+  var chatLabel = isAdjacent ? "Adjacent Events" : "Community Chat";
+  var endpoint = isAdjacent ? "/api/metacrisis/push-to-adjacent" : "/api/metacrisis/push-to-chat";
 
-  var pushBtn = document.getElementById("qs-push");
+  if (!confirm("Push this message to " + chatLabel + "?")) return;
+
+  var btn = document.getElementById(isAdjacent ? "qs-push-adjacent" : "qs-push");
   var statusEl = document.getElementById("qs-status");
-  if (pushBtn) { pushBtn.disabled = true; pushBtn.textContent = "Pushing..."; }
+  var originalText = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = "Pushing..."; }
 
   try {
-    var res = await adminFetch("/api/metacrisis/push-to-chat", {
+    var res = await adminFetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message: message }),
@@ -1026,13 +1034,13 @@ async function handleQuickSharePush() {
       var data = await res.json().catch(function() { return {}; });
       throw new Error(data.error || "Server returned " + res.status);
     }
-    if (statusEl) statusEl.textContent = "Pushed to Community Chat!";
+    if (statusEl) statusEl.textContent = "Pushed to " + chatLabel + "!";
     setTimeout(function() { if (statusEl) statusEl.textContent = ""; }, 3000);
   } catch (err) {
     console.error("Push failed:", err);
     alert("Push failed: " + err.message);
   } finally {
-    if (pushBtn) { pushBtn.disabled = false; pushBtn.textContent = "Push to Community Chat"; }
+    if (btn) { btn.disabled = false; btn.textContent = originalText; }
   }
 }
 

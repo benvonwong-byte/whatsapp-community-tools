@@ -12,7 +12,8 @@ export function createMetacrisisRouter(
   processEventsTrigger: () => Promise<number>,
   handlerDiagnostics?: () => MetacrisisHandlerDiagnostics,
   sendRawToAnnouncement?: (message: string) => Promise<void>,
-  sendRawToCommunity?: (message: string) => Promise<void>
+  sendRawToCommunity?: (message: string) => Promise<void>,
+  sendRawToAdjacentEvents?: (message: string) => Promise<void>
 ): Router {
   const router = Router();
 
@@ -311,6 +312,25 @@ export function createMetacrisisRouter(
         return;
       }
       await sendRawToCommunity(message);
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || "Push failed" });
+    }
+  });
+
+  // POST /api/metacrisis/push-to-adjacent — push a message to Adjacent Events chat
+  router.post("/push-to-adjacent", async (req: Request, res: Response) => {
+    try {
+      const { message } = req.body;
+      if (!message || typeof message !== "string") {
+        res.status(400).json({ error: "message (string) is required" });
+        return;
+      }
+      if (!sendRawToAdjacentEvents) {
+        res.status(500).json({ error: "Adjacent Events chat sending not configured" });
+        return;
+      }
+      await sendRawToAdjacentEvents(message);
       res.json({ ok: true });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || "Push failed" });

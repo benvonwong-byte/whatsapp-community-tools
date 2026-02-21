@@ -1030,6 +1030,55 @@
         </div>
       </div>
 
+      <!-- Quick Link Sharer -->
+      <div class="section" id="quick-share-section" style="border-left:3px solid var(--green);">
+        <div class="section-title" style="color:var(--green);">Quick Link Sharer</div>
+
+        <!-- URL input -->
+        <div class="qs-input-row">
+          <input type="text" class="qs-url-input" id="qs-url" placeholder="Paste a link to scrape and share...">
+          <button class="qs-scrape-btn" id="qs-scrape-btn">Scrape</button>
+        </div>
+
+        <!-- Editable fields (hidden until scraped) -->
+        <div id="qs-fields-container" class="hidden">
+          <div class="qs-fields">
+            <span class="qs-field-label">Title</span>
+            <input type="text" class="qs-field-input" id="qs-title">
+
+            <span class="qs-field-label">Date</span>
+            <input type="text" class="qs-field-input" id="qs-date" placeholder="e.g. 2026-03-15 (leave blank if not event)">
+
+            <span class="qs-field-label">Time</span>
+            <input type="text" class="qs-field-input" id="qs-time" placeholder="e.g. 18:30 (leave blank if not event)">
+
+            <span class="qs-field-label">Location</span>
+            <input type="text" class="qs-field-input" id="qs-location" placeholder="e.g. Brooklyn Commons (leave blank if not event)">
+
+            <span class="qs-field-label">Description</span>
+            <textarea class="qs-field-textarea" id="qs-description" rows="3"></textarea>
+          </div>
+
+          <!-- WhatsApp Preview -->
+          <div style="font-size:12px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">WhatsApp Preview</div>
+          <pre id="qs-preview" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:14px;font-size:12px;color:var(--text);white-space:pre-wrap;word-wrap:break-word;line-height:1.6;max-height:300px;overflow-y:auto;font-family:inherit;"></pre>
+
+          <!-- Action buttons -->
+          <div class="qs-actions">
+            <button id="qs-copy" class="push-btn" style="flex:1;">Copy to Clipboard</button>
+            <button id="qs-push" class="summarize-btn" style="flex:1;background:var(--green);">Community Chat</button>
+            <button id="qs-push-adjacent" class="summarize-btn" style="flex:1;background:#6c5ce7;">Adjacent Events</button>
+          </div>
+          <div id="qs-status" style="font-size:11px;color:var(--text-dim);margin-top:6px;text-align:center;"></div>
+        </div>
+      </div>
+
+      <!-- Daily Digest -->
+      <div class="section" id="digest-section">
+        <div class="section-title">Daily Digest</div>
+        <div id="digest-content"></div>
+      </div>
+
       <!-- Weekly Update Composer -->
       <div class="section" id="composer-section" style="border-left:3px solid var(--accent);">
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:16px;">
@@ -1094,54 +1143,6 @@
           <button id="composer-push" class="summarize-btn" style="flex:1;">Push to Announcement Chat</button>
         </div>
         <div id="composer-status" style="font-size:11px;color:var(--text-dim);margin-top:6px;text-align:center;"></div>
-      </div>
-
-      <!-- Quick Link Sharer -->
-      <div class="section" id="quick-share-section" style="border-left:3px solid var(--green);">
-        <div class="section-title" style="color:var(--green);">Quick Link Sharer</div>
-
-        <!-- URL input -->
-        <div class="qs-input-row">
-          <input type="text" class="qs-url-input" id="qs-url" placeholder="Paste a link to scrape and share...">
-          <button class="qs-scrape-btn" id="qs-scrape-btn">Scrape</button>
-        </div>
-
-        <!-- Editable fields (hidden until scraped) -->
-        <div id="qs-fields-container" class="hidden">
-          <div class="qs-fields">
-            <span class="qs-field-label">Title</span>
-            <input type="text" class="qs-field-input" id="qs-title">
-
-            <span class="qs-field-label">Date</span>
-            <input type="text" class="qs-field-input" id="qs-date" placeholder="e.g. 2026-03-15 (leave blank if not event)">
-
-            <span class="qs-field-label">Time</span>
-            <input type="text" class="qs-field-input" id="qs-time" placeholder="e.g. 18:30 (leave blank if not event)">
-
-            <span class="qs-field-label">Location</span>
-            <input type="text" class="qs-field-input" id="qs-location" placeholder="e.g. Brooklyn Commons (leave blank if not event)">
-
-            <span class="qs-field-label">Description</span>
-            <textarea class="qs-field-textarea" id="qs-description" rows="3"></textarea>
-          </div>
-
-          <!-- WhatsApp Preview -->
-          <div style="font-size:12px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">WhatsApp Preview</div>
-          <pre id="qs-preview" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:14px;font-size:12px;color:var(--text);white-space:pre-wrap;word-wrap:break-word;line-height:1.6;max-height:300px;overflow-y:auto;font-family:inherit;"></pre>
-
-          <!-- Action buttons -->
-          <div class="qs-actions">
-            <button id="qs-copy" class="push-btn" style="flex:1;">Copy to Clipboard</button>
-            <button id="qs-push" class="summarize-btn" style="flex:1;background:var(--green);">Push to Community Chat</button>
-          </div>
-          <div id="qs-status" style="font-size:11px;color:var(--text-dim);margin-top:6px;text-align:center;"></div>
-        </div>
-      </div>
-
-      <!-- Daily Digest -->
-      <div class="section" id="digest-section">
-        <div class="section-title">Daily Digest</div>
-        <div id="digest-content"></div>
       </div>
 
       <!-- Upcoming Events -->
