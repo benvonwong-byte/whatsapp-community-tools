@@ -1,3 +1,6 @@
+// Lock all server-side time operations to Eastern Time
+process.env.TZ = "America/New_York";
+
 import fs from "fs";
 import path from "path";
 import { config } from "./config";
@@ -777,9 +780,9 @@ async function main() {
     await relationshipAnalyze();
   });
 
-  // Schedule daily update send to Hope (configurable hour, default 7 AM EST)
+  // Schedule daily update send to Hope (configurable hour, default 5 PM EST)
   const scheduleUpdateSend = () => {
-    const sendHour = parseInt(relationshipStore.getSetting("update_send_hour") || "7", 10);
+    const sendHour = parseInt(relationshipStore.getSetting("update_send_hour") || "17", 10);
     const now = new Date();
     const next = new Date(now);
     next.setHours(sendHour, 0, 0, 0);

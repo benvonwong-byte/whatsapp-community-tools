@@ -560,7 +560,7 @@ export function createRelationshipRouter(
       // Format recent messages compactly
       const recentMsgText = recentMessages.map(m => {
         const date = new Date(m.timestamp * 1000).toISOString().split("T")[0];
-        const time = new Date(m.timestamp * 1000).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+        const time = new Date(m.timestamp * 1000).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" });
         const speaker = m.speaker === "self" ? "Ben" : "Hope";
         const content = m.type === "voice"
           ? (m.transcript || m.body || "[voice note]")
@@ -646,7 +646,7 @@ INSTRUCTIONS:
           const fetchedMessages = store.getMessagesByRange(start_date, end_date);
           const fetchedText = fetchedMessages.map(m => {
             const date = new Date(m.timestamp * 1000).toISOString().split("T")[0];
-            const time = new Date(m.timestamp * 1000).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+            const time = new Date(m.timestamp * 1000).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" });
             const speaker = m.speaker === "self" ? "Ben" : "Hope";
             const content = m.type === "voice"
               ? (m.transcript || m.body || "[voice note]")

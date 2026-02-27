@@ -35,6 +35,7 @@ function formatConversation(messages: RelationshipMessage[]): string {
     const time = new Date(m.timestamp * 1000).toLocaleTimeString("en-US", {
       hour: "numeric",
       minute: "2-digit",
+      timeZone: "America/New_York",
     });
     const speaker = m.speaker === "self" ? "Ben" : "Hope";
     const sourceTag = m.source === "in-person" ? "[in-person] " : "";

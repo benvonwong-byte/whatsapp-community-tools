@@ -32,6 +32,7 @@ body {
   background: var(--bg);
   color: var(--text);
   min-height: 100vh;
+  min-height: 100dvh;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -1755,9 +1756,25 @@ kbd {
 /* Responsive */
 @media (max-width: 600px) {
   header { padding: 12px 16px 0; }
-  main { padding: 16px; }
-  .cal-day { min-height: 74px; padding: 3px; }
-  .cal-day .day-number { font-size: 11px; margin-bottom: 2px; }
+  main { padding: 12px; }
+
+  /* Touch-friendly buttons — minimum 44px tap targets */
+  .login-btn, .logout-btn { font-size: 13px; padding: 8px 14px; }
+  .refresh-btn { font-size: 13px; padding: 8px 14px; }
+  .tab { padding: 10px 14px; font-size: 13px; }
+  .calendar-controls button { width: 44px; height: 44px; }
+  .search-clear { padding: 8px 10px; font-size: 20px; }
+  .delete-btn { padding: 8px; font-size: 18px; }
+  .fav-btn { padding: 8px; font-size: 22px; }
+  .list-controls select { font-size: 16px; padding: 10px 14px; }
+
+  /* Modals — tighter padding on small screens */
+  .modal { padding: 16px; max-height: 85dvh; }
+  .modal-close { top: 8px; right: 12px; padding: 8px; font-size: 28px; }
+
+  /* Calendar */
+  .cal-day { min-height: 80px; padding: 3px; }
+  .cal-day .day-number { font-size: 12px; margin-bottom: 2px; }
   /* Show events as compact colored bars (text hidden — tap day for details) */
   .day-events { gap: 1px; margin-top: 1px; }
   .day-event-item {
@@ -1779,11 +1796,19 @@ kbd {
   .day-event-item[data-category="multiday"]           { background: var(--cat-multiday); }
   .day-event-item[data-category="conference"]         { background: var(--cat-conference); }
   .day-event-item[data-category="online"]             { background: var(--cat-online); }
-  .day-event-more { font-size: 8px; padding: 0 2px; }
-  .cal-cat-tab { font-size: 10px; padding: 4px 8px; }
+  .day-event-more { font-size: 9px; padding: 1px 3px; }
+  .cal-cat-tab { font-size: 12px; padding: 6px 10px; }
   .calendar-controls h2 { font-size: 16px; }
-  .dashboard-panel { padding: 0 16px 16px; }
-  .dash-group-stats { gap: 8px; font-size: 11px; }
+
+  /* Dashboard */
+  .dashboard-panel { padding: 0 12px 16px; }
+  .dash-group-stats { gap: 8px; font-size: 12px; }
   .dash-group-cats { display: none; }
+
+  /* Hide keyboard shortcuts panel */
   .kb-persistent-panel { display: none !important; }
+
+  /* Prevent horizontal overflow */
+  .category-tabs { gap: 4px; }
+  .calendar-cat-tabs { gap: 4px; }
 }

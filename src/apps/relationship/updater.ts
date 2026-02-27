@@ -11,12 +11,23 @@ function getModel() {
   return geminiModel;
 }
 
+export interface Recommendation {
+  for: "Hope" | "Ben" | "Both";
+  text: string;
+  window: "24h" | "48h" | "week";
+}
+
+export interface MultiWindowRecs {
+  recommendations: Recommendation[];
+}
+
 /** Format messages into a readable conversation string */
 function formatConversation(messages: RelationshipMessage[]): string {
   return messages.map((m) => {
     const time = new Date(m.timestamp * 1000).toLocaleTimeString("en-US", {
       hour: "numeric",
       minute: "2-digit",
+      timeZone: "America/New_York",
     });
     const speaker = m.speaker === "self" ? "Ben" : "Hope";
     const sourceTag = m.source === "in-person" ? "[in-person] " : "";
@@ -25,31 +36,67 @@ function formatConversation(messages: RelationshipMessage[]): string {
   }).join("\n");
 }
 
-/** Ask Gemini for fresh recommendations based on last 24h of chat */
-async function generateFreshRecommendations(
-  messages: RelationshipMessage[],
+/** Generate recommendations across multiple time windows (24h, 48h, 7d) with variable count */
+async function generateMultiWindowRecommendations(
+  store: RelationshipStore,
   latestAnalysis: RelationshipAnalysis | null
-): Promise<{ forHope: string; forBen: string; forBoth: string } | null> {
-  if (messages.length === 0) return null;
+): Promise<MultiWindowRecs | null> {
+  const msgs24h = store.getRecentMessages(24);
+  const msgs48h = store.getRecentMessages(48);
+  const msgs7d = store.getRecentMessages(168); // 7 * 24
 
-  const conversation = formatConversation(messages).slice(0, 8000);
+  if (msgs24h.length === 0 && msgs48h.length === 0 && msgs7d.length === 0) return null;
+
+  // Only include older messages (to avoid repeating the 24h window)
+  const msgs48hOnly = msgs48h.filter((m) => {
+    const ageHours = (Date.now() / 1000 - m.timestamp) / 3600;
+    return ageHours > 24;
+  });
+  const msgs7dOnly = msgs7d.filter((m) => {
+    const ageHours = (Date.now() / 1000 - m.timestamp) / 3600;
+    return ageHours > 48;
+  });
+
+  const conv24h = formatConversation(msgs24h).slice(0, 6000);
+  const conv48h = msgs48hOnly.length > 0 ? formatConversation(msgs48hOnly).slice(0, 4000) : "";
+  const conv7d = msgs7dOnly.length > 0 ? formatConversation(msgs7dOnly).slice(0, 4000) : "";
+
   const analysisContext = latestAnalysis
     ? `\nLATEST ANALYSIS (${latestAnalysis.date}): ${latestAnalysis.summary}`
     : "";
 
-  const prompt = `You are a relationship coach for Ben and Hope (a couple). Based on their last 24 hours of conversation, give 3 brief, specific, actionable recommendations.
+  const windowSections: string[] = [];
+  if (msgs24h.length > 0) {
+    windowSections.push(`== LAST 24 HOURS (${msgs24h.length} messages) ==\n${conv24h}`);
+  }
+  if (msgs48hOnly.length > 0) {
+    windowSections.push(`== 24-48 HOURS AGO (${msgs48hOnly.length} messages) ==\n${conv48h}`);
+  }
+  if (msgs7dOnly.length > 0) {
+    windowSections.push(`== 2-7 DAYS AGO (${msgs7dOnly.length} messages) ==\n${conv7d}`);
+  }
 
-LAST 24 HOURS (${messages.length} messages):
-${conversation}
+  const prompt = `You are a relationship coach for Ben and Hope (a couple). You have their conversations from three time windows below. Generate specific, actionable recommendations based on what you see.
+
+${windowSections.join("\n\n")}
 ${analysisContext}
 
-Each recommendation must reference something specific from the conversation above — not generic advice. Keep each to 1-2 sentences max.
+INSTRUCTIONS:
+- Generate between 2 and 6 recommendations. Vary the count based on what's actually interesting and actionable — don't force it. Some days there's more to say, some days less. Keep it organic.
+- Draw from different time windows when there's something worth noting:
+  - "24h" recs: based on today's conversations (always include at least 1-2 if there are recent messages)
+  - "48h" recs: patterns or follow-ups from the last couple days (only if there's something notable)
+  - "week" recs: trends, recurring patterns, or things that have been building over the week (only if there's a real trend worth calling out)
+- Each rec should be for "Hope", "Ben", or "Both"
+- Each must reference something SPECIFIC from the conversations — no generic advice
+- Keep each to 1-2 sentences max
+- If a time window has no messages or nothing interesting, skip it entirely — don't pad with filler
 
 Respond with ONLY a JSON object (no markdown code fences):
 {
-  "forHope": "<one specific thing Hope could do based on the last 24h>",
-  "forBen": "<one specific thing Ben could do based on the last 24h>",
-  "forBoth": "<one shared activity or practice to try together>"
+  "recommendations": [
+    { "for": "Hope"|"Ben"|"Both", "text": "<specific actionable recommendation>", "window": "24h"|"48h"|"week" }
+  ]
 }
 
 JSON:`;
@@ -66,21 +113,46 @@ JSON:`;
     if (firstBrace !== -1 && lastBrace !== -1) {
       text = text.slice(firstBrace, lastBrace + 1);
     }
-    return JSON.parse(text);
+    const parsed = JSON.parse(text);
+    if (!parsed.recommendations || !Array.isArray(parsed.recommendations)) return null;
+    // Validate individual items and clamp to 6 max
+    const validFor = new Set(["Hope", "Ben", "Both"]);
+    const validWindow = new Set(["24h", "48h", "week"]);
+    parsed.recommendations = parsed.recommendations
+      .filter((r: any) =>
+        r && typeof r.text === "string" && r.text.length > 0 &&
+        validFor.has(r.for) && validWindow.has(r.window)
+      )
+      .slice(0, 6);
+    if (parsed.recommendations.length === 0) return null;
+    return parsed as MultiWindowRecs;
   } catch (err) {
-    console.error("[updater] Failed to generate fresh recommendations:", err);
+    console.error("[updater] Failed to generate multi-window recommendations:", err);
     return null;
   }
 }
 
+/** Map a Recommendation to its emoji prefix */
+function recEmoji(rec: Recommendation): string {
+  if (rec.for === "Hope") return "💗";
+  if (rec.for === "Ben") return "💙";
+  return "🌱";
+}
+
+/** Map a window label to a short tag */
+function windowTag(window: string): string {
+  if (window === "48h") return " _(last 2 days)_";
+  if (window === "week") return " _(this week)_";
+  return "";
+}
+
 /**
  * Format a concise daily check-in message.
- * Uses fresh AI recommendations based on last 24h of chat.
+ * Uses multi-window AI recommendations with variable count.
  */
 function formatDailyUpdate(
   analysis: RelationshipAnalysis,
-  freshRecs: { forHope: string; forBen: string; forBoth: string } | null,
-  recentMsgCount: number
+  multiRecs: MultiWindowRecs | null
 ): string {
   const m = JSON.parse(analysis.metricsJson);
   const score = m.overallHealthScore ?? 0;
@@ -90,15 +162,21 @@ function formatDailyUpdate(
   lines.push(`💕 *Daily Check-in* — ${formatDateStr(analysis.date)}`);
   lines.push("");
 
-  // Use fresh recommendations from last 24h if available, fall back to stored analysis
-  const recs = freshRecs || m.recommendations || {};
-  const hopeRec = freshRecs ? freshRecs.forHope : (recs.forHope && recs.forHope[0]) || null;
-  const benRec = freshRecs ? freshRecs.forBen : (recs.forBen && recs.forBen[0]) || null;
-  const togetherRec = freshRecs ? freshRecs.forBoth : (recs.forBoth && recs.forBoth[0]) || null;
-
-  if (hopeRec) lines.push(`💗 *Hope:* ${hopeRec}`);
-  if (benRec) lines.push(`💙 *Ben:* ${benRec}`);
-  if (togetherRec) lines.push(`🌱 *Together:* ${togetherRec}`);
+  if (multiRecs && multiRecs.recommendations.length > 0) {
+    for (const rec of multiRecs.recommendations) {
+      const tag = windowTag(rec.window);
+      lines.push(`${recEmoji(rec)} *${rec.for}:* ${rec.text}${tag}`);
+    }
+  } else {
+    // Fall back to stored analysis recommendations
+    const recs = m.recommendations || {};
+    const hopeRec = (recs.forHope && recs.forHope[0]) || null;
+    const benRec = (recs.forBen && recs.forBen[0]) || null;
+    const togetherRec = (recs.forBoth && recs.forBoth[0]) || null;
+    if (hopeRec) lines.push(`💗 *Hope:* ${hopeRec}`);
+    if (benRec) lines.push(`💙 *Ben:* ${benRec}`);
+    if (togetherRec) lines.push(`🌱 *Together:* ${togetherRec}`);
+  }
 
   // Brief stats
   lines.push("");
@@ -118,10 +196,13 @@ function formatDailyUpdate(
     }
   }
 
-  lines.push("");
-  if (freshRecs && recentMsgCount > 0) {
-    lines.push(`_Based on ${recentMsgCount} msgs in last 24h_`);
+  if (multiRecs && multiRecs.recommendations.length > 0) {
+    const windows = [...new Set(multiRecs.recommendations.map((r) => r.window))];
+    const windowLabels = windows.map((w) => w === "24h" ? "today" : w === "48h" ? "last 2 days" : "this week");
+    lines.push("");
+    lines.push(`_${multiRecs.recommendations.length} recs from ${windowLabels.join(", ")}_`);
   } else {
+    lines.push("");
     lines.push(`_${analysis.messageCount} msgs analyzed_`);
   }
 
@@ -129,13 +210,11 @@ function formatDailyUpdate(
 }
 
 /**
- * Format a weekly summary — same concise structure with trend line.
- * Uses fresh AI recommendations based on last 24h of chat.
+ * Format a weekly summary with multi-window recommendations.
  */
 function formatWeeklyUpdate(
   analyses: RelationshipAnalysis[],
-  freshRecs: { forHope: string; forBen: string; forBoth: string } | null,
-  recentMsgCount: number
+  multiRecs: MultiWindowRecs | null
 ): string {
   if (analyses.length === 0) return "";
 
@@ -148,20 +227,27 @@ function formatWeeklyUpdate(
   const startDate = analyses[analyses.length - 1].date;
   const endDate = analyses[0].date;
 
+  const latestM = JSON.parse(analyses[0].metricsJson);
+
   const lines: string[] = [];
   lines.push(`💕 *Weekly Summary* — ${formatDateStr(startDate)} to ${formatDateStr(endDate)}`);
   lines.push("");
 
-  // Use fresh recommendations from last 24h if available, fall back to stored analysis
-  const latestM = JSON.parse(analyses[0].metricsJson);
-  const recs = freshRecs || latestM.recommendations || {};
-  const hopeRec = freshRecs ? freshRecs.forHope : (recs.forHope && recs.forHope[0]) || null;
-  const benRec = freshRecs ? freshRecs.forBen : (recs.forBen && recs.forBen[0]) || null;
-  const togetherRec = freshRecs ? freshRecs.forBoth : (recs.forBoth && recs.forBoth[0]) || null;
-
-  if (hopeRec) lines.push(`💗 *Hope:* ${hopeRec}`);
-  if (benRec) lines.push(`💙 *Ben:* ${benRec}`);
-  if (togetherRec) lines.push(`🌱 *Together:* ${togetherRec}`);
+  if (multiRecs && multiRecs.recommendations.length > 0) {
+    for (const rec of multiRecs.recommendations) {
+      const tag = windowTag(rec.window);
+      lines.push(`${recEmoji(rec)} *${rec.for}:* ${rec.text}${tag}`);
+    }
+  } else {
+    // Fall back to stored analysis recommendations
+    const recs = latestM.recommendations || {};
+    const hopeRec = (recs.forHope && recs.forHope[0]) || null;
+    const benRec = (recs.forBen && recs.forBen[0]) || null;
+    const togetherRec = (recs.forBoth && recs.forBoth[0]) || null;
+    if (hopeRec) lines.push(`💗 *Hope:* ${hopeRec}`);
+    if (benRec) lines.push(`💙 *Ben:* ${benRec}`);
+    if (togetherRec) lines.push(`🌱 *Together:* ${togetherRec}`);
+  }
 
   // Brief stats
   lines.push("");
@@ -181,10 +267,13 @@ function formatWeeklyUpdate(
     lines.push(`🏦 Bank: ${bank.ratio.toFixed(1)}:1 ${bankEmoji}`);
   }
 
-  lines.push("");
-  if (freshRecs && recentMsgCount > 0) {
-    lines.push(`_${totalMsgs} msgs across ${analyses.length} days · recs from last 24h (${recentMsgCount} msgs)_`);
+  if (multiRecs && multiRecs.recommendations.length > 0) {
+    const windows = [...new Set(multiRecs.recommendations.map((r) => r.window))];
+    const windowLabels = windows.map((w) => w === "24h" ? "today" : w === "48h" ? "last 2 days" : "this week");
+    lines.push("");
+    lines.push(`_${totalMsgs} msgs across ${analyses.length} days · ${multiRecs.recommendations.length} recs from ${windowLabels.join(", ")}_`);
   } else {
+    lines.push("");
     lines.push(`_${totalMsgs} msgs across ${analyses.length} days_`);
   }
 
@@ -196,38 +285,36 @@ function formatDateStr(dateStr: string): string {
     weekday: "short",
     month: "short",
     day: "numeric",
+    timeZone: "America/New_York",
   });
 }
 
 /**
  * Build the update message based on frequency setting.
- * Fetches last 24h of chat history and generates fresh AI recommendations.
- * Falls back to stored analysis recommendations if Gemini call fails or no recent messages.
+ * Fetches messages from multiple time windows (24h, 48h, 7d) and generates
+ * a variable number of AI recommendations. Falls back to stored analysis
+ * recommendations if Gemini call fails or no recent messages.
  */
 export async function buildUpdateMessage(
   store: RelationshipStore,
   frequency: "daily" | "weekly"
 ): Promise<string | null> {
-  // Fetch last 24h of messages for fresh recommendations
-  const recentMessages = store.getRecentMessages(24);
   const latestAnalysis = store.getAnalyses(1)[0] || null;
 
-  // Generate fresh recommendations from last 24h (falls back gracefully)
-  const freshRecs = recentMessages.length > 0
-    ? await generateFreshRecommendations(recentMessages, latestAnalysis)
-    : null;
+  // Generate multi-window recommendations (24h, 48h, 7d)
+  const multiRecs = await generateMultiWindowRecommendations(store, latestAnalysis);
 
   if (frequency === "weekly") {
     const endDate = new Date().toISOString().split("T")[0];
     const startDate = new Date(Date.now() - 7 * 86400000).toISOString().split("T")[0];
     const analyses = store.getAnalysesByRange(startDate, endDate);
     if (analyses.length === 0) return null;
-    return formatWeeklyUpdate(analyses, freshRecs, recentMessages.length);
+    return formatWeeklyUpdate(analyses, multiRecs);
   }
 
   // Daily: get most recent analysis
   if (!latestAnalysis) return null;
-  return formatDailyUpdate(latestAnalysis, freshRecs, recentMessages.length);
+  return formatDailyUpdate(latestAnalysis, multiRecs);
 }
 
 /**

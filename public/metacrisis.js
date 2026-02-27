@@ -26,6 +26,11 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   document.getElementById("main-content").classList.remove("hidden");
+
+  // Show dashboard shell immediately — Quick Link Sharer needs no data
+  document.getElementById("loading-state").classList.add("hidden");
+  document.getElementById("dashboard").classList.remove("hidden");
+
   setupSummarizeButton();
   setupLinkFilterTabs();
   setupSettingsToggle();
@@ -40,61 +45,76 @@ document.addEventListener("DOMContentLoaded", () => {
   refreshTimer = setInterval(loadDashboard, 60000);
 });
 
-// ── Data Loading ──
+// ── Data Loading (progressive) ──
 
-async function loadDashboard() {
-  try {
-    const [statsRes, summariesRes, linksRes, leaderboardRes, settingsRes, dailyRes, eventsRes, topicsRes, draftRes] =
-      await Promise.all([
-        adminFetch("/api/metacrisis/stats"),
-        adminFetch("/api/metacrisis/summaries?days=30&type=weekly"),
-        adminFetch("/api/metacrisis/links?limit=50"),
-        adminFetch("/api/metacrisis/leaderboard?limit=10"),
-        adminFetch("/api/metacrisis/settings"),
-        adminFetch("/api/metacrisis/summaries?days=7&type=daily"),
-        adminFetch("/api/metacrisis/events"),
-        adminFetch(`/api/metacrisis/topics?period=${activeTopicPeriod}`),
-        adminFetch("/api/metacrisis/weekly-draft"),
-      ]);
+// Helper: fetch, parse, render one section — errors are isolated per-section
+function loadSection(url, onSuccess) {
+  adminFetch(url).then(function(res) {
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    return res.json();
+  }).then(onSuccess).catch(function(err) {
+    console.warn("Section load failed (" + url + "):", err);
+  });
+}
 
-    if (!statsRes.ok) throw new Error(`Stats: ${statsRes.status}`);
-    if (!summariesRes.ok) throw new Error(`Summaries: ${summariesRes.status}`);
-    if (!linksRes.ok) throw new Error(`Links: ${linksRes.status}`);
-    if (!leaderboardRes.ok) throw new Error(`Leaderboard: ${leaderboardRes.status}`);
-    if (!settingsRes.ok) throw new Error(`Settings: ${settingsRes.status}`);
+function loadDashboard() {
+  // Fire all fetches in parallel — each renders its section independently on arrival
 
-    stats = await statsRes.json();
-    summaries = await summariesRes.json();
-    links = await linksRes.json();
-    leaderboard = await leaderboardRes.json();
-    settings = await settingsRes.json();
-    dailyDigests = dailyRes.ok ? await dailyRes.json() : [];
-    upcomingEvents = eventsRes.ok ? await eventsRes.json() : [];
-    topics = topicsRes.ok ? await topicsRes.json() : [];
+  loadSection("/api/metacrisis/stats", function(data) {
+    stats = data;
+    renderMonitorBar();
+    renderStats();
+  });
 
-    // Load weekly draft for composer
-    if (draftRes.ok) {
-      const draft = await draftRes.json();
-      // Only reset composer state on first load (when weeklyDraft is null)
-      if (!weeklyDraft) {
-        weeklyDraft = draft;
-        composerLinks = {};
-        ["events", "videos", "articles"].forEach(function(cat) {
-          (draft[cat] || []).forEach(function(link) { composerLinks[link.id] = true; });
-        });
-      } else {
-        weeklyDraft = draft;
-      }
+  loadSection("/api/metacrisis/summaries?days=7&type=daily", function(data) {
+    dailyDigests = data;
+    renderDailyDigest();
+  });
+
+  loadSection("/api/metacrisis/events", function(data) {
+    upcomingEvents = data;
+    renderUpcomingEvents();
+  });
+
+  loadSection("/api/metacrisis/topics?period=" + activeTopicPeriod, function(data) {
+    topics = data;
+    renderTopics();
+  });
+
+  loadSection("/api/metacrisis/links?limit=50", function(data) {
+    links = data;
+    renderLinks();
+  });
+
+  loadSection("/api/metacrisis/leaderboard?limit=10", function(data) {
+    leaderboard = data;
+    renderLeaderboard();
+    // Re-render stats since member count comes from leaderboard
+    if (stats) renderStats();
+  });
+
+  loadSection("/api/metacrisis/summaries?days=30&type=weekly", function(data) {
+    summaries = data;
+    renderSummaries();
+  });
+
+  loadSection("/api/metacrisis/settings", function(data) {
+    settings = data;
+    renderSettings();
+  });
+
+  loadSection("/api/metacrisis/weekly-draft", function(draft) {
+    if (!weeklyDraft) {
+      weeklyDraft = draft;
+      composerLinks = {};
+      ["events", "videos", "articles"].forEach(function(cat) {
+        (draft[cat] || []).forEach(function(link) { composerLinks[link.id] = true; });
+      });
+    } else {
+      weeklyDraft = draft;
     }
-
-    renderDashboard();
-  } catch (err) {
-    console.error("Failed to load dashboard:", err);
-    document.getElementById("loading-state").classList.add("hidden");
-    const errorEl = document.getElementById("error-state");
-    errorEl.textContent = `Failed to load dashboard: ${err.message}`;
-    errorEl.classList.remove("hidden");
-  }
+    renderComposer();
+  });
 }
 
 // ── Summarize Now ──
@@ -232,23 +252,6 @@ function setupSettingsSave() {
 }
 
 // ── Rendering ──
-
-function renderDashboard() {
-  document.getElementById("loading-state").classList.add("hidden");
-  document.getElementById("error-state").classList.add("hidden");
-  document.getElementById("dashboard").classList.remove("hidden");
-
-  renderMonitorBar();
-  renderStats();
-  renderComposer();
-  renderDailyDigest();
-  renderUpcomingEvents();
-  renderTopics();
-  renderLinks();
-  renderLeaderboard();
-  renderSummaries();
-  renderSettings();
-}
 
 // ── Monitor Bar ──
 
@@ -891,8 +894,8 @@ function setupQuickShare() {
 
   if (copyBtn) copyBtn.addEventListener("click", function() {
     var preview = document.getElementById("qs-preview");
-    if (!preview || !preview.textContent) return;
-    navigator.clipboard.writeText(preview.textContent).then(function() {
+    if (!preview || !preview.value) return;
+    navigator.clipboard.writeText(preview.value).then(function() {
       var statusEl = document.getElementById("qs-status");
       if (statusEl) { statusEl.textContent = "Copied to clipboard!"; setTimeout(function() { statusEl.textContent = ""; }, 2000); }
     });
@@ -1003,11 +1006,12 @@ function buildQuickShareMessage() {
 function updateQuickSharePreview() {
   var preview = document.getElementById("qs-preview");
   if (!preview) return;
-  preview.textContent = buildQuickShareMessage();
+  preview.value = buildQuickShareMessage();
 }
 
 async function handleQuickSharePush(target) {
-  var message = buildQuickShareMessage();
+  var preview = document.getElementById("qs-preview");
+  var message = preview ? preview.value.trim() : "";
   if (!message) {
     alert("Nothing to push \u2014 scrape a URL first.");
     return;

@@ -20,6 +20,7 @@ function formatMessages(messages: MetacrisisMessage[]): string {
       const time = new Date(m.timestamp * 1000).toLocaleTimeString("en-US", {
         hour: "numeric",
         minute: "2-digit",
+        timeZone: "America/New_York",
       });
       const sender = m.sender_name || "Unknown";
       return `[${time}] ${sender}: ${m.body}`;

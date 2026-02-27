@@ -223,7 +223,7 @@ export function createMetacrisisRouter(
 
       const now = new Date();
       const weekAgo = new Date(now.getTime() - 7 * 86400000);
-      const dateRange = `${weekAgo.toLocaleDateString("en-US", { month: "short", day: "numeric" })} → ${now.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+      const dateRange = `${weekAgo.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/New_York" })} → ${now.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/New_York" })}`;
 
       // Links: articles/videos from last 7 days + future events
       const allLinks = store.getComposerLinks();

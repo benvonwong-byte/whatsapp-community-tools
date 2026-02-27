@@ -26,6 +26,7 @@
       background: var(--bg);
       color: var(--text);
       min-height: 100vh;
+      min-height: 100dvh;
       -webkit-font-smoothing: antialiased;
     }
 
@@ -730,6 +731,14 @@
       font-size: 15px;
     }
 
+    .loading-placeholder {
+      text-align: center;
+      color: var(--text-dim);
+      font-size: 13px;
+      padding: 24px 0;
+      opacity: 0.6;
+    }
+
     .error-state {
       text-align: center;
       padding: 40px 20px;
@@ -968,12 +977,16 @@
         grid-template-columns: repeat(2, 1fr);
       }
 
-      .header { padding: 12px 16px; }
-      .container { padding: 16px; }
-      .link-url { max-width: 200px; }
-      .leaderboard-name { width: 90px; }
-      .settings-label { width: 100px; font-size: 12px; }
-      .monitor-bar { gap: 10px; }
+      .header { padding: 12px 16px; flex-wrap: wrap; gap: 8px; }
+      .header h1 { font-size: 16px; }
+      .container { padding: 12px; }
+      .summarize-btn { padding: 10px 16px; font-size: 13px; }
+      .back-link { font-size: 14px; padding: 4px 0; }
+      .link-url { max-width: calc(100vw - 80px); font-size: 13px; }
+      .link-item { padding: 12px 0; }
+      .leaderboard-name { width: 90px; font-size: 13px; }
+      .settings-label { width: 100px; font-size: 13px; }
+      .monitor-bar { gap: 10px; flex-wrap: wrap; }
     }
   </style>
 </head>
@@ -994,13 +1007,13 @@
   <!-- Main content (hidden until auth confirmed) -->
   <div id="main-content" class="container hidden">
 
-    <!-- Loading state -->
-    <div id="loading-state" class="loading-state">Loading dashboard...</div>
-
     <!-- Error state -->
     <div id="error-state" class="error-state hidden"></div>
 
-    <!-- Dashboard content (hidden until data loaded) -->
+    <!-- Loading state (kept for backwards compat but hidden immediately) -->
+    <div id="loading-state" class="loading-state hidden"></div>
+
+    <!-- Dashboard content (shown immediately, sections populate progressively) -->
     <div id="dashboard" class="hidden">
 
       <!-- Monitoring bar -->
@@ -1059,9 +1072,9 @@
             <textarea class="qs-field-textarea" id="qs-description" rows="3"></textarea>
           </div>
 
-          <!-- WhatsApp Preview -->
+          <!-- WhatsApp Preview (editable) -->
           <div style="font-size:12px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">WhatsApp Preview</div>
-          <pre id="qs-preview" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:14px;font-size:12px;color:var(--text);white-space:pre-wrap;word-wrap:break-word;line-height:1.6;max-height:300px;overflow-y:auto;font-family:inherit;"></pre>
+          <textarea id="qs-preview" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:14px;font-size:12px;color:var(--text);white-space:pre-wrap;word-wrap:break-word;line-height:1.6;max-height:300px;overflow-y:auto;font-family:inherit;width:100%;min-height:120px;resize:vertical;outline:none;transition:border-color 0.15s;" placeholder="Preview will appear here after scraping..."></textarea>
 
           <!-- Action buttons -->
           <div class="qs-actions">
@@ -1076,7 +1089,7 @@
       <!-- Daily Digest -->
       <div class="section" id="digest-section">
         <div class="section-title">Daily Digest</div>
-        <div id="digest-content"></div>
+        <div id="digest-content"><div class="loading-placeholder">Loading digest...</div></div>
       </div>
 
       <!-- Weekly Update Composer -->
@@ -1148,7 +1161,7 @@
       <!-- Upcoming Events -->
       <div class="section" id="events-section">
         <div class="section-title">Upcoming Events</div>
-        <div id="events-list"></div>
+        <div id="events-list"><div class="loading-placeholder">Loading events...</div></div>
       </div>
 
       <!-- Topic Trends -->
@@ -1159,7 +1172,7 @@
           <button class="topic-period-tab" data-period="month">This Month</button>
           <button class="topic-period-tab" data-period="quarter">3 Months</button>
         </div>
-        <div id="topics-list"></div>
+        <div id="topics-list"><div class="loading-placeholder">Loading topics...</div></div>
       </div>
 
       <!-- Link Organizer -->
@@ -1173,19 +1186,19 @@
           <button class="filter-tab" data-category="article">Article</button>
           <button class="filter-tab" data-category="other">Other</button>
         </div>
-        <div id="links-list"></div>
+        <div id="links-list"><div class="loading-placeholder">Loading links...</div></div>
       </div>
 
       <!-- Member Leaderboard -->
       <div class="section" id="leaderboard-section">
         <div class="section-title">Member Leaderboard</div>
-        <div id="leaderboard-list"></div>
+        <div id="leaderboard-list"><div class="loading-placeholder">Loading leaderboard...</div></div>
       </div>
 
       <!-- Summaries -->
       <div class="section" id="summaries-section">
         <div class="section-title">Summaries</div>
-        <div id="summaries-list"></div>
+        <div id="summaries-list"><div class="loading-placeholder">Loading summaries...</div></div>
       </div>
 
       <!-- Push Settings -->
