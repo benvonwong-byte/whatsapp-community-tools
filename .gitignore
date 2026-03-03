@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+.auth/
+*.db
+*.db-shm
+*.db-wal
+.wwebjs_cache/
+.claude/settings.local.json
+events-prod.db
+firebase.json
+.firebaserc

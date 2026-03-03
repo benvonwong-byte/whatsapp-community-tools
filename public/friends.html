@@ -1,0 +1,2349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Friends Network Dashboard</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👥</text></svg>">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #121212;
+      --surface: #1e1e1e;
+      --surface2: #2a2a2a;
+      --border: #333;
+      --text: #e0e0e0;
+      --text-dim: #888;
+      --accent: #4fc3f7;
+      --green: #00b894;
+      --yellow: #fdcb6e;
+      --red: #d63031;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      min-height: 100dvh;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Header */
+    .header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .header h1 { font-size: 18px; font-weight: 700; letter-spacing: -0.5px; flex: 1; }
+    .back-link { color: var(--accent); text-decoration: none; font-size: 13px; flex-shrink: 0; }
+    .back-link:hover { text-decoration: underline; }
+
+    .header-btn {
+      background: var(--accent);
+      color: #000;
+      border: none;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 6px 16px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: opacity 0.15s;
+      white-space: nowrap;
+    }
+    .header-btn:hover { opacity: 0.85; }
+    .header-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .header-btn.secondary {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .header-btn.secondary:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* Tabs */
+    .tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+      padding: 0 20px;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .tab {
+      padding: 10px 18px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-dim);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: color 0.15s, border-color 0.15s;
+      white-space: nowrap;
+      user-select: none;
+    }
+    .tab:hover { color: var(--text); }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* Main container */
+    .container { max-width: 1100px; margin: 0 auto; padding: 16px 20px; overflow: hidden; }
+
+    /* Login gate */
+    .login-gate { text-align: center; padding: 80px 20px; color: var(--text-dim); font-size: 15px; line-height: 1.6; }
+    .login-gate a { color: var(--accent); text-decoration: none; }
+    .login-gate a:hover { text-decoration: underline; }
+
+    /* Section panels */
+    .section { background: var(--surface); border-radius: 10px; padding: 16px; margin-bottom: 14px; max-width: 100%; overflow: hidden; }
+    .section-title { font-size: 12px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 14px; }
+
+    /* Stats grid */
+    .stats-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 14px; }
+    .stat-card { background: var(--surface); border-radius: 10px; padding: 12px; text-align: center; }
+    .stat-value { font-size: 22px; font-weight: 700; color: var(--accent); }
+    .stat-label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
+
+    /* Skeleton loading */
+    @keyframes skel-shimmer { 0%{background-position:-200px 0} 100%{background-position:200px 0} }
+    .skel-line { background: linear-gradient(90deg, var(--surface2) 25%, var(--surface) 50%, var(--surface2) 75%); background-size:400px 100%; animation: skel-shimmer 1.2s ease-in-out infinite; border-radius:4px; }
+    .skel-big { height:24px; width:60px; margin:0 auto 6px; }
+    .skel-sm { height:10px; width:80px; margin:0 auto; }
+    .skeleton-card { min-height:58px; display:flex; flex-direction:column; justify-content:center;
+      background: linear-gradient(90deg, var(--surface2) 25%, var(--surface) 50%, var(--surface2) 75%); background-size:400px 100%; animation: skel-shimmer 1.2s ease-in-out infinite; }
+
+    /* Chart container */
+    .chart-container { position: relative; width: 100%; height: 220px; }
+    .chart-container canvas { width: 100% !important; height: 100% !important; }
+    .chart-empty { text-align: center; color: var(--text-dim); font-size: 12px; padding: 50px 0; }
+
+    /* Neglected cards */
+    .neglected-card {
+      background: var(--surface2);
+      border-radius: 8px;
+      padding: 12px 14px;
+      margin-bottom: 6px;
+      border-left: 3px solid var(--red);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .neglected-card .name { font-size: 13px; font-weight: 600; color: var(--text); }
+    .neglected-card .days { font-size: 11px; color: var(--red); }
+    .neglected-card .group-tag { font-size: 10px; color: var(--text-dim); margin-left: 8px; }
+    .neglected-dismiss {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      font-size: 14px;
+      line-height: 1;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      margin-left: 8px;
+      transition: all 0.15s;
+    }
+    .neglected-dismiss:hover { border-color: var(--red); color: var(--red); background: rgba(214, 48, 49, 0.1); }
+
+    /* Neglected friends navigation */
+    .neg-window-btns { display: flex; gap: 2px; }
+    .neg-window-btn {
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 4px;
+      padding: 4px 10px; font-size: 11px; color: var(--muted); cursor: pointer;
+    }
+    .neg-window-btn:hover { border-color: var(--red); color: var(--text); }
+    .neg-window-btn.active { background: var(--red); color: #fff; border-color: var(--red); }
+    .neglected-card-info { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+    .neglected-name { font-size: 13px; font-weight: 600; color: var(--text); }
+    .neglected-meta { font-size: 10px; color: var(--text-dim); margin-top: 2px; display: flex; gap: 8px; flex-wrap: wrap; }
+    .neglected-tier-dot {
+      display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+      margin-right: 3px; vertical-align: middle;
+    }
+
+    /* Initiators list */
+    .initiator-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+    .initiator-row:last-child { border-bottom: none; }
+    .initiator-name { font-size: 13px; font-weight: 500; flex: 1; }
+    .initiator-bar-bg { width: 120px; height: 6px; background: var(--surface2); border-radius: 3px; overflow: hidden; }
+    .initiator-bar-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.4s; }
+    .initiator-value { font-size: 11px; color: var(--text-dim); width: 36px; text-align: right; }
+
+    /* Filter bar */
+    .filter-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      margin-bottom: 14px;
+      flex-wrap: wrap;
+    }
+
+    .filter-select {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-family: inherit;
+      outline: none;
+      cursor: pointer;
+    }
+    .filter-select:focus { border-color: var(--accent); }
+
+    .filter-search {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-family: inherit;
+      outline: none;
+      flex: 1;
+      min-width: 140px;
+    }
+    .filter-search::placeholder { color: var(--text-dim); }
+    .filter-search:focus { border-color: var(--accent); }
+
+    /* Contacts table */
+    .contacts-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    .contacts-table th {
+      text-align: left;
+      padding: 8px 10px;
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+      transition: color 0.15s;
+    }
+    .contacts-table th:hover { color: var(--accent); }
+    .contacts-table th.sort-asc::after { content: " \u25B2"; font-size: 8px; }
+    .contacts-table th.sort-desc::after { content: " \u25BC"; font-size: 8px; }
+    .contacts-table td {
+      padding: 8px 10px;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+      color: var(--text);
+    }
+    .contacts-table tr { cursor: pointer; transition: background 0.1s; }
+    .contacts-table tbody tr:hover { background: var(--surface2); }
+
+    /* Quality badges */
+    .quality-badge {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 999px;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+    .quality-badge.high { background: rgba(0,184,148,0.15); color: var(--green); }
+    .quality-badge.medium { background: rgba(253,203,110,0.15); color: var(--yellow); }
+    .quality-badge.low { background: rgba(214,48,49,0.15); color: var(--red); }
+
+    /* Group Lanes (Kanban-style) */
+    .group-lanes {
+      display: flex;
+      gap: 14px;
+      overflow-x: auto;
+      padding-bottom: 10px;
+      -webkit-overflow-scrolling: touch;
+      min-height: 300px;
+    }
+
+    .group-lane {
+      background: var(--surface);
+      border-radius: 10px;
+      min-width: 220px;
+      max-width: 280px;
+      flex: 1 0 220px;
+      display: flex;
+      flex-direction: column;
+      border: 2px solid transparent;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .group-lane.drag-over {
+      border-color: var(--accent);
+      background: rgba(79, 195, 247, 0.05);
+    }
+
+    .group-lane-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+    }
+    .group-lane-header .color-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .group-lane-header .lane-title {
+      font-size: 13px;
+      font-weight: 600;
+      flex: 1;
+    }
+    .group-lane-header .lane-count {
+      font-size: 10px;
+      color: var(--text-dim);
+      background: var(--surface2);
+      padding: 1px 6px;
+      border-radius: 999px;
+    }
+    .group-lane-header .lane-btn {
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      font-size: 14px;
+      cursor: pointer;
+      padding: 0 2px;
+      transition: color 0.15s;
+    }
+    .group-lane-header .lane-btn:hover { color: var(--accent); }
+    .group-lane-header .lane-btn.delete:hover { color: var(--red); }
+
+    .group-lane-body {
+      flex: 1;
+      padding: 8px;
+      min-height: 60px;
+    }
+
+    /* Contact chip (draggable item in lanes) */
+    .contact-chip {
+      background: var(--surface2);
+      border-radius: 6px;
+      padding: 8px 10px;
+      margin-bottom: 4px;
+      font-size: 12px;
+      cursor: grab;
+      transition: opacity 0.15s, transform 0.15s, box-shadow 0.15s;
+      user-select: none;
+    }
+    .contact-chip:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+    .contact-chip.dragging {
+      opacity: 0.4;
+      transform: scale(0.95);
+    }
+    .contact-chip .chip-name { font-weight: 500; color: var(--text); }
+    .contact-chip .chip-meta { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+
+    /* Tier kanban viewport — grid layout */
+    .tier-lanes-viewport.group-lanes {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      overflow-x: hidden;
+      overflow-y: auto;
+      max-height: calc(100dvh - 280px);
+      min-height: 200px;
+    }
+    .tier-lanes-viewport > .group-lane {
+      min-width: 0;
+      max-width: none;
+      flex: none;
+    }
+    .tier-lanes-viewport > .group-lane > .group-lane-body {
+      max-height: 220px;
+      overflow-y: auto;
+      padding: 8px;
+    }
+    /* Collapsible tiers */
+    .group-lane.collapsed > .group-lane-body,
+    .group-lane.collapsed > .tier-pagination {
+      display: none;
+    }
+    .tier-collapse-btn {
+      font-size: 10px;
+      transition: transform 0.2s;
+    }
+    /* Board drag-and-drop reorder */
+    .tier-lanes-viewport > .group-lane > .group-lane-header {
+      cursor: grab;
+    }
+    .tier-lanes-viewport > .group-lane.board-dragging {
+      opacity: 0.4;
+      transform: scale(0.97);
+    }
+    .tier-lanes-viewport > .group-lane.board-drag-over {
+      outline: 2px dashed var(--accent);
+      outline-offset: -2px;
+    }
+
+    /* Tier search input */
+    .tier-search-input {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 5px 10px;
+      font-size: 12px;
+      width: 180px;
+    }
+    .tier-search-input::placeholder { color: var(--text-dim); }
+
+    /* Tier section label */
+    .tier-section-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* Tier unassigned horizontal section */
+    .tier-unassigned-section {
+      background: var(--surface);
+      border-radius: 10px;
+      padding: 10px 12px;
+      margin-bottom: 12px;
+      border: 2px solid transparent;
+      transition: border-color 0.2s;
+    }
+    .tier-unassigned-section.drag-over {
+      border-color: var(--accent);
+    }
+    .tier-horizontal-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      max-height: 120px;
+      overflow-y: auto;
+      min-height: 32px;
+    }
+    .tier-horizontal-chips .contact-chip {
+      margin-bottom: 0;
+      padding: 5px 8px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+    }
+    .tier-horizontal-chips .contact-chip .chip-meta {
+      margin-top: 0;
+    }
+
+    /* Tier search results */
+    .tier-search-results {
+      background: var(--surface);
+      border-radius: 10px;
+      padding: 10px 12px;
+      margin-bottom: 12px;
+      border: 2px dashed var(--accent);
+    }
+
+    /* Tier pagination */
+    .tier-pagination {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 6px 0 2px;
+      border-top: 1px solid var(--border);
+    }
+    .tier-pagination button {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text);
+      font-size: 11px;
+      padding: 2px 10px;
+      cursor: pointer;
+    }
+    .tier-pagination button:disabled {
+      opacity: 0.3;
+      cursor: default;
+    }
+    .tier-pagination span {
+      font-size: 10px;
+      color: var(--text-dim);
+    }
+
+    /* Messaging tab */
+    .recipient-section {
+      background: var(--surface);
+      border-radius: 10px;
+      padding: 16px;
+      margin-bottom: 14px;
+    }
+
+    .recipient-groups {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+    }
+
+    .recipient-pill {
+      background: var(--surface2);
+      color: var(--text-dim);
+      border: 1px solid var(--border);
+      font-size: 11px;
+      font-weight: 500;
+      padding: 4px 12px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: all 0.15s;
+      user-select: none;
+    }
+    .recipient-pill:hover { border-color: var(--accent); color: var(--text); }
+    .recipient-pill.selected {
+      background: var(--accent);
+      color: #000;
+      border-color: var(--accent);
+    }
+
+    .recipient-contacts {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+      max-height: 120px;
+      overflow-y: auto;
+    }
+
+    .recipient-count {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-top: 8px;
+    }
+
+    .composer {
+      width: 100%;
+      min-height: 100px;
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+      resize: vertical;
+      transition: border-color 0.15s;
+    }
+    .composer:focus { border-color: var(--accent); }
+    .composer::placeholder { color: var(--text-dim); }
+
+    .media-upload {
+      border: 2px dashed var(--border);
+      border-radius: 8px;
+      padding: 20px;
+      text-align: center;
+      color: var(--text-dim);
+      font-size: 12px;
+      cursor: pointer;
+      margin-top: 10px;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .media-upload:hover { border-color: var(--accent); }
+    .media-upload.has-file {
+      border-color: var(--green);
+      border-style: solid;
+      background: rgba(0,184,148,0.05);
+    }
+
+    .media-preview {
+      margin-top: 10px;
+      text-align: center;
+    }
+    .media-preview img {
+      max-width: 200px;
+      max-height: 200px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+
+    .send-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .send-btn {
+      background: var(--green);
+      color: #fff;
+      border: none;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 8px 24px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .send-btn:hover { opacity: 0.85; }
+    .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .send-progress-container {
+      flex: 1;
+      display: none;
+    }
+    .send-progress-container.active { display: block; }
+
+    .send-progress-bar {
+      height: 4px;
+      background: var(--surface2);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .send-progress-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 2px;
+      transition: width 0.4s ease;
+      width: 0%;
+    }
+    .send-progress-label {
+      font-size: 10px;
+      color: var(--text-dim);
+      margin-top: 4px;
+    }
+
+    .send-status-text {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-top: 8px;
+    }
+
+    /* Manage Chats tab */
+    .chats-list {
+      list-style: none;
+    }
+    .chats-list li {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+      font-size: 13px;
+    }
+    .chats-list li:last-child { border-bottom: none; }
+    .chats-list label {
+      flex: 1;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .chats-list input[type="checkbox"] {
+      accent-color: var(--accent);
+      width: 16px;
+      height: 16px;
+      cursor: pointer;
+    }
+
+    /* Contact Detail Panel (slide-in from right) */
+    .detail-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 199;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s;
+    }
+    .detail-overlay.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .contact-detail {
+      position: fixed;
+      top: 0;
+      right: 0;
+      width: 400px;
+      max-width: 90vw;
+      height: 100dvh;
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+      z-index: 200;
+      transform: translateX(100%);
+      transition: transform 0.3s ease;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+    .contact-detail.open {
+      transform: translateX(0);
+    }
+
+    .detail-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+    .detail-header .close-btn {
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      font-size: 20px;
+      cursor: pointer;
+      transition: color 0.15s;
+    }
+    .detail-header .close-btn:hover { color: var(--text); }
+    .hide-contact-btn {
+      background: none; border: 1px solid var(--border); color: var(--text-dim);
+      font-size: 11px; padding: 3px 8px; border-radius: 4px; cursor: pointer;
+    }
+    .hide-contact-btn:hover { border-color: #f44; color: #f44; }
+
+    .detail-body { padding: 20px; flex: 1; }
+
+    .detail-name {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .detail-name:hover { color: var(--accent); }
+    .detail-phone {
+      display: block;
+      font-size: 12px;
+      color: var(--text-dim);
+      text-decoration: none;
+      margin-bottom: 4px;
+    }
+    .detail-phone:hover { color: var(--accent); }
+    .detail-name-edit { margin-bottom: 8px; }
+    .detail-name-edit.hidden { display: none;
+    }
+    .detail-groups {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-bottom: 16px;
+    }
+
+    .detail-range-pills {
+      display: flex; gap: 4px; margin-bottom: 12px; padding: 0 2px;
+    }
+    .detail-range-pill {
+      background: var(--surface2); color: var(--text-dim); border: 1px solid transparent;
+      border-radius: 12px; padding: 3px 10px; font-size: 10px; cursor: pointer;
+      transition: all .15s; white-space: nowrap; user-select: none;
+    }
+    .detail-range-pill:hover { color: var(--text); background: var(--surface); }
+    .detail-range-pill.active { color: #fff; background: var(--accent); border-color: var(--accent); }
+
+    .detail-stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .detail-stat {
+      background: var(--surface2);
+      border-radius: 8px;
+      padding: 10px;
+      text-align: center;
+    }
+    .detail-stat .value { font-size: 18px; font-weight: 700; color: var(--accent); }
+    .detail-stat .label { font-size: 9px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
+
+    .detail-chart-section {
+      margin-bottom: 16px;
+    }
+    .detail-chart-section canvas {
+      width: 100% !important;
+      height: 200px !important;
+    }
+
+    .detail-notes textarea {
+      width: 100%;
+      min-height: 60px;
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      font-size: 12px;
+      font-family: inherit;
+      outline: none;
+      resize: vertical;
+    }
+    .detail-notes textarea:focus { border-color: var(--accent); }
+
+    .detail-notes .add-note-btn {
+      margin-top: 8px;
+      background: var(--accent);
+      color: #000;
+      border: none;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 5px 14px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .detail-notes .add-note-btn:hover { opacity: 0.85; }
+    .detail-notes .add-note-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .note-item {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      position: relative;
+    }
+    .note-item .note-timestamp {
+      font-size: 10px;
+      color: var(--text-dim);
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .note-item .note-timestamp .note-edited {
+      font-style: italic;
+      opacity: 0.7;
+    }
+    .note-item .note-content {
+      font-size: 12px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .note-item .note-actions {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      display: flex;
+      gap: 4px;
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+    .note-item:hover .note-actions { opacity: 1; }
+    .note-item .note-action-btn {
+      background: var(--surface);
+      color: var(--text-dim);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-size: 10px;
+      padding: 2px 8px;
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .note-item .note-action-btn:hover { color: var(--accent); border-color: var(--accent); }
+    .note-item .note-action-btn.delete:hover { color: var(--red); border-color: var(--red); }
+
+    .note-item.editing .note-content { display: none; }
+    .note-item.editing .note-edit-area { display: block; }
+    .note-edit-area { display: none; }
+    .note-edit-area textarea {
+      width: 100%;
+      min-height: 60px;
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--accent);
+      border-radius: 6px;
+      padding: 8px;
+      font-size: 12px;
+      font-family: inherit;
+      outline: none;
+      resize: vertical;
+    }
+    .note-edit-actions {
+      display: flex;
+      gap: 6px;
+      margin-top: 6px;
+    }
+    .note-edit-actions button {
+      font-size: 10px;
+      padding: 3px 10px;
+      border-radius: 999px;
+      border: none;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .note-edit-actions .save-edit { background: var(--accent); color: #000; }
+    .note-edit-actions .cancel-edit { background: var(--surface); color: var(--text-dim); border: 1px solid var(--border); }
+
+    /* Conversation log */
+    .detail-conversation { margin-top: 16px; }
+    .detail-reply-box {
+      margin-top: 8px;
+      padding: 8px 0;
+      border-top: 1px solid var(--border);
+    }
+    .detail-reply-box textarea:focus { border-color: var(--accent); }
+    .detail-reply-box button:hover { opacity: 0.85; }
+    .detail-reply-box button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .detail-messages-container {
+      max-height: 400px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 8px 0;
+    }
+    .msg-row { display: flex; }
+    .msg-row.sent { justify-content: flex-end; }
+    .msg-row.received { justify-content: flex-start; }
+    .msg-bubble {
+      max-width: 80%;
+      padding: 6px 10px;
+      border-radius: 10px;
+      font-size: 12px;
+      line-height: 1.4;
+      word-wrap: break-word;
+    }
+    .msg-bubble.sent {
+      background: var(--accent);
+      color: #000;
+      border-bottom-right-radius: 2px;
+    }
+    .msg-bubble.received {
+      background: var(--surface2);
+      color: var(--text);
+      border-bottom-left-radius: 2px;
+    }
+    .msg-bubble .msg-time {
+      display: block;
+      font-size: 9px;
+      margin-top: 2px;
+      opacity: 0.6;
+    }
+    .msg-bubble.sent .msg-time { color: #000; }
+    .msg-bubble .msg-type-label {
+      font-style: italic;
+      opacity: 0.7;
+    }
+    .msg-bubble .msg-voice-transcript {
+      color: #CE93D8;
+      font-style: italic;
+    }
+    .msg-bubble.sent .msg-voice-transcript {
+      color: #7B1FA2;
+    }
+    .msg-source {
+      font-size: 8px;
+      font-weight: 600;
+      padding: 1px 3px;
+      border-radius: 3px;
+      margin-right: 4px;
+      vertical-align: middle;
+    }
+    .msg-source.whatsapp {
+      background: rgba(37, 211, 102, 0.2);
+      color: #25D366;
+    }
+    .msg-source.imessage {
+      background: rgba(52, 120, 246, 0.2);
+      color: #3478F6;
+    }
+    .msg-bubble.sent .msg-source.imessage {
+      color: #1a3f7a;
+      background: rgba(52, 120, 246, 0.15);
+    }
+    .msg-bubble.sent .msg-source.whatsapp {
+      color: #0d5c2a;
+      background: rgba(37, 211, 102, 0.15);
+    }
+    .msg-bubble.imessage.received {
+      background: #1a2a44;
+    }
+    .load-more-btn {
+      margin-top: 8px;
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      font-size: 11px;
+      padding: 5px 14px;
+      border-radius: 4px;
+      cursor: pointer;
+      width: 100%;
+    }
+    .load-more-btn:hover { border-color: var(--accent); }
+    .msg-date-divider {
+      text-align: center;
+      font-size: 10px;
+      color: var(--text-dim);
+      margin: 8px 0 4px;
+    }
+
+    /* AI Search */
+    .ai-search-section { margin-bottom: 16px; }
+    .ai-search-bar { display: flex; gap: 8px; }
+    .ai-search-bar input {
+      flex: 1; background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+      border-radius: 6px; padding: 10px 14px; font-size: 14px; outline: none;
+    }
+    .ai-search-bar input:focus { border-color: var(--accent); }
+    .ai-search-bar input::placeholder { color: var(--text-dim); }
+    .ai-search-go {
+      background: var(--accent); color: #fff; border: none; border-radius: 6px;
+      padding: 10px 18px; font-size: 13px; font-weight: 600; cursor: pointer;
+    }
+    .ai-search-go:hover { opacity: 0.9; }
+    .ai-search-go:disabled { opacity: 0.5; cursor: not-allowed; }
+    .ai-search-results {
+      margin-top: 10px; background: var(--surface2); border-radius: 6px; padding: 12px;
+      max-height: 400px; overflow-y: auto;
+    }
+    .ai-search-explanation { font-size: 12px; color: var(--text-dim); margin-bottom: 10px; }
+    .ai-search-result {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 10px; border-radius: 4px; cursor: pointer; gap: 8px;
+    }
+    .ai-search-result:hover { background: var(--surface); }
+    .ai-search-result-name { font-weight: 600; font-size: 13px; }
+    .ai-search-result-meta { font-size: 11px; color: var(--text-dim); }
+    .ai-search-result-meta mark { background: rgba(255,235,59,0.3); color: var(--text); padding: 0 2px; border-radius: 2px; }
+    .ai-search-result-reason { font-size: 11px; color: var(--accent); }
+    .ai-search-result-tier {
+      font-size: 9px; padding: 1px 6px; border-radius: 3px; margin-left: 4px;
+    }
+    .ai-search-close {
+      background: none; border: 1px solid var(--border); color: var(--text-dim);
+      font-size: 11px; padding: 2px 8px; border-radius: 4px; cursor: pointer; float: right;
+    }
+
+    /* ── Contact Explorer (Graph Tab) ── */
+    .gx-toolbar {
+      display:flex; flex-direction:column; gap:3px; padding:6px 0;
+      border-bottom:1px solid var(--border); margin-bottom:0;
+    }
+    .gx-toolbar-row { display:flex; align-items:center; gap:6px 12px; flex-wrap:wrap; }
+    .gx-toolbar-section { display:flex; align-items:center; gap:4px; }
+    .gx-toolbar-right { margin-left:auto; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+    .gx-label { font-size:10px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:.5px; min-width:14px; }
+    .gx-pill-group { display:flex; gap:2px; }
+    .gx-pill-group-wrap { flex-wrap:wrap; }
+    .gx-pill {
+      background:var(--surface2); color:var(--text-dim); border:1px solid transparent;
+      border-radius:12px; padding:3px 10px; font-size:10px; cursor:pointer;
+      transition: all .15s; white-space:nowrap; user-select:none;
+    }
+    .gx-pill:hover { color:var(--text); background:var(--surface); }
+    .gx-pill.active { color:#fff; background:var(--accent); border-color:var(--accent); }
+    .gx-tier-pills { display:flex; gap:2px; }
+    .gx-tier-pill {
+      width:18px; height:18px; border-radius:50%; border:2px solid transparent;
+      cursor:pointer; transition: all .15s; opacity:.5;
+    }
+    .gx-tier-pill:hover { opacity:.8; transform:scale(1.15); }
+    .gx-tier-pill.active { opacity:1; border-color:#fff; transform:scale(1.2); }
+    .gx-search {
+      background:var(--surface2); color:var(--text); border:1px solid var(--border);
+      border-radius:12px; padding:4px 12px; font-size:11px; width:120px; outline:none;
+      transition: border-color .15s, width .2s;
+    }
+    .gx-search:focus { border-color:var(--accent); width:180px; }
+    .gx-icon-btn {
+      width:26px; height:26px; border-radius:50%; border:1px solid var(--border);
+      background:var(--surface2); color:var(--text-dim); font-size:10px; font-weight:700;
+      cursor:pointer; transition: all .15s; display:flex; align-items:center; justify-content:center;
+    }
+    .gx-icon-btn:hover { color:var(--text); border-color:var(--accent); }
+    .gx-icon-btn.active { background:var(--accent); color:#000; border-color:var(--accent); }
+
+    /* Floating tooltips */
+    [data-tip] { position:relative; }
+    [data-tip]::after {
+      content:attr(data-tip);
+      position:absolute; bottom:calc(100% + 6px); left:50%; transform:translateX(-50%);
+      background:rgba(16,16,24,.95); color:var(--text); border:1px solid var(--border);
+      border-radius:6px; padding:5px 10px; font-size:11px; font-weight:400;
+      white-space:nowrap; pointer-events:none; z-index:40;
+      opacity:0; transition:opacity .15s; box-shadow:0 4px 16px rgba(0,0,0,.5);
+    }
+    [data-tip]:hover::after { opacity:1; }
+    [data-tip-pos="below"]::after { bottom:auto; top:calc(100% + 6px); }
+    [data-tip-pos="left"]::after { left:auto; right:0; transform:none; }
+    [data-tip-pos="right"]::after { left:0; right:auto; transform:none; }
+
+    /* Split layout */
+    .gx-split { display:flex; height:calc(100dvh - 180px); gap:0; transition: height .3s ease; }
+    .gx-canvas-wrap {
+      flex:1; position:relative; background:#08080d; border-radius:8px 0 0 8px;
+      border:1px solid var(--border); overflow:hidden;
+    }
+    .gx-canvas-wrap svg { width:100%; height:100%; }
+    .gx-detail {
+      width:0; overflow:hidden; background:var(--surface); border-radius:0 8px 8px 0;
+      border:1px solid var(--border); border-left:0; transition: width .3s ease;
+      display:flex; flex-direction:column;
+    }
+    .gx-detail.open { width:380px; }
+    .gx-detail-header {
+      display:flex; justify-content:space-between; align-items:center;
+      padding:12px 14px; border-bottom:1px solid var(--border); min-height:44px;
+    }
+    .gx-detail-name { font-weight:700; font-size:15px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .gx-detail-close {
+      background:none; border:none; color:var(--text-dim); font-size:20px; cursor:pointer;
+      width:28px; height:28px; display:flex; align-items:center; justify-content:center;
+      border-radius:50%; transition: all .15s;
+    }
+    .gx-detail-close:hover { background:var(--surface2); color:var(--text); }
+    .gx-detail-body { flex:1; overflow-y:auto; padding:14px; font-size:12px; line-height:1.6; }
+    .gx-detail-body .gxd-section { margin-bottom:14px; }
+    .gx-detail-body .gxd-label { font-size:9px; text-transform:uppercase; letter-spacing:.5px; color:var(--text-dim); margin-bottom:4px; }
+    .gx-detail-body .gxd-stat-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+    .gx-detail-body .gxd-stat { background:var(--surface2); border-radius:6px; padding:8px; text-align:center; }
+    .gx-detail-body .gxd-stat-val { font-size:18px; font-weight:700; color:var(--accent); }
+    .gx-detail-body .gxd-stat-lbl { font-size:9px; color:var(--text-dim); text-transform:uppercase; }
+    .gx-detail-body .gxd-tags { display:flex; flex-wrap:wrap; gap:4px; }
+    .gx-detail-body .gxd-tag {
+      background:var(--surface2); color:var(--accent); border-radius:10px; padding:2px 8px;
+      font-size:10px; cursor:pointer; transition: background .15s;
+    }
+    .gx-detail-body .gxd-tag:hover { background:var(--accent); color:#000; }
+    .gx-detail-body .gxd-group { color:var(--text-dim); font-size:11px; padding:2px 0; }
+    .gx-detail-body .gxd-btn {
+      display:block; width:100%; padding:8px; margin-top:6px; border-radius:6px;
+      background:var(--accent); color:#000; border:none; font-weight:600; font-size:12px;
+      cursor:pointer; text-align:center; transition: opacity .15s;
+    }
+    .gx-detail-body .gxd-btn:hover { opacity:.85; }
+
+    /* Tooltip */
+    .gx-tooltip {
+      position:absolute; display:none; background:rgba(16,16,24,.95); border:1px solid var(--border);
+      border-radius:8px; padding:10px 12px; font-size:11px; pointer-events:none; z-index:20;
+      max-width:260px; box-shadow:0 8px 32px rgba(0,0,0,.6); backdrop-filter:blur(8px); line-height:1.5;
+    }
+    .gx-loading {
+      position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+      color:var(--text-dim); font-size:13px; z-index:5;
+    }
+    .gx-status { font-size:10px; color:var(--text-dim); padding:4px 8px; opacity:.7; }
+
+    /* Help overlay */
+    .gx-help-overlay {
+      position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:50;
+      display:none; align-items:center; justify-content:center; backdrop-filter:blur(4px);
+    }
+    .gx-help-overlay.open { display:flex; }
+    .gx-help-card {
+      background:var(--surface); border:1px solid var(--border); border-radius:10px;
+      padding:20px 28px; max-width:380px; color:var(--text);
+    }
+    .gx-help-card h3 { margin:0 0 12px; font-size:14px; }
+    .gx-help-grid { display:grid; grid-template-columns:auto 1fr; gap:5px 14px; font-size:12px; }
+    .gx-help-grid kbd {
+      background:var(--surface2); border:1px solid var(--border); border-radius:3px;
+      padding:1px 6px; font-family:monospace; font-size:11px; text-align:center; min-width:36px;
+    }
+
+    /* Filter panel */
+    .gx-filter-panel {
+      max-height:0; overflow:hidden; transition: max-height .3s ease, padding .3s ease;
+      background:var(--surface); border-bottom:1px solid var(--border); padding:0 8px;
+    }
+    .gx-filter-panel.open {
+      max-height:400px; padding:8px; overflow-y:auto;
+    }
+    .gx-filter-row {
+      display:flex; align-items:center; gap:8px; padding:4px 0;
+      border-bottom:1px solid rgba(255,255,255,0.03);
+    }
+    .gx-filter-row.active { background:rgba(79,195,247,0.06); border-radius:4px; padding:4px 6px; }
+    .gx-filter-label { font-size:11px; color:var(--text-dim); min-width:140px; white-space:nowrap; }
+    .gx-filter-inputs { display:flex; align-items:center; gap:4px; }
+    .gx-filter-input {
+      background:var(--surface2); color:var(--text); border:1px solid var(--border);
+      border-radius:4px; padding:3px 6px; font-size:11px; width:90px; outline:none;
+      transition: border-color .15s;
+    }
+    .gx-filter-input:focus { border-color:var(--accent); }
+    .gx-filter-input[type="date"] { width:120px; }
+    .gx-filter-sep { font-size:10px; color:var(--text-dim); }
+    .gx-filter-apply {
+      background:var(--accent); color:#000; border:none; border-radius:4px;
+      width:22px; height:22px; font-size:12px; cursor:pointer; font-weight:700;
+      display:flex; align-items:center; justify-content:center; transition: opacity .15s;
+    }
+    .gx-filter-apply:hover { opacity:.8; }
+    .gx-filter-clear {
+      background:transparent; color:var(--text-dim); border:1px solid var(--border);
+      border-radius:4px; width:22px; height:22px; font-size:14px; cursor:pointer;
+      display:flex; align-items:center; justify-content:center; transition: all .15s;
+    }
+    .gx-filter-clear:hover { color:#f44; border-color:#f44; }
+
+    /* D3 scatter plot styles */
+    .gx-dot { transition: r .3s ease, opacity .3s ease; }
+    .gx-dot.selected { stroke:#fff; stroke-width:2; }
+    .gx-dot.dimmed { opacity:.12; }
+    .gx-dot.highlighted { stroke:var(--accent); stroke-width:2; }
+    @keyframes gx-pulse { 0%,100%{stroke-opacity:1} 50%{stroke-opacity:.3} }
+    .gx-dot.selected { animation: gx-pulse 1.5s ease infinite; }
+    .gx-edge { stroke-opacity:.12; }
+    .gx-edge.highlighted { stroke-opacity:.5; }
+    .gx-label { cursor:pointer; transition:fill .15s; }
+    .gx-label:hover { fill:var(--accent) !important; opacity:1 !important; }
+    .gx-axis text { fill:var(--text-dim); font-size:10px; }
+    .gx-axis line, .gx-axis path { stroke:var(--border); }
+    .gx-axis-label { fill:var(--text-dim); font-size:10px; text-anchor:middle; }
+
+    /* Group Modal */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.7);
+      z-index: 300;
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-overlay.open { display: flex; }
+
+    .modal-dialog {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      width: 90%;
+      max-width: 400px;
+    }
+    .modal-title {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 16px;
+    }
+    .modal-field {
+      margin-bottom: 14px;
+    }
+    .modal-field label {
+      display: block;
+      font-size: 11px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 4px;
+    }
+    .modal-field input[type="text"] {
+      width: 100%;
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+    }
+    .modal-field input[type="text"]:focus { border-color: var(--accent); }
+    .modal-field input[type="color"] {
+      width: 40px;
+      height: 32px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      cursor: pointer;
+      background: var(--surface2);
+      padding: 2px;
+    }
+    .modal-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      margin-top: 20px;
+    }
+    .modal-actions button {
+      font-size: 12px;
+      font-weight: 600;
+      padding: 6px 16px;
+      border-radius: 999px;
+      cursor: pointer;
+      border: none;
+      transition: opacity 0.15s;
+    }
+    .modal-actions .modal-save {
+      background: var(--accent);
+      color: #000;
+    }
+    .modal-actions .modal-cancel {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .modal-actions button:hover { opacity: 0.85; }
+
+    /* Loading & error states */
+    .loading-state { text-align: center; padding: 60px 20px; color: var(--text-dim); font-size: 15px; }
+    .error-state { text-align: center; padding: 40px 20px; color: var(--red); font-size: 14px; }
+    .hidden { display: none !important; }
+
+    /* Tier pills on dashboard */
+    .tier-pills { display: flex; flex-wrap: wrap; gap: 8px; }
+    .tier-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 5px 14px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: border-color 0.15s;
+    }
+    .tier-pill:hover { border-color: var(--accent); }
+    .tier-pill.active {
+      border-color: var(--accent);
+      background: rgba(79, 195, 247, 0.1);
+      box-shadow: 0 0 0 1px var(--accent);
+    }
+    .tier-pill .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+    }
+    .tier-pill .count {
+      color: var(--text-dim);
+      font-weight: 600;
+    }
+
+    /* Tag filters */
+    .tag-filters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .tag-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 3px 10px;
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.15s;
+      user-select: none;
+    }
+    .tag-chip:hover { border-color: var(--accent); }
+    .tag-chip.active { background: var(--accent); color: #000; border-color: var(--accent); }
+    .tag-chip .tag-count { opacity: 0.6; font-size: 10px; }
+    .tag-mode-toggle {
+      font-size: 11px;
+      color: var(--text-dim);
+      cursor: pointer;
+      padding: 3px 8px;
+      border: 1px dashed var(--border);
+      border-radius: 4px;
+    }
+    .tag-mode-toggle:hover { color: var(--accent); border-color: var(--accent); }
+
+    /* Dashboard tag cloud */
+    .dash-tag-cloud {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+    .dash-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 5px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: all 0.15s;
+      user-select: none;
+    }
+    .dash-tag:hover { filter: brightness(1.2); transform: translateY(-1px); }
+    .dash-tag.active { border-color: #fff; box-shadow: 0 0 8px rgba(255,255,255,0.15); }
+    .dash-tag .tag-count {
+      font-size: 10px;
+      opacity: 0.7;
+      font-weight: 400;
+    }
+    .tag-cloud-controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+      width: 100%;
+    }
+    .tag-sort-select {
+      background: var(--card);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 4px 8px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .tag-expand-btn {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--dim);
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .tag-expand-btn:hover { color: var(--accent); border-color: var(--accent); }
+    .tag-category-group {
+      width: 100%;
+      margin-bottom: 8px;
+    }
+    .tag-category-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--dim);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 4px;
+    }
+    .tag-category-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+    .tag-more-hint {
+      display: inline-flex;
+      align-items: center;
+      padding: 5px 12px;
+      font-size: 11px;
+      color: var(--dim);
+      cursor: default;
+    }
+
+    /* Detail panel tags */
+    .detail-tags { padding: 0 0 8px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+    .detail-tag {
+      background: var(--surface2);
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: 11px;
+      color: var(--accent);
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .detail-tag .tag-remove {
+      cursor: pointer;
+      opacity: 0.5;
+      font-size: 10px;
+      line-height: 1;
+    }
+    .detail-tag .tag-remove:hover { opacity: 1; color: #f44; }
+    .detail-tag { cursor: pointer; transition: opacity 0.15s; }
+    .detail-tag:hover { opacity: 0.8; }
+    .detail-tag .tag-count { opacity: 0.6; font-size: 10px; margin-left: 2px; }
+    .detail-tier-select {
+      display: flex; align-items: center; gap: 6px; margin: 6px 0 10px;
+    }
+    .detail-tier-select label { font-size: 11px; color: var(--text-dim); }
+    .detail-tier-select select {
+      background: var(--surface2); color: var(--text); border: 1px solid var(--border);
+      border-radius: 4px; padding: 3px 8px; font-size: 12px; outline: none; cursor: pointer;
+    }
+    .detail-tier-select select:focus { border-color: var(--accent); }
+    .tag-add-form {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+    }
+    .tag-add-form input {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 2px 6px;
+      font-size: 11px;
+      color: var(--text);
+      width: 80px;
+      outline: none;
+    }
+    .tag-add-form input:focus { border-color: var(--accent); }
+    .tag-add-form button {
+      background: var(--accent);
+      border: none;
+      border-radius: 4px;
+      padding: 2px 6px;
+      font-size: 10px;
+      color: #fff;
+      cursor: pointer;
+    }
+    .tag-extract-btn {
+      background: none;
+      border: 1px dashed var(--border);
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: 10px;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .tag-extract-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* Detail voice stats */
+    .detail-voice-stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .voice-stat-item {
+      background: var(--surface);
+      border-radius: 6px;
+      padding: 8px 10px;
+      text-align: center;
+    }
+    .voice-stat-item .val { font-size: 16px; font-weight: 700; }
+    .voice-stat-item .lbl { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+
+    /* Calendar — matches Events dashboard pattern */
+    .cal-week-header {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      text-align: center;
+      font-size: 12px;
+      color: var(--text-dim);
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .calendar-days {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 2px;
+    }
+    .cal-day {
+      min-height: 100px;
+      padding: 6px;
+      border-radius: 6px;
+      cursor: pointer;
+      position: relative;
+      overflow: hidden;
+      transition: background 0.15s;
+    }
+    .cal-day:hover { background: var(--surface2); }
+    .cal-day.today { background: var(--surface2); outline: 1px solid var(--accent); }
+    .cal-day.other-month { opacity: 0.25; }
+    .cal-day .day-number {
+      font-size: 13px;
+      font-weight: 500;
+      margin-bottom: 4px;
+      color: var(--text-dim);
+    }
+    .cal-day.today .day-number { color: var(--accent); font-weight: 700; }
+    .day-contacts {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      overflow: hidden;
+    }
+    .day-contact-item {
+      font-size: 10px;
+      line-height: 1.3;
+      padding: 1px 4px;
+      border-radius: 3px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      cursor: pointer;
+      border-left: 3px solid var(--accent);
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text);
+    }
+    .day-contact-item:hover { background: rgba(255, 255, 255, 0.1); }
+    .day-contact-more {
+      font-size: 9px;
+      color: var(--text-dim);
+      padding: 1px 4px;
+    }
+
+    /* Dashboard 2-col grid */
+    .dash-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+
+    /* Top friends navigation */
+    .tf-nav-btn {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 4px 10px;
+      font-size: 12px;
+      color: var(--text);
+      cursor: pointer;
+    }
+    .tf-nav-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .tf-nav-btn:disabled { opacity: 0.3; cursor: default; }
+    .tf-window-btns { display: flex; gap: 2px; }
+    .tf-window-btn {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 4px 10px;
+      font-size: 11px;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .tf-window-btn:hover { border-color: var(--accent); color: var(--text); }
+    .tf-window-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+    /* Top friends leaderboard */
+    .top-friend-row {
+      display: flex; align-items: center; gap: 12px;
+      padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+    .top-friend-row:last-child { border-bottom: none; }
+    .top-friend-rank {
+      font-size: 14px; font-weight: 700; color: var(--text-dim); width: 24px; text-align: center; flex-shrink: 0;
+    }
+    .top-friend-rank.gold { color: #ffd700; }
+    .top-friend-rank.silver { color: #c0c0c0; }
+    .top-friend-rank.bronze { color: #cd7f32; }
+    .top-friend-name { font-size: 14px; font-weight: 600; white-space: nowrap; flex-shrink: 0; }
+    .top-friend-tags { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; min-width: 0; justify-content: flex-end; }
+    .top-friend-tag {
+      font-size: 10px; padding: 1px 6px; border-radius: 8px;
+      cursor: pointer; white-space: nowrap; transition: opacity 0.15s;
+    }
+    .top-friend-tag:hover { opacity: 0.7; }
+    .top-friend-score { flex-shrink: 0; text-align: right; white-space: nowrap; }
+    .top-friend-count {
+      font-size: 18px; font-weight: 700; color: var(--accent);
+    }
+    .top-friend-trend {
+      font-size: 11px; margin-left: 4px;
+    }
+    .top-friend-trend.up { color: var(--green); }
+    .top-friend-trend.down { color: var(--red); }
+    .top-friend-trend.flat { color: var(--text-dim); }
+
+    /* Reciprocity bars */
+    .recip-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.04);
+      font-size: 12px;
+    }
+    .recip-row:last-child { border-bottom: none; }
+    .recip-name { width: 90px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .recip-bar {
+      flex: 1; height: 16px; background: var(--surface2); border-radius: 8px; overflow: hidden;
+      display: flex; position: relative;
+    }
+    .recip-bar-sent { background: var(--accent); height: 100%; transition: width 0.4s; }
+    .recip-bar-received { background: var(--green); height: 100%; transition: width 0.4s; }
+    .recip-pct { width: 40px; text-align: right; font-size: 11px; color: var(--text-dim); }
+
+    /* Streaks */
+    .streak-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+    .streak-row:last-child { border-bottom: none; }
+    .streak-name { font-size: 13px; font-weight: 500; flex: 1; }
+    .streak-badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 12px; font-weight: 700;
+      padding: 3px 10px; border-radius: 999px;
+    }
+    .streak-badge.active { background: rgba(253,203,110,0.15); color: var(--yellow); }
+    .streak-badge.record { background: rgba(79,195,247,0.1); color: var(--accent); }
+
+    /* Fast responders */
+    .fast-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+    .fast-row:last-child { border-bottom: none; }
+    .fast-rank { font-size: 14px; color: var(--text-dim); width: 20px; text-align: center; }
+    .fast-name { font-size: 13px; font-weight: 500; flex: 1; }
+    .fast-time { font-size: 13px; font-weight: 600; color: var(--green); }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .dash-grid-2 { grid-template-columns: 1fr; }
+      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+      .stat-card { padding: 10px; }
+      .stat-value { font-size: 20px; }
+      .stat-label { font-size: 11px; }
+      .header { padding: 10px 14px; flex-wrap: wrap; gap: 8px; }
+      .header h1 { font-size: 16px; }
+      .header-btn { padding: 8px 14px; font-size: 12px; }
+      .back-link { font-size: 14px; padding: 4px 0; }
+      .container { padding: 12px; }
+      .tabs { padding: 0 12px; gap: 0; }
+      .tab { padding: 12px 10px; font-size: 13px; }
+      .group-lanes { flex-direction: column; }
+      .group-lane { max-width: none; min-width: 0; }
+      .tier-lanes-viewport.group-lanes { grid-template-columns: 1fr; max-height: none; overflow-y: visible; }
+      .contacts-table { font-size: 12px; }
+      .contacts-table th, .contacts-table td { padding: 10px 8px; }
+      .contacts-table th { font-size: 11px; }
+      .contact-detail { width: 100%; max-width: 100vw; }
+      .filter-bar { gap: 6px; flex-wrap: wrap; }
+      .filter-bar select, .filter-bar input { font-size: 16px; padding: 8px 10px; }
+      .detail-stats { grid-template-columns: 1fr 1fr; }
+      .calendar-days { gap: 1px; }
+      .cal-day { min-height: 60px; padding: 4px; }
+      .cal-day .day-number { font-size: 11px; }
+      .day-contact-item { font-size: 10px; }
+      .section-title { font-size: 13px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <a href="/hub.html" class="back-link">&larr; Hub</a>
+    <h1>Friends Network</h1>
+    <button id="scan-btn" class="header-btn">Scan Chats</button>
+    <button id="backfill-btn" class="header-btn secondary">Backfill</button>
+    <button id="tag-all-header-btn" class="header-btn secondary">Tag All</button>
+  </div>
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <div class="tab active" data-tab="dashboard">Dashboard</div>
+    <div class="tab" data-tab="contacts">Contacts</div>
+    <div class="tab" data-tab="tiers">Tiers</div>
+    <div class="tab" data-tab="graph">Graph</div>
+    <div class="tab" data-tab="calls">Calls</div>
+  </div>
+
+  <!-- Login gate -->
+  <div id="login-gate" class="login-gate hidden">
+    <p>Admin access required.</p>
+    <p>Please <a href="/">log in via the main app</a> first, then return here.</p>
+  </div>
+
+  <!-- Main content container -->
+  <div id="main-content" class="container hidden">
+
+    <!-- ==================== Dashboard Tab ==================== -->
+    <div id="tab-dashboard" class="tab-content active">
+
+      <!-- Server & iMessage Status Bar -->
+      <div id="dash-status-bar" style="display:flex;align-items:center;gap:12px;padding:6px 12px;margin-bottom:10px;border-radius:8px;background:var(--surface2);font-size:11px;color:var(--text-dim);">
+        <span id="dash-server-status" style="display:flex;align-items:center;gap:5px;">
+          <span id="dash-server-dot" style="width:7px;height:7px;border-radius:50%;background:#888;display:inline-block;"></span>
+          Server
+        </span>
+        <span style="opacity:.3;">|</span>
+        <span id="dash-imsg-status" style="display:flex;align-items:center;gap:5px;">
+          <span id="dash-imsg-dot" style="width:7px;height:7px;border-radius:50%;background:#888;display:inline-block;"></span>
+          iMessage
+        </span>
+        <span style="opacity:.3;">|</span>
+        <span id="dash-bridge-status" style="display:flex;align-items:center;gap:5px;">
+          <span id="dash-bridge-dot" style="width:7px;height:7px;border-radius:50%;background:#888;display:inline-block;"></span>
+          Bridge
+        </span>
+        <span id="dash-imsg-detail" style="margin-left:auto;font-size:10px;opacity:.6;"></span>
+      </div>
+
+      <!-- AI Search -->
+      <div class="ai-search-section">
+        <div class="ai-search-bar">
+          <input type="text" id="ai-search-input" placeholder="Ask anything... e.g. 'friends who live in San Francisco' or 'people interested in climate'" />
+          <button id="ai-search-btn" class="ai-search-go">Search</button>
+        </div>
+        <div id="ai-search-results" class="ai-search-results" style="display:none;"></div>
+      </div>
+
+      <!-- Summary cards -->
+      <div id="summary-cards" class="stats-grid"></div>
+
+      <!-- Tier distribution -->
+      <div class="section" id="tier-distribution-section">
+        <div class="section-title">Tier Overview</div>
+        <div id="tier-pills" class="tier-pills"></div>
+      </div>
+
+      <!-- Tag Cloud -->
+      <div class="section" id="tag-cloud-section">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+          <div class="section-title" style="margin-bottom:0;">Tags</div>
+          <button id="tag-all-btn" class="header-btn secondary" style="font-size:11px;padding:5px 14px;">AI Tag All</button>
+        </div>
+        <div id="dash-tag-cloud" class="dash-tag-cloud">
+          <span class="chart-empty">No tags yet. Use "AI Tag All" to auto-tag contacts from conversations.</span>
+        </div>
+      </div>
+
+      <!-- Top Friends leaderboard -->
+      <div class="section" id="tf-section" tabindex="0" style="outline:none;">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <button id="tf-prev" class="tf-nav-btn" title="Previous period (Left arrow)">&larr;</button>
+            <div class="section-title" style="margin:0;">Top 10 Friends</div>
+            <button id="tf-next" class="tf-nav-btn" title="Next period (Right arrow)">&rarr;</button>
+          </div>
+          <div class="tf-window-btns" id="tf-window-btns">
+            <button class="tf-window-btn" data-days="7">7d</button>
+            <button class="tf-window-btn active" data-days="14">14d</button>
+            <button class="tf-window-btn" data-days="30">30d</button>
+            <button class="tf-window-btn" data-days="60">60d</button>
+            <button class="tf-window-btn" data-days="90">90d</button>
+          </div>
+        </div>
+        <div id="tf-date-range" style="font-size:10px;color:var(--muted);margin-bottom:6px;"></div>
+        <div id="top-friends-list">
+          <div class="chart-empty">No data yet.</div>
+        </div>
+      </div>
+
+      <!-- Calendar (integrated into dashboard) -->
+      <div class="section">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+          <button id="cal-prev" class="header-btn secondary" style="font-size:11px;padding:5px 12px;">&larr;</button>
+          <div class="section-title" style="margin-bottom:0;" id="cal-month-title">--</div>
+          <button id="cal-next" class="header-btn secondary" style="font-size:11px;padding:5px 12px;">&rarr;</button>
+        </div>
+        <div class="cal-week-header">
+          <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+        </div>
+        <div id="calendar-days" class="calendar-days"></div>
+      </div>
+
+      <!-- Top 10 to Follow Up With (mirrors Top Friends nav) -->
+      <div class="section" id="neglected-section" tabindex="0" style="outline:none;">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <button id="neg-prev" class="tf-nav-btn" title="Previous period (Left arrow)">&larr;</button>
+            <div class="section-title" style="margin:0;">Top 10 to Follow Up</div>
+            <button id="neg-next" class="tf-nav-btn" title="Next period (Right arrow)">&rarr;</button>
+          </div>
+          <div class="tf-window-btns" id="neg-window-btns">
+            <button class="neg-window-btn tf-window-btn" data-days="7">7d</button>
+            <button class="neg-window-btn tf-window-btn" data-days="14">14d</button>
+            <button class="neg-window-btn tf-window-btn active" data-days="30">30d</button>
+            <button class="neg-window-btn tf-window-btn" data-days="60">60d</button>
+            <button class="neg-window-btn tf-window-btn" data-days="90">90d</button>
+          </div>
+        </div>
+        <div id="neg-date-range" style="font-size:10px;color:var(--muted);margin-bottom:6px;"></div>
+        <div id="neg-filters" style="display:flex;gap:4px;margin-bottom:6px;flex-wrap:wrap;">
+          <select id="neg-sort" style="font-size:10px;padding:2px 4px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;">
+            <option value="msgs-per-day">Avg Messages / Active Day</option>
+            <option value="total-in-range">Total Messages / Range</option>
+            <option value="voice-in-range">Total Voice Notes / Range</option>
+          </select>
+          <select id="neg-group-filter" style="font-size:10px;padding:2px 4px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;">
+            <option value="">All Groups</option>
+          </select>
+          <select id="neg-tag-filter" style="font-size:10px;padding:2px 4px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;">
+            <option value="">All Tags</option>
+          </select>
+          <select id="neg-recency-filter" style="font-size:10px;padding:2px 4px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;">
+            <option value="">No recency filter</option>
+            <option value="30">Hide contacted &lt;30d ago</option>
+            <option value="60">Hide contacted &lt;60d ago</option>
+            <option value="90">Hide contacted &lt;90d ago</option>
+          </select>
+        </div>
+        <div id="neglected-list">
+          <div class="chart-empty">No data yet.</div>
+        </div>
+      </div>
+
+      <!-- Two-column grid for charts -->
+      <div class="dash-grid-2">
+        <!-- Weekly chart -->
+        <div class="section">
+          <div class="section-title">Weekly Volume</div>
+          <div class="chart-container">
+            <canvas id="weekly-chart"></canvas>
+          </div>
+        </div>
+
+        <!-- Hourly activity -->
+        <div class="section">
+          <div class="section-title">Activity by Hour</div>
+          <div class="chart-container">
+            <canvas id="hourly-chart"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Fastest responders + Initiators row -->
+      <div class="dash-grid-2">
+        <div class="section">
+          <div class="section-title">Fastest Responders</div>
+          <div id="fast-responders-list">
+            <div class="chart-empty">No data yet.</div>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="section-title">Who Initiates Most</div>
+          <div id="initiators-list">
+            <div class="chart-empty">No data yet.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- iMessage Sync Monitor -->
+      <div class="section" id="imessage-monitor-section">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+          <div class="section-title" style="margin:0;">iMessage Sync Monitor</div>
+          <span id="imsg-status-badge" style="font-size:10px;padding:2px 8px;border-radius:10px;background:var(--surface2);color:var(--text-dim);">Loading...</span>
+        </div>
+        <div id="imsg-stats" style="display:flex;gap:16px;margin-bottom:10px;flex-wrap:wrap;"></div>
+        <div id="imsg-log" style="background:var(--surface2);border-radius:6px;padding:10px;font-family:monospace;font-size:11px;max-height:200px;overflow-y:auto;color:var(--text-dim);line-height:1.7;">
+          <span style="opacity:.5;">No sync events yet.</span>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ==================== Contacts Tab ==================== -->
+    <div id="tab-contacts" class="tab-content">
+
+      <!-- Filter bar -->
+      <div class="filter-bar">
+        <select id="filter-group" class="filter-select">
+          <option value="">All Groups</option>
+        </select>
+        <select id="filter-tier" class="filter-select">
+          <option value="">All Tiers</option>
+        </select>
+        <select id="filter-quality" class="filter-select">
+          <option value="">All Quality</option>
+          <option value="70">High (70+)</option>
+          <option value="40">Medium (40+)</option>
+          <option value="1">Low (1+)</option>
+        </select>
+        <input type="text" id="contact-search" class="filter-search" placeholder="Search contacts...">
+      </div>
+      <div id="tag-filters" class="tag-filters"></div>
+
+      <!-- Contacts table -->
+      <div class="section" style="padding: 0; overflow-x: auto;">
+        <table class="contacts-table">
+          <thead>
+            <tr>
+              <th data-sort="name">Name</th>
+              <th data-sort="tier_name">Tier</th>
+              <th data-sort="last_seen">Last Contact</th>
+              <th data-sort="messages_30d">30d Msgs</th>
+              <th data-sort="initiation_ratio">Init Ratio</th>
+              <th data-sort="their_avg_response_sec">Avg Response</th>
+              <th data-sort="quality_score">Quality</th>
+            </tr>
+          </thead>
+          <tbody id="contacts-tbody">
+            <tr><td colspan="7" style="text-align:center;color:var(--text-dim);padding:40px;">No contacts loaded.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+
+    <!-- ==================== Tiers Tab ==================== -->
+    <div id="tab-tiers" class="tab-content">
+
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+        <div class="section-title" style="margin-bottom:0;">Friend Tiers</div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <input type="text" id="tier-search-input" class="tier-search-input" placeholder="Search contacts...">
+          <select id="tier-sort-select" class="tier-search-input" style="width:auto;">
+            <option value="default">Sort: Default</option>
+            <option value="name-asc">Name A-Z</option>
+            <option value="name-desc">Name Z-A</option>
+            <option value="count-desc">Most People</option>
+            <option value="count-asc">Fewest People</option>
+          </select>
+          <button id="create-tier-btn" class="header-btn" style="font-size:11px;padding:5px 14px;">+ New Tier</button>
+        </div>
+      </div>
+
+      <!-- Search results (shown when searching) -->
+      <div id="tier-search-results" class="tier-search-results" style="display:none;">
+        <div class="tier-section-label">Search Results</div>
+        <div id="tier-search-chips" class="tier-horizontal-chips"></div>
+      </div>
+
+      <!-- Unassigned contacts (horizontal row above tiers) -->
+      <div id="tier-unassigned-section" class="tier-unassigned-section">
+        <div class="tier-section-label">Unassigned <span id="tier-unassigned-count" class="lane-count">0</span></div>
+        <div id="tier-unassigned-chips" class="tier-horizontal-chips tier-drop-zone" data-tier-id="unassigned"></div>
+      </div>
+
+      <!-- Tier columns -->
+      <div id="tier-lanes" class="group-lanes tier-lanes-viewport">
+        <div class="chart-empty" style="flex:1;display:flex;align-items:center;justify-content:center;">
+          Loading tiers...
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ==================== Groups Tab ==================== -->
+    <div id="tab-groups" class="tab-content">
+
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+        <div class="section-title" style="margin-bottom:0;">Friend Groups</div>
+        <button id="create-group-btn" class="header-btn" style="font-size:11px;padding:5px 14px;">+ New Group</button>
+      </div>
+
+      <div id="group-lanes" class="group-lanes">
+        <div class="chart-empty" style="flex:1;display:flex;align-items:center;justify-content:center;">
+          No groups created yet. Click "New Group" to get started.
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ==================== Graph Tab — Contact Explorer ==================== -->
+    <div id="tab-graph" class="tab-content">
+      <!-- Toolbar -->
+      <div class="gx-toolbar">
+        <div class="gx-toolbar-row">
+          <div class="gx-toolbar-section">
+            <span class="gx-label" data-tip="X axis: time of last contact" data-tip-pos="below">Time</span>
+            <div class="gx-pill-group" id="gx-x-pills"></div>
+          </div>
+          <div class="gx-toolbar-section gx-toolbar-right">
+            <div class="gx-tier-pills" id="gx-tier-pills"></div>
+            <input type="text" id="gx-search" class="gx-search" placeholder="Search (F)">
+            <button class="gx-icon-btn" id="gx-btn-help" data-tip="Keyboard shortcuts" title="Help (?)">?</button>
+          </div>
+        </div>
+        <div class="gx-toolbar-row">
+          <div class="gx-toolbar-section">
+            <span class="gx-label" data-tip="Y axis metric (scroll to zoom)" data-tip-pos="below">Y</span>
+            <div class="gx-pill-group gx-pill-group-wrap" id="gx-y-pills"></div>
+            <button class="gx-icon-btn" id="gx-btn-log" data-tip="Toggle logarithmic Y scale (W)" title="Logarithmic Y scale (W)">LOG</button>
+          </div>
+        </div>
+        <div class="gx-toolbar-row">
+          <div class="gx-toolbar-section">
+            <span class="gx-label" data-tip="Dot color encoding" data-tip-pos="below">Color</span>
+            <div class="gx-pill-group" id="gx-color-pills"></div>
+          </div>
+          <div class="gx-toolbar-section">
+            <span class="gx-label" data-tip="Dot size encoding" data-tip-pos="below">Size</span>
+            <div class="gx-pill-group" id="gx-size-pills"></div>
+          </div>
+          <div class="gx-toolbar-section" style="margin-left:auto;gap:4px;">
+            <button class="gx-icon-btn" id="gx-btn-filter" data-tip="Range filters" title="Filters (/)">&#9776;</button>
+            <button class="gx-icon-btn" id="gx-btn-lines" data-tip="Show shared group lines" title="Group connections (G)">G</button>
+            <button class="gx-icon-btn" id="gx-btn-tags" data-tip="Show shared tag lines" title="Tag connections (T)">T</button>
+            <button class="gx-icon-btn" id="gx-btn-labels" data-tip="Toggle name labels" title="Labels (L)">L</button>
+          </div>
+        </div>
+      </div>
+      <!-- Filter panel (collapsible) -->
+      <div class="gx-filter-panel" id="gx-filter-panel"></div>
+      <!-- Split view -->
+      <div class="gx-split" id="gx-split">
+        <div class="gx-canvas-wrap" id="gx-canvas-wrap">
+          <svg id="gx-svg"></svg>
+          <div id="gx-tooltip" class="gx-tooltip"></div>
+          <div id="gx-loading" class="gx-loading">Loading contacts...</div>
+        </div>
+        <div class="gx-detail" id="gx-detail">
+          <div class="gx-detail-header">
+            <div class="gx-detail-name" id="gx-detail-name"></div>
+            <button class="gx-detail-close" id="gx-detail-close">&times;</button>
+          </div>
+          <div class="gx-detail-body" id="gx-detail-body"></div>
+        </div>
+      </div>
+      <!-- Status bar -->
+      <div class="gx-status" id="gx-status"></div>
+      <!-- Help overlay -->
+      <div class="gx-help-overlay" id="gx-help-overlay">
+        <div class="gx-help-card">
+          <h3>Keyboard Shortcuts</h3>
+          <div class="gx-help-grid">
+            <kbd>&uarr;&darr;&larr;&rarr;</kbd><span>Navigate contacts</span>
+            <kbd>Enter</kbd><span>Open contact detail</span>
+            <kbd>Dbl-click</kbd><span>Open contact detail</span>
+            <kbd>Esc</kbd><span>Deselect</span>
+            <kbd>Y</kbd><span>Cycle Y axis</span>
+            <kbd>[ ]</kbd><span>Navigate time window</span>
+            <kbd>W</kbd><span>Toggle log scale</span>
+            <kbd>C</kbd><span>Cycle color</span>
+            <kbd>S</kbd><span>Cycle size</span>
+            <kbd>/</kbd><span>Toggle filter panel</span>
+            <kbd>G</kbd><span>Toggle group connections</span>
+            <kbd>T</kbd><span>Toggle tag connections</span>
+            <kbd>L</kbd><span>Toggle labels</span>
+            <kbd>F</kbd><span>Search</span>
+            <kbd>1-5</kbd><span>Filter by tier</span>
+            <kbd>0</kbd><span>All tiers</span>
+            <kbd>+/-</kbd><span>Zoom Y axis</span>
+            <kbd>R</kbd><span>Reset zoom</span>
+            <kbd>?</kbd><span>This help</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== Calls Tab ==================== -->
+    <div id="tab-calls" class="tab-content">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+        <div class="section-title" style="margin:0;">Call Recorder</div>
+        <a href="/calls.html" style="color:var(--accent);font-size:12px;text-decoration:none;">Open Full Page</a>
+      </div>
+
+      <!-- Compact recorder -->
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:16px;">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+          <select id="calls-tab-type" style="background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:11px;">
+            <option value="phone">Phone</option>
+            <option value="zoom">Zoom</option>
+            <option value="meet">Meet</option>
+            <option value="facetime">FaceTime</option>
+            <option value="other">Other</option>
+          </select>
+          <select id="calls-tab-source" style="background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:11px;">
+            <option value="mic">Mic Only</option>
+            <option value="system+mic">System + Mic</option>
+          </select>
+          <span id="calls-tab-timer" style="font-variant-numeric:tabular-nums;font-size:14px;color:var(--text-dim);min-width:50px;">00:00</span>
+          <div style="flex:1;height:3px;background:var(--surface2);border-radius:2px;overflow:hidden;min-width:60px;">
+            <div id="calls-tab-level" style="height:100%;background:var(--accent);width:0%;transition:width 0.05s;border-radius:2px;"></div>
+          </div>
+          <button id="calls-tab-record" style="background:var(--accent);color:#000;border:none;padding:6px 16px;border-radius:999px;font-size:11px;font-weight:600;cursor:pointer;">Record</button>
+        </div>
+      </div>
+
+      <!-- Recent calls list -->
+      <div class="section-title">Recent Calls</div>
+      <div id="calls-tab-list"></div>
+      <button id="calls-tab-more" class="header-btn secondary" style="display:none;margin-top:8px;">Load More</button>
+    </div>
+
+    <!-- ==================== Messaging Tab ==================== -->
+    <div id="tab-messaging" class="tab-content">
+
+      <!-- Recipients -->
+      <div class="recipient-section">
+        <div class="section-title">Select Recipients</div>
+
+        <!-- Group select buttons -->
+        <div id="msg-group-buttons" class="recipient-groups"></div>
+
+        <!-- Individual contacts -->
+        <div id="msg-contact-pills" class="recipient-contacts"></div>
+
+        <div id="recipient-count" class="recipient-count">0 recipients selected</div>
+      </div>
+
+      <!-- Compose -->
+      <div class="section">
+        <div class="section-title">Compose Message</div>
+        <textarea id="msg-text" class="composer" placeholder="Type your message..."></textarea>
+
+        <!-- Media upload -->
+        <div id="media-upload" class="media-upload">
+          Click or drag an image here to attach
+        </div>
+        <input type="file" id="media-file-input" accept="image/*" style="display:none;">
+        <div id="media-preview" class="media-preview"></div>
+
+        <!-- Send -->
+        <div class="send-actions">
+          <button id="send-btn" class="send-btn" disabled>Send to <span id="send-count">0</span></button>
+
+          <div id="send-progress" class="send-progress-container">
+            <div class="send-progress-bar">
+              <div id="send-progress-fill" class="send-progress-fill"></div>
+            </div>
+            <div id="send-progress-label" class="send-progress-label"></div>
+          </div>
+        </div>
+
+        <div id="send-status-text" class="send-status-text"></div>
+      </div>
+
+    </div>
+
+    <!-- ==================== Manage Chats Tab ==================== -->
+    <div id="tab-chats" class="tab-content">
+
+      <div class="section">
+        <div class="section-title">Monitored Chats</div>
+        <ul id="chats-list" class="chats-list">
+          <li style="color:var(--text-dim);justify-content:center;">No chats found. Click "Scan Chats" to discover conversations.</li>
+        </ul>
+      </div>
+
+      <!-- Bot Detection Section -->
+      <div class="section">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+          <div class="section-title" style="margin-bottom:0;">Bot & Notification Detection</div>
+          <button id="detect-bots-btn" class="header-btn secondary" style="font-size:11px;padding:5px 14px;">Scan for Bots</button>
+        </div>
+        <p style="font-size:11px;color:var(--text-dim);margin-bottom:12px;">
+          Detect and hide automated contacts (OTP senders, delivery notifications, system messages).
+        </p>
+        <div id="bot-results" style="display:none;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <span id="bot-count" style="font-size:12px;color:var(--text-dim);"></span>
+            <div style="display:flex;gap:6px;">
+              <button id="bot-select-all" class="header-btn secondary" style="font-size:10px;padding:3px 10px;">Select All</button>
+              <button id="bot-hide-selected" class="header-btn" style="font-size:10px;padding:3px 10px;">Hide Selected</button>
+            </div>
+          </div>
+          <div id="bot-list" style="max-height:400px;overflow-y:auto;"></div>
+        </div>
+      </div>
+
+      <!-- Hidden Contacts Section -->
+      <div class="section">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+          <div class="section-title" style="margin-bottom:0;">Hidden Contacts</div>
+          <button id="load-hidden-btn" class="header-btn secondary" style="font-size:11px;padding:5px 14px;">Show Hidden</button>
+        </div>
+        <div id="hidden-list" style="display:none;max-height:300px;overflow-y:auto;"></div>
+      </div>
+
+    </div>
+
+  </div>
+
+  <!-- ==================== Contact Detail Panel ==================== -->
+  <div id="detail-overlay" class="detail-overlay"></div>
+  <div id="detail-panel" class="contact-detail">
+    <div class="detail-header">
+      <span style="font-size:14px;font-weight:600;">Contact Details</span>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <button id="detail-hide-btn" class="hide-contact-btn" title="Hide this contact from all views">Hide</button>
+        <button class="close-btn" id="detail-close">&times;</button>
+      </div>
+    </div>
+    <div class="detail-body">
+      <div id="detail-name" class="detail-name" style="cursor:pointer;" title="Click to edit display name">--</div>
+      <a id="detail-phone" class="detail-phone" style="display:none;" href="#"></a>
+      <div id="detail-name-edit" class="detail-name-edit hidden">
+        <input type="text" id="detail-name-input" placeholder="Display name..." style="background:var(--surface2);border:1px solid var(--accent);border-radius:4px;padding:4px 8px;font-size:16px;font-weight:600;color:var(--text);width:100%;outline:none;">
+        <div style="display:flex;gap:4px;margin-top:4px;">
+          <button id="detail-name-save" style="font-size:10px;padding:2px 8px;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;">Save</button>
+          <button id="detail-name-reset" style="font-size:10px;padding:2px 8px;background:var(--surface2);color:var(--muted);border:1px solid var(--border);border-radius:4px;cursor:pointer;">Reset to Original</button>
+          <button id="detail-name-cancel" style="font-size:10px;padding:2px 8px;background:var(--surface2);color:var(--muted);border:1px solid var(--border);border-radius:4px;cursor:pointer;">Cancel</button>
+        </div>
+      </div>
+      <div id="detail-groups" class="detail-groups">No groups</div>
+
+      <div id="detail-tier-select" class="detail-tier-select"></div>
+
+      <div id="detail-tags" class="detail-tags"></div>
+
+      <div class="detail-range-pills" id="detail-range-pills">
+        <span class="detail-range-pill active" data-range="all">All Time</span>
+        <span class="detail-range-pill" data-range="1y">1Y</span>
+        <span class="detail-range-pill" data-range="90d">90d</span>
+        <span class="detail-range-pill" data-range="30d">30d</span>
+        <span class="detail-range-pill" data-range="7d">7d</span>
+      </div>
+
+      <div id="detail-stats" class="detail-stats"></div>
+      <div id="detail-voice-stats" class="detail-voice-stats"></div>
+
+      <div class="detail-chart-section">
+        <div class="section-title" id="detail-chart-title">Activity</div>
+        <canvas id="detail-chart"></canvas>
+      </div>
+
+      <div class="detail-conversation">
+        <div class="section-title">Conversation</div>
+        <button id="load-more-messages" class="load-more-btn" style="display:none;">Load More</button>
+        <div id="detail-messages" class="detail-messages-container"></div>
+        <div id="detail-reply-box" class="detail-reply-box" style="display:none;">
+          <div id="detail-reply-platform" style="font-size:10px;color:var(--text-dim);margin-bottom:4px;"></div>
+          <div style="display:flex;gap:6px;align-items:flex-end;">
+            <textarea id="detail-reply-input" placeholder="Type a message..." rows="1" style="flex:1;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:12px;font-family:inherit;outline:none;resize:none;max-height:80px;"></textarea>
+            <button id="detail-reply-send" style="background:var(--accent);color:#000;border:none;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">Send</button>
+          </div>
+          <div id="detail-reply-status" style="font-size:10px;margin-top:4px;display:none;"></div>
+        </div>
+      </div>
+
+      <div class="detail-notes">
+        <div class="section-title">Notes</div>
+        <textarea id="new-note-input" placeholder="Write a note..."></textarea>
+        <button id="add-note-btn" class="add-note-btn">Add Note</button>
+        <div id="notes-list" style="margin-top:12px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== Create/Edit Group Modal ==================== -->
+  <div id="group-modal" class="modal-overlay">
+    <div class="modal-dialog">
+      <div class="modal-title">New Group</div>
+      <div class="modal-field">
+        <label for="group-modal-name">Group Name</label>
+        <input type="text" id="group-modal-name" placeholder="e.g. Close Friends">
+      </div>
+      <div class="modal-field">
+        <label for="group-modal-color">Color</label>
+        <input type="color" id="group-modal-color" value="#4fc3f7">
+      </div>
+      <div class="modal-actions">
+        <button class="modal-cancel" id="group-modal-cancel">Cancel</button>
+        <button class="modal-save" id="group-modal-save">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== Create/Edit Tier Modal ==================== -->
+  <div id="tier-modal" class="modal-overlay">
+    <div class="modal-dialog">
+      <div class="modal-title">New Tier</div>
+      <div class="modal-field">
+        <label for="tier-modal-name">Tier Name</label>
+        <input type="text" id="tier-modal-name" placeholder="e.g. Inner Circle">
+      </div>
+      <div class="modal-field">
+        <label for="tier-modal-color">Color</label>
+        <input type="color" id="tier-modal-color" value="#4fc3f7">
+      </div>
+      <div class="modal-actions">
+        <button class="modal-cancel" id="tier-modal-cancel">Cancel</button>
+        <button class="modal-save" id="tier-modal-save">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+  <script src="shared.js"></script>
+  <script src="calls-recorder.js"></script>
+  <script src="friends.js"></script>
+</body>
+</html>
