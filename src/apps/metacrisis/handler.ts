@@ -7,9 +7,7 @@ import { scrapeLinksMeta } from "./summarizer";
 const URL_REGEX = /https?:\/\/[^\s<>"')\]]+/gi;
 
 /** Override map for sender IDs that fail contact lookup (raw @lid IDs → display name) */
-const SENDER_NAME_OVERRIDES: Record<string, string> = {
-  "116084476788850:76@lid": "Benjamin Von Wong",
-};
+const SENDER_NAME_OVERRIDES: Record<string, string> = config.senderNameOverrides;
 
 /** Categorize a URL based on its domain */
 export function categorizeUrl(url: string): string {
@@ -98,7 +96,8 @@ export function createMetacrisisHandler(store: MetacrisisStore) {
 
     // Get sender info (check override map first for known @lid IDs)
     const rawSender = msg.author || msg.from;
-    const contact = await msg.getContact();
+    let contact: any = null;
+    try { contact = await msg.getContact(); } catch {}
     const senderName = SENDER_NAME_OVERRIDES[rawSender] || contact?.pushname || contact?.name || msg.author || "";
 
     // Save the message

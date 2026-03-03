@@ -483,6 +483,20 @@
       $("processing-section").classList.add("visible");
       $("processing-status").textContent = "Transcribing audio...";
 
+      // Abort flag to prevent race between timeout and in-flight fetch
+      let transcribeAborted = false;
+
+      // Timeout: abort if transcription takes longer than 5 minutes
+      const transcribeTimeout = setTimeout(() => {
+        transcribeAborted = true;
+        $("processing-status").textContent = "Transcription timed out. You can try again.";
+        setTimeout(() => {
+          $("processing-section").classList.remove("visible");
+          $("recorder-section").style.display = "";
+          recorder.reset();
+        }, 3000);
+      }, 5 * 60 * 1000);
+
       try {
         const formData = new FormData();
         formData.append("audio", blob, "call." + (blob.type.includes("webm") ? "webm" : "mp4"));
@@ -491,6 +505,9 @@
           method: "POST",
           body: formData,
         });
+
+        clearTimeout(transcribeTimeout);
+        if (transcribeAborted) return; // Timeout already reset the UI
 
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
@@ -505,6 +522,8 @@
 
         showResults();
       } catch (err) {
+        clearTimeout(transcribeTimeout);
+        if (transcribeAborted) return; // Timeout already reset the UI
         alert("Transcription error: " + err.message);
         $("processing-section").classList.remove("visible");
         $("recorder-section").style.display = "";

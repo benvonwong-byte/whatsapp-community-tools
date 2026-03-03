@@ -1,19 +1,17 @@
 {
   "name": "whatsapp-events-nyc",
   "version": "1.0.0",
-  "description": "",
+  "description": "WhatsApp-powered event scanner, community hub, and relationship tracker",
   "main": "index.js",
   "scripts": {
     "start": "node dist/index.js",
     "dev": "npx tsx src/index.ts",
-    "dev:local": "kill $(lsof -ti :3001) 2>/dev/null; PORT=3001 DB_PATH=./events-prod.db ADMIN_TOKEN=dev-local-token-2024 npx tsx src/dev-server.ts",
-    "sync-db": "railway ssh -- base64 /data/events.db | base64 -d > events-prod.db && echo 'Database synced!'",
     "build": "tsc",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": ["whatsapp", "events", "community", "nyc"],
+  "author": "Benjamin Von Wong",
+  "license": "MIT",
   "type": "commonjs",
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

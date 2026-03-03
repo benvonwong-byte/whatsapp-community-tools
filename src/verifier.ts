@@ -83,7 +83,13 @@ function isSafeUrl(url: string): boolean {
 }
 
 /** Fetch a URL with timeout and return its text content. */
-export async function fetchPageText(url: string): Promise<string | null> {
+export async function fetchPageText(url: string, _redirectDepth: number = 0): Promise<string | null> {
+  const MAX_REDIRECTS = 5;
+  if (_redirectDepth > MAX_REDIRECTS) {
+    console.log(`[verifier] Too many redirects (>${MAX_REDIRECTS}) for ${url}`);
+    return null;
+  }
+
   if (!isSafeUrl(url)) {
     console.log(`[verifier] Blocked unsafe URL: ${url}`);
     return null;
@@ -100,8 +106,21 @@ export async function fetchPageText(url: string): Promise<string | null> {
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
       },
-      redirect: "follow",
+      redirect: "manual",
     });
+
+    // Handle redirects manually to validate destination against SSRF blocklist
+    if (res.status >= 300 && res.status < 400) {
+      clearTimeout(timeout);
+      const location = res.headers.get("location");
+      if (!location) return null;
+      const redirectUrl = new URL(location, url).toString();
+      if (!isSafeUrl(redirectUrl)) {
+        console.log(`[verifier] Blocked redirect to unsafe URL: ${redirectUrl}`);
+        return null;
+      }
+      return fetchPageText(redirectUrl, _redirectDepth + 1);
+    }
 
     if (!res.ok) {
       clearTimeout(timeout);

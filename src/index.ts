@@ -273,7 +273,7 @@ async function main() {
       if (!msg.body && !isPtt) continue;
       if (relationshipStore.isDuplicate(msg.id._serialized)) continue;
 
-      const speaker = msg.fromMe ? "self" : "hope";
+      const speaker = msg.fromMe ? "self" : "partner";
 
       // For voice notes, try to download and transcribe
       if (isPtt) {
@@ -367,7 +367,7 @@ async function main() {
     return success;
   };
 
-  // Send a WhatsApp message to Hope's chat
+  // Send a WhatsApp message to the relationship chat
   const relationshipSendUpdate = async (message: string): Promise<void> => {
     const chat = await whatsapp.getChatByName(config.relationshipChatName);
     if (!chat) throw new Error(`Chat "${config.relationshipChatName}" not found`);
@@ -780,7 +780,7 @@ async function main() {
     await relationshipAnalyze();
   });
 
-  // Schedule daily update send to Hope (configurable hour, default 5 PM EST)
+  // Schedule daily update send (configurable hour, default 5 PM)
   const scheduleUpdateSend = () => {
     const sendHour = parseInt(relationshipStore.getSetting("update_send_hour") || "17", 10);
     const now = new Date();
@@ -799,7 +799,7 @@ async function main() {
           if (message) {
             await relationshipSendUpdate(message);
             relationshipStore.setSetting("update_last_sent", new Date().toISOString());
-            console.log(`[scheduler] Sent ${freq} relationship update to Hope.`);
+            console.log(`[scheduler] Sent ${freq} relationship update.`);
           }
         }
       } catch (err: any) {
@@ -934,16 +934,24 @@ main().catch((err) => {
 // ── Daily task scheduler ──
 
 function scheduleDailyTask(hour: number, task: () => Promise<void>) {
+  let nextExpected = 0;
+  let timerId: ReturnType<typeof setTimeout> | null = null;
+
   const schedule = () => {
+    // Clear any existing timer before creating a new one
+    if (timerId !== null) clearTimeout(timerId);
+
     const now = new Date();
     const next = new Date(now);
     next.setHours(hour, 0, 0, 0);
     if (next <= now) next.setDate(next.getDate() + 1);
 
     const delay = next.getTime() - now.getTime();
+    nextExpected = next.getTime();
     console.log(`[scheduler] Next daily task in ${(delay / 3600000).toFixed(1)}h at ${next.toISOString()}`);
 
-    setTimeout(async () => {
+    timerId = setTimeout(async () => {
+      timerId = null;
       try {
         await task();
       } catch (err) {
@@ -952,6 +960,14 @@ function scheduleDailyTask(hour: number, task: () => Promise<void>) {
       schedule(); // reschedule for next day
     }, delay);
   };
+
+  // Watchdog: if the task hasn't fired 2h past its expected time, reschedule
+  setInterval(() => {
+    if (nextExpected > 0 && Date.now() > nextExpected + 2 * 3600000) {
+      console.warn("[scheduler] Watchdog: daily task overdue, rescheduling...");
+      schedule();
+    }
+  }, 3600000); // check every hour
 
   schedule();
 }

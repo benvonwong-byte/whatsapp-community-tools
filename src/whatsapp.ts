@@ -18,12 +18,9 @@ export interface BufferedMessage {
 type FlushCallback = (messages: BufferedMessage[]) => Promise<void>;
 type ReadyCallback = () => Promise<void>;
 
-// Private chats to monitor in addition to group chats (e.g. self-chat for testing/forwarding links)
-const ALLOWED_PRIVATE_CHATS = ["benjamin von wong"];
-
 function isAllowedPrivateChat(chatName: string): boolean {
   const lower = chatName.toLowerCase();
-  return ALLOWED_PRIVATE_CHATS.some((name) => lower.includes(name));
+  return config.allowedPrivateChats.some((name) => lower.includes(name));
 }
 
 export class WhatsAppClient {
@@ -188,7 +185,7 @@ export class WhatsAppClient {
 
     // Process group chats with >10 participants, plus allowed private chats
     const chat = preloadedChat || await msg.getChat();
-    if (!chat.isGroup && !isAllowedPrivateChat(chat.name)) return;
+    if (!chat.isGroup && (!chat.name || !isAllowedPrivateChat(chat.name))) return;
     if (chat.isGroup) {
       const participants = (chat as any).participants;
       if (participants && participants.length <= 10) return;
@@ -289,7 +286,7 @@ export class WhatsAppClient {
     if (!this.ready) return null;
     const chats = await this.client.getChats();
     const lower = name.toLowerCase();
-    return chats.find(c => c.name.toLowerCase().includes(lower)) || null;
+    return chats.find(c => c.name?.toLowerCase().includes(lower)) || null;
   }
 
   async fetchRecentMessages(hours: number = 168, onGroupProgress?: (scanned: number, total: number) => void): Promise<BufferedMessage[]> {
@@ -306,6 +303,7 @@ export class WhatsAppClient {
     const chats = await this.client.getChats();
     let blockedCount = 0;
     const monitoredChats = chats.filter((c) => {
+      if (!c.name) return false;
       if (isAllowedPrivateChat(c.name)) return true;
       if (!c.isGroup) return false;
       const participants = (c as any).participants;

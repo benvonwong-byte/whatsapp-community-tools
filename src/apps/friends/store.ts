@@ -112,6 +112,8 @@ export interface ActivityPoint {
   period: string;
   sent: number;
   received: number;
+  my_initiations: number;
+  their_initiations: number;
 }
 
 // ── Store ──
@@ -1214,13 +1216,23 @@ export class FriendsStore extends SettingsStore {
     const since = startTs ?? (Math.floor(Date.now() / 1000) - 730 * 86400); // default: 2 years
 
     return this.db.prepare(`
+      WITH ordered AS (
+        SELECT
+          is_from_me,
+          timestamp,
+          strftime('${fmt}', datetime(timestamp, 'unixepoch', 'localtime')) as period,
+          LAG(timestamp) OVER (PARTITION BY chat_id ORDER BY timestamp) as prev_ts
+        FROM friends_messages
+        WHERE chat_id IN (${placeholders})
+          AND timestamp >= ?
+      )
       SELECT
-        strftime('${fmt}', datetime(timestamp, 'unixepoch', 'localtime')) as period,
+        period,
         SUM(CASE WHEN is_from_me = 1 THEN 1 ELSE 0 END) as sent,
-        SUM(CASE WHEN is_from_me = 0 THEN 1 ELSE 0 END) as received
-      FROM friends_messages
-      WHERE chat_id IN (${placeholders})
-        AND timestamp >= ?
+        SUM(CASE WHEN is_from_me = 0 THEN 1 ELSE 0 END) as received,
+        SUM(CASE WHEN (timestamp - COALESCE(prev_ts, 0)) > 14400 AND is_from_me = 1 THEN 1 ELSE 0 END) as my_initiations,
+        SUM(CASE WHEN (timestamp - COALESCE(prev_ts, 0)) > 14400 AND is_from_me = 0 THEN 1 ELSE 0 END) as their_initiations
+      FROM ordered
       GROUP BY period
       ORDER BY period ASC
     `).all(...chatIds, since) as ActivityPoint[];

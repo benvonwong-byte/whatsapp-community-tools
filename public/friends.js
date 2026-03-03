@@ -1668,6 +1668,36 @@ function rangeLabel(range) {
   return "All Time";
 }
 
+function rangeGranularity(range) {
+  if (range === "7d" || range === "30d") return "day";
+  if (range === "90d") return "week";
+  return "month"; // 1y, all
+}
+
+var MONTH_ABBR = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+function formatPeriodLabel(period, granularity) {
+  if (granularity === "day") {
+    // "2025-01-15" → "Jan 15"
+    var parts = period.split("-");
+    if (parts.length === 3) {
+      var m = parseInt(parts[1], 10) - 1;
+      return (MONTH_ABBR[m] || parts[1]) + " " + parseInt(parts[2], 10);
+    }
+  } else if (granularity === "week") {
+    // "2025-W05" → "W05"
+    var wi = period.indexOf("-W");
+    if (wi !== -1) return period.substring(wi + 1);
+  } else if (granularity === "month") {
+    // "2025-01" → "Jan '25"
+    var parts = period.split("-");
+    if (parts.length >= 2) {
+      var m = parseInt(parts[1], 10) - 1;
+      return (MONTH_ABBR[m] || parts[1]) + " '" + parts[0].slice(2);
+    }
+  }
+  return period;
+}
+
 async function refreshDetailRange(contactId, range) {
   currentDetailRange = range;
   // Update pill UI
@@ -1680,9 +1710,10 @@ async function refreshDetailRange(contactId, range) {
 
   try {
     const rangeParam = range === "all" ? "" : "?range=" + range;
+    const gran = rangeGranularity(range);
     const [detailRes, activityRes] = await Promise.all([
       adminFetch("/api/friends/contacts/" + encodeURIComponent(contactId) + rangeParam),
-      adminFetch("/api/friends/contacts/" + encodeURIComponent(contactId) + "/activity?granularity=week" + (range === "all" ? "" : "&range=" + range)),
+      adminFetch("/api/friends/contacts/" + encodeURIComponent(contactId) + "/activity?granularity=" + gran + (range === "all" ? "" : "&range=" + range)),
     ]);
     if (detailRes.ok) {
       const data = await detailRes.json();
@@ -1691,7 +1722,7 @@ async function refreshDetailRange(contactId, range) {
     }
     if (activityRes.ok) {
       const activityData = await activityRes.json();
-      renderDetailChart(activityData);
+      renderDetailChart(activityData, gran);
     }
   } catch (err) {
     console.error("Failed to refresh range:", err);
@@ -1737,7 +1768,7 @@ async function openContactDetail(contactId) {
     // Fetch contact detail, activity, and messages in parallel
     const [detailRes, activityRes, messagesRes] = await Promise.all([
       adminFetch("/api/friends/contacts/" + encodeURIComponent(contactId)),
-      adminFetch("/api/friends/contacts/" + encodeURIComponent(contactId) + "/activity?granularity=week"),
+      adminFetch("/api/friends/contacts/" + encodeURIComponent(contactId) + "/activity?granularity=" + rangeGranularity("all")),
       adminFetch("/api/friends/contacts/" + encodeURIComponent(contactId) + "/messages?limit=50&offset=0"),
     ]);
 
@@ -1815,7 +1846,7 @@ async function openContactDetail(contactId) {
     // Activity chart
     if (activityRes.ok) {
       const activityData = await activityRes.json();
-      renderDetailChart(activityData);
+      renderDetailChart(activityData, rangeGranularity("all"));
     }
 
     // Conversation log — show cached messages first, then fetch fresh from WhatsApp
@@ -2141,7 +2172,7 @@ function renderConversationLog(contactId, messages, append) {
   }
 }
 
-function renderDetailChart(data) {
+function renderDetailChart(data, granularity) {
   const canvas = $("detail-chart");
   if (!canvas) return;
 
@@ -2152,44 +2183,107 @@ function renderDetailChart(data) {
 
   if (!data || data.length === 0) return;
 
+  var gran = granularity || "month";
+  var hasInitiations = data.some(function(d) { return (d.my_initiations || 0) + (d.their_initiations || 0) > 0; });
+
+  var datasets = [
+    {
+      label: "Sent",
+      type: "bar",
+      data: data.map(function(d) { return d.sent || 0; }),
+      backgroundColor: "rgba(79, 195, 247, 0.7)",
+      yAxisID: "y",
+      order: 2,
+    },
+    {
+      label: "Received",
+      type: "bar",
+      data: data.map(function(d) { return d.received || 0; }),
+      backgroundColor: "rgba(129, 199, 132, 0.7)",
+      yAxisID: "y",
+      order: 2,
+    },
+  ];
+
+  if (hasInitiations) {
+    datasets.push({
+      label: "I Initiated",
+      type: "line",
+      data: data.map(function(d) { return d.my_initiations || 0; }),
+      borderColor: "rgba(255, 167, 38, 0.9)",
+      backgroundColor: "rgba(255, 167, 38, 0.1)",
+      borderDash: [4, 4],
+      borderWidth: 2,
+      pointRadius: 2,
+      pointHoverRadius: 4,
+      tension: 0.3,
+      fill: false,
+      yAxisID: "y1",
+      order: 1,
+    });
+    datasets.push({
+      label: "They Initiated",
+      type: "line",
+      data: data.map(function(d) { return d.their_initiations || 0; }),
+      borderColor: "rgba(240, 98, 146, 0.9)",
+      backgroundColor: "rgba(240, 98, 146, 0.1)",
+      borderDash: [4, 4],
+      borderWidth: 2,
+      pointRadius: 2,
+      pointHoverRadius: 4,
+      tension: 0.3,
+      fill: false,
+      yAxisID: "y1",
+      order: 1,
+    });
+  }
+
+  var scales = {
+    x: {
+      ticks: {
+        color: "#888",
+        maxTicksLimit: 20,
+        maxRotation: 45,
+        callback: function(value, index) {
+          var label = data[index] ? data[index].period : "";
+          return formatPeriodLabel(label, gran);
+        },
+      },
+      grid: { color: "#333" },
+    },
+    y: {
+      position: "left",
+      title: { display: true, text: "Messages", color: "#888", font: { size: 10 } },
+      ticks: { color: "#888" },
+      grid: { color: "#333" },
+    },
+  };
+
+  if (hasInitiations) {
+    scales.y1 = {
+      position: "right",
+      title: { display: true, text: "Initiations", color: "#888", font: { size: 10 } },
+      ticks: { color: "#888" },
+      grid: { drawOnChartArea: false },
+    };
+  }
+
   const ctx = canvas.getContext("2d");
   detailChart = new Chart(ctx, {
     type: "bar",
     data: {
-      labels: data.map((d) => d.period || ""),
-      datasets: [
-        {
-          label: "Sent",
-          data: data.map((d) => d.sent || 0),
-          backgroundColor: "rgba(79, 195, 247, 0.7)",
-          order: 2,
-        },
-        {
-          label: "Received",
-          data: data.map((d) => d.received || 0),
-          backgroundColor: "rgba(129, 199, 132, 0.7)",
-          order: 2,
-        },
-      ],
+      labels: data.map(function(d) { return d.period || ""; }),
+      datasets: datasets,
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
         legend: {
-          labels: { color: "#fff" },
+          labels: { color: "#fff", boxWidth: 12, font: { size: 10 } },
         },
       },
-      scales: {
-        x: {
-          ticks: { color: "#888" },
-          grid: { color: "#333" },
-        },
-        y: {
-          ticks: { color: "#888" },
-          grid: { color: "#333" },
-        },
-      },
+      scales: scales,
     },
   });
 }
@@ -4119,7 +4213,7 @@ function gxRenderDetail(n) {
       <div class="gxd-tags">${n.tags.map(t => `<span class="gxd-tag">${esc(t)}</span>`).join("")}</div></div>` : ""}
     ${n.groups.length > 0 ? `<div class="gxd-section"><div class="gxd-label">Groups (${n.groups.length})</div>
       ${n.groups.map(g => `<div class="gxd-group">· ${esc(g)}</div>`).join("")}</div>` : ""}
-    <div class="gxd-section"><button class="gxd-btn" onclick="openContactDetail('${esc(n.id)}')">Open Full Profile</button></div>`;
+    <div class="gxd-section"><button class="gxd-btn" onclick="openContactDetail('${escapeAttr(n.id)}')">Open Full Profile</button></div>`;
 }
 
 function gxShowTooltip(n, event) {

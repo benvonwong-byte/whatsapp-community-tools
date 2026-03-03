@@ -31,13 +31,15 @@ function logProgress(progress: AnalyzeProgress | undefined, msg: string) {
 // ── Conversation formatting ──
 
 function formatConversation(messages: RelationshipMessage[]): string {
+  const selfName = config.relationshipSelfName;
+  const partnerName = config.relationshipPartnerName;
   return messages.map((m) => {
     const time = new Date(m.timestamp * 1000).toLocaleTimeString("en-US", {
       hour: "numeric",
       minute: "2-digit",
       timeZone: "America/New_York",
     });
-    const speaker = m.speaker === "self" ? "Ben" : "Hope";
+    const speaker = m.speaker === "self" ? selfName : partnerName;
     const sourceTag = m.source === "in-person" ? "[in-person] " : "";
     const content = m.type === "voice" ? `[voice note] ${m.transcript}` : m.body;
     return `[${time}] ${sourceTag}${speaker}: ${content}`;
@@ -45,7 +47,10 @@ function formatConversation(messages: RelationshipMessage[]): string {
 }
 
 function buildAnalysisPrompt(conversation: string, messageCount: number, date: string): string {
-  return `You are a relationship communication analyst trained in the Gottman Institute's research and Esther Perel's frameworks. Analyze the following conversation between Ben and Hope (a couple).
+  const selfName = config.relationshipSelfName;
+  const partnerName = config.relationshipPartnerName;
+
+  return `You are a relationship communication analyst trained in the Gottman Institute's research and Esther Perel's frameworks. Analyze the following conversation between ${selfName} and ${partnerName} (a couple).
 
 Messages come from two sources:
 - WhatsApp text/voice messages (default)
@@ -79,7 +84,7 @@ ANALYSIS FRAMEWORKS:
 
 4. **Conversation Dynamics**:
    - Who initiates more conversations?
-   - Ratio of message volume (Ben vs Hope)
+   - Ratio of message volume (${selfName} vs ${partnerName})
    - Emotional tone (positive, neutral, negative, mixed)
 
 5. **Emotional Bank Account** (Gottman):
@@ -90,19 +95,19 @@ ANALYSIS FRAMEWORKS:
 
 6. **Bids for Connection**:
    - A "bid" is any attempt to get the other's attention, affirmation, or engagement (question, sharing something, request for input, phatic expression like "look at this")
-   - Count bids made by Ben and by Hope
+   - Count bids made by ${selfName} and by ${partnerName}
    - For each bid, classify the response: "toward" (engaged positively), "away" (ignored or missed), "against" (hostile rejection)
    - Count total turned toward, turned away, turned against
 
 7. **Pursue-Withdraw Pattern** (Sue Johnson / EFT):
    - Detect if one person consistently initiates, pushes for engagement, or escalates while the other withdraws, gives brief responses, or disengages
-   - Pattern: "balanced", "ben-pursues", "hope-pursues", or "mutual-withdrawal"
+   - Pattern: "balanced", "self-pursues", "partner-pursues", or "mutual-withdrawal"
    - Provide a one-sentence description of the dynamic observed
 
 8. **Actionable Recommendations**:
    - Based on ALL the above analysis, provide specific, concrete, actionable suggestions
-   - For Ben: 1-3 things Ben could do differently tomorrow based on today's observed patterns
-   - For Hope: 1-3 things Hope could do differently
+   - For ${selfName}: 1-3 things ${selfName} could do differently tomorrow based on today's observed patterns
+   - For ${partnerName}: 1-3 things ${partnerName} could do differently
    - For both: 1-2 shared activities or practices to try together
    - Each recommendation MUST reference a specific observed pattern from this conversation (not generic relationship advice)
 
@@ -114,7 +119,7 @@ ANALYSIS FRAMEWORKS:
 
 12. **Language & Emotion Analysis**:
     - Primary emotions detected for each speaker (e.g., joy, frustration, anxiety, tenderness, excitement)
-    - Communication style notes (e.g., "Ben uses more questions", "Hope uses more affirmations")
+    - Communication style notes (e.g., "${selfName} uses more questions", "${partnerName} uses more affirmations")
     - Any notable language patterns or shifts during the conversation
 
 Respond with ONLY a JSON object (no markdown code fences):
@@ -140,19 +145,19 @@ Respond with ONLY a JSON object (no markdown code fences):
     "status": "healthy" | "watch" | "overdrawn"
   },
   "bids": {
-    "benMade": <integer>,
-    "hopeMade": <integer>,
+    "selfMade": <integer>,
+    "partnerMade": <integer>,
     "turnedToward": <integer>,
     "turnedAway": <integer>,
     "turnedAgainst": <integer>
   },
   "pursueWithdraw": {
-    "pattern": "balanced" | "ben-pursues" | "hope-pursues" | "mutual-withdrawal",
+    "pattern": "balanced" | "self-pursues" | "partner-pursues" | "mutual-withdrawal",
     "description": "<one sentence describing the observed dynamic>"
   },
   "recommendations": {
-    "forBen": ["specific action referencing today's pattern..."],
-    "forHope": ["specific action referencing today's pattern..."],
+    "forSelf": ["specific action referencing today's pattern..."],
+    "forPartner": ["specific action referencing today's pattern..."],
     "forBoth": ["shared practice or activity..."]
   },
   "evidence": {
@@ -168,11 +173,11 @@ Respond with ONLY a JSON object (no markdown code fences):
     "autonomyTogetherness": ["quote..."]
   },
   "notableQuotes": [
-    { "speaker": "Ben" | "Hope", "quote": "<direct quote under 120 chars>", "label": "vulnerability" | "humor" | "affection" | "tension" | "insight" | "playfulness" }
+    { "speaker": "${selfName}" | "${partnerName}", "quote": "<direct quote under 120 chars>", "label": "vulnerability" | "humor" | "affection" | "tension" | "insight" | "playfulness" }
   ],
   "languageEmotionAnalysis": {
-    "benEmotions": ["<primary emotions detected for Ben>"],
-    "hopeEmotions": ["<primary emotions detected for Hope>"],
+    "selfEmotions": ["<primary emotions detected for ${selfName}>"],
+    "partnerEmotions": ["<primary emotions detected for ${partnerName}>"],
     "communicationNotes": "<style observations>",
     "notableShifts": "<any tone or pattern shifts during the conversation>"
   },

@@ -332,8 +332,8 @@
       text-transform: uppercase;
       letter-spacing: 0.5px;
     }
-    .utterance .speaker.ben { color: #42a5f5; }
-    .utterance .speaker.hope { color: #f06292; }
+    .utterance .speaker.self { color: #42a5f5; }
+    .utterance .speaker.partner { color: #f06292; }
     .utterance .text {
       font-size: 0.95rem;
       line-height: 1.6;
@@ -409,8 +409,8 @@
       font-weight: 600;
       cursor: pointer;
     }
-    .modal-btn.ben { background: #42a5f5; color: #fff; }
-    .modal-btn.hope { background: #f06292; color: #fff; }
+    .modal-btn.self { background: #42a5f5; color: #fff; }
+    .modal-btn.partner { background: #f06292; color: #fff; }
 
     @media (max-width: 600px) {
       .nav-btn { padding: 0.5rem 0.9rem; font-size: 0.85rem; }
@@ -466,8 +466,8 @@
       <span id="sample-text"></span>
     </div>
     <div class="modal-buttons">
-      <button class="modal-btn ben" onclick="assignSpeaker('A')">Ben</button>
-      <button class="modal-btn hope" onclick="assignSpeaker('B')">Hope</button>
+      <button class="modal-btn self" onclick="assignSpeaker('A')">Self</button>
+      <button class="modal-btn partner" onclick="assignSpeaker('B')">Partner</button>
     </div>
   </div>
 
@@ -615,7 +615,7 @@
     let timerInterval = null;
     let startTime = 0;
     let animationFrame = null;
-    let transcriptData = null; // { speakers: {A: "Ben", B: "Hope"}, utterances: [...] }
+    let transcriptData = null; // { speakers: {A: "Self", B: "Partner"}, utterances: [...] }
     let speakerMap = null; // loaded from localStorage
 
     // --- DOM ---
@@ -750,11 +750,11 @@
 
       if (pitch > 0) {
         if (pitch < 180) {
-          color = '#42a5f5'; // blue = male (Ben)
-          speakerText = 'Ben';
+          color = '#42a5f5'; // blue = lower pitch
+          speakerText = 'Speaker 1';
         } else {
-          color = '#f06292'; // pink = female (Hope)
-          speakerText = 'Hope';
+          color = '#f06292'; // pink = higher pitch
+          speakerText = 'Speaker 2';
         }
       }
 
@@ -872,9 +872,9 @@
         return;
       }
 
-      // If only one speaker, default to Ben
+      // If only one speaker, default to Self
       if (speakers.length === 1) {
-        speakerMap = { [speakers[0]]: 'Ben' };
+        speakerMap = { [speakers[0]]: 'Self' };
         localStorage.setItem('speakerMap', JSON.stringify(speakerMap));
         finishWithMapping(data, speakerMap);
         return;
@@ -896,13 +896,13 @@
       speakerModal.classList.remove('active');
 
       if (choice === 'A') {
-        // Speaker A is Ben
-        speakerMap = { [speakers[0]]: 'Ben' };
-        for (let i = 1; i < speakers.length; i++) speakerMap[speakers[i]] = 'Hope';
+        // Speaker A is Self
+        speakerMap = { [speakers[0]]: 'Self' };
+        for (let i = 1; i < speakers.length; i++) speakerMap[speakers[i]] = 'Partner';
       } else {
-        // Speaker A is Hope
-        speakerMap = { [speakers[0]]: 'Hope' };
-        for (let i = 1; i < speakers.length; i++) speakerMap[speakers[i]] = 'Ben';
+        // Speaker A is Partner
+        speakerMap = { [speakers[0]]: 'Partner' };
+        for (let i = 1; i < speakers.length; i++) speakerMap[speakers[i]] = 'Self';
       }
 
       localStorage.setItem('speakerMap', JSON.stringify(speakerMap));
@@ -911,7 +911,7 @@
 
     function finishWithMapping(data, mapping) {
       transcriptData = {
-        speakers: { A: 'Ben', B: 'Hope' },
+        speakers: { A: 'Self', B: 'Partner' },
         utterances: data.utterances.map(u => ({
           speaker: mapping[u.speaker] || `Speaker ${u.speaker}`,
           text: u.text,
@@ -930,13 +930,13 @@
 
       for (let i = 0; i < transcriptData.utterances.length; i++) {
         const u = transcriptData.utterances[i];
-        const isBen = u.speaker === 'Ben';
+        const isSelf = u.speaker === 'Self';
 
         const div = document.createElement('div');
         div.className = 'utterance';
 
         const speakerDiv = document.createElement('div');
-        speakerDiv.className = 'speaker ' + (isBen ? 'ben' : 'hope');
+        speakerDiv.className = 'speaker ' + (isSelf ? 'self' : 'partner');
         speakerDiv.textContent = u.speaker;
 
         const textDiv = document.createElement('div');
@@ -970,7 +970,7 @@
 
       try {
         // Convert from frontend format to backend format:
-        //   speaker: "Ben" -> "self", "Hope" -> "hope"
+        //   speaker: maps to "self" or "partner"
         //   text -> body
         //   start (ms offset from AssemblyAI) -> timestamp (unix seconds)
         const now = Math.floor(Date.now() / 1000);
@@ -979,7 +979,7 @@
           : 0;
 
         const utterances = transcriptData.utterances.map(u => ({
-          speaker: u.speaker === 'Ben' ? 'self' : 'hope',
+          speaker: u.speaker === 'Self' ? 'self' : 'partner',
           body: u.text,
           timestamp: Math.floor(now - (firstStartMs / 1000) + (u.start / 1000)),
         }));

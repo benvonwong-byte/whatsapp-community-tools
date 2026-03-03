@@ -12,7 +12,9 @@ let dateRange = { startDate: null, endDate: null, preset: "7" };
 
 // Trend chart interactivity state
 let trendPoints = []; // [{x, y, score, date, summary, tone}]
-let selectedPerson = "ben"; // "ben" or "hope"
+let selectedPerson = "self"; // "self" or "partner"
+let selfName = "Me";      // loaded from API config
+let partnerName = "Partner"; // loaded from API config
 
 function toDateStr(d) { return d.toISOString().split("T")[0]; }
 
@@ -132,7 +134,7 @@ function hideAdminElements() {
   const hideIds = [
     "analyze-btn", "reset-analyze-btn", "backfill-btn", "transcribe-btn",
     "import-btn", "import-file", "send-update-btn", "preview-update-btn",
-    "text-hope-btn", "update-frequency", "update-send-hour",
+    "text-partner-btn", "update-frequency", "update-send-hour",
   ];
   for (const id of hideIds) {
     const el = $(id);
@@ -185,16 +187,16 @@ function setupPersonToggle() {
     });
   });
 
-  // Text Hope button
-  const textHopeBtn = document.getElementById("text-hope-btn");
-  if (textHopeBtn) {
-    textHopeBtn.addEventListener("click", sendTextToHope);
+  // Text partner button
+  const textPartnerBtn = document.getElementById("text-partner-btn");
+  if (textPartnerBtn) {
+    textPartnerBtn.addEventListener("click", sendTextToPartner);
   }
 }
 
-function updateTextHopeButton() {
-  const btn = document.getElementById("text-hope-btn");
-  if (btn) btn.style.display = selectedPerson === "hope" ? "" : "none";
+function updateTextPartnerButton() {
+  const btn = document.getElementById("text-partner-btn");
+  if (btn) btn.style.display = selectedPerson === "partner" ? "" : "none";
 }
 
 function renderIndividualSection(d) {
@@ -204,24 +206,24 @@ function renderIndividualSection(d) {
   renderLanguageEmotion(d);
   renderCommunicationBalance(d);
   renderBids(d);
-  updateTextHopeButton();
+  updateTextPartnerButton();
 }
 
-function buildHopeMessage(d) {
+function buildPartnerMessage(d) {
   var a = d.latestAnalysis;
   var range = d.rangeAnalysis;
   var lines = [];
 
-  lines.push("💗 *Hey Hope — here's your daily check-in*");
+  lines.push("💗 *Hey " + partnerName + " — here's your daily check-in*");
   lines.push("");
 
-  // Hope's recommendations
+  // Partner's recommendations
   var recs = a ? a.recommendations : null;
-  var hopeRecs = recs && recs.forHope ? recs.forHope : [];
-  if (hopeRecs.length > 0) {
+  var partnerRecs = recs && recs.forPartner ? recs.forPartner : [];
+  if (partnerRecs.length > 0) {
     lines.push("✨ *What you can focus on:*");
-    for (var i = 0; i < hopeRecs.length; i++) {
-      lines.push("• " + hopeRecs[i]);
+    for (var i = 0; i < partnerRecs.length; i++) {
+      lines.push("• " + partnerRecs[i]);
     }
     lines.push("");
   }
@@ -269,34 +271,34 @@ function buildHopeMessage(d) {
     lines.push("📝 " + a.summary);
   }
 
-  // Notable quotes from Hope
+  // Notable quotes from partner
   var allQuotes = a ? (a.notableQuotes || []) : [];
-  var hopeQuotes = allQuotes.filter(function(q) { return (q.speaker || "").toLowerCase() === "hope"; });
-  if (hopeQuotes.length > 0) {
+  var partnerQuotes = allQuotes.filter(function(q) { return (q.speaker || "").toLowerCase() === partnerName.toLowerCase(); });
+  if (partnerQuotes.length > 0) {
     lines.push("");
     lines.push("💬 *Your notable quotes today:*");
-    for (var i = 0; i < Math.min(hopeQuotes.length, 3); i++) {
-      lines.push('"' + hopeQuotes[i].text + '"');
+    for (var i = 0; i < Math.min(partnerQuotes.length, 3); i++) {
+      lines.push('"' + partnerQuotes[i].text + '"');
     }
   }
 
   lines.push("");
-  lines.push("_Sent with love from Ben's dashboard_ 💕");
+  lines.push("_Sent with love from " + selfName + "'s dashboard_ 💕");
 
   return lines.join("\n");
 }
 
-async function sendTextToHope() {
-  var btn = document.getElementById("text-hope-btn");
+async function sendTextToPartner() {
+  var btn = document.getElementById("text-partner-btn");
   if (!btn || !dashboardData) return;
 
-  var message = buildHopeMessage(dashboardData);
+  var message = buildPartnerMessage(dashboardData);
   if (!message.trim()) {
     alert("No data to send yet.");
     return;
   }
 
-  if (!confirm("Send this summary to Hope via WhatsApp?\n\n" + message.substring(0, 300) + "...")) return;
+  if (!confirm("Send this summary to " + partnerName + " via WhatsApp?\n\n" + message.substring(0, 300) + "...")) return;
 
   btn.disabled = true;
   btn.textContent = "Sending...";
@@ -309,10 +311,10 @@ async function sendTextToHope() {
     var data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed");
     btn.textContent = "Sent ✓";
-    setTimeout(function() { btn.textContent = "Text Hope"; btn.disabled = false; }, 3000);
+    setTimeout(function() { btn.textContent = "Text " + partnerName; btn.disabled = false; }, 3000);
   } catch (err) {
     alert("Failed to send: " + err.message);
-    btn.textContent = "Text Hope";
+    btn.textContent = "Text " + partnerName;
     btn.disabled = false;
   }
 }
@@ -324,6 +326,10 @@ async function loadDashboard() {
     const res = await adminFetch(buildDashboardUrl());
     if (!res.ok) throw new Error(`Server returned ${res.status}`);
     dashboardData = await res.json();
+    if (dashboardData.config) {
+      selfName = dashboardData.config.selfName || "Me";
+      partnerName = dashboardData.config.partnerName || "Partner";
+    }
     renderDashboard();
   } catch (err) {
     console.error("Failed to load dashboard:", err);
@@ -590,7 +596,7 @@ function setupUpdateControls() {
   if (sendBtn) {
     sendBtn.addEventListener("click", async () => {
       if (sendBtn.disabled) return;
-      if (!confirm("Send a dashboard update to Hope via WhatsApp now?")) return;
+      if (!confirm("Send a dashboard update via WhatsApp now?")) return;
       sendBtn.disabled = true;
       sendBtn.textContent = "Sending...";
       try {
@@ -602,7 +608,7 @@ function setupUpdateControls() {
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Send failed");
-        alert("Update sent to Hope!");
+        alert("Update sent!");
       } catch (err) {
         alert("Failed to send: " + err.message);
       } finally {
@@ -648,13 +654,13 @@ function setupUpdateControls() {
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Send failed");
-        alert("Update sent to Hope!");
+        alert("Update sent!");
         modal.style.display = "none";
       } catch (err) {
         alert("Failed to send: " + err.message);
       } finally {
         previewSend.disabled = false;
-        previewSend.textContent = "Send to Hope";
+        previewSend.textContent = "Send to Partner";
       }
     });
   }
@@ -746,7 +752,7 @@ function renderInPersonPanel(data) {
   feedEl.innerHTML = data.recentMessages.map(m => {
     const time = new Date(m.timestamp * 1000).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
     const date = new Date(m.timestamp * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-    const speaker = m.speaker === "self" ? "Ben" : "Hope";
+    const speaker = m.speaker === "self" ? selfName : partnerName;
     const color = m.speaker === "self" ? "var(--accent)" : "var(--pink)";
     const body = m.body.length > 150 ? m.body.slice(0, 150) + "..." : m.body;
     const deleteBtn = isAdminUser
@@ -883,8 +889,8 @@ function aggregateBids(analyses) {
   const valid = analyses.filter(a => a.bids);
   if (valid.length === 0) return null;
   return {
-    benMade: valid.reduce((s, a) => s + (a.bids.benMade || 0), 0),
-    hopeMade: valid.reduce((s, a) => s + (a.bids.hopeMade || 0), 0),
+    selfMade: valid.reduce((s, a) => s + (a.bids.selfMade || 0), 0),
+    partnerMade: valid.reduce((s, a) => s + (a.bids.partnerMade || 0), 0),
     turnedToward: valid.reduce((s, a) => s + (a.bids.turnedToward || 0), 0),
     turnedAway: valid.reduce((s, a) => s + (a.bids.turnedAway || 0), 0),
     turnedAgainst: valid.reduce((s, a) => s + (a.bids.turnedAgainst || 0), 0),
@@ -941,7 +947,7 @@ function renderDashboard() {
   renderIndividualActionCard(d);
   renderNotableQuotes(d);
   renderLanguageEmotion(d);
-  updateTextHopeButton();
+  updateTextPartnerButton();
 
   // TEAM (date-range dependent)
   renderHealthScoreHero(d);
@@ -1000,11 +1006,11 @@ function renderIndividualActionCard(d) {
 
   // Style the card based on selected person
   card.className = "action-card action-card-" + person;
-  if (label) label.textContent = person === "ben" ? "What Ben should do" : "What Hope should do";
+  if (label) label.textContent = person === "self" ? "What " + selfName + " should do" : "What " + partnerName + " should do";
 
-  var personRecs = person === "ben"
-    ? (recs && recs.forBen) || []
-    : (recs && recs.forHope) || [];
+  var personRecs = person === "self"
+    ? (recs && recs.forSelf) || []
+    : (recs && recs.forPartner) || [];
 
   if (personRecs.length > 0) {
     text.textContent = personRecs[0];
@@ -1040,9 +1046,10 @@ function renderNotableQuotes(d) {
   }
 
   // Filter to selected person
-  var personName = selectedPerson === "ben" ? "Ben" : "Hope";
+  var personName = selectedPerson === "self" ? selfName : partnerName;
   var quotes = allQuotes.filter(function(q) {
-    return (q.speaker || "").toLowerCase() === selectedPerson;
+    var sp = (q.speaker || "").toLowerCase();
+    return selectedPerson === "self" ? sp === selfName.toLowerCase() : sp === partnerName.toLowerCase();
   });
 
   section.classList.remove("hidden");
@@ -1053,13 +1060,13 @@ function renderNotableQuotes(d) {
   }
 
   container.innerHTML = quotes.map(function(q) {
-    var isHope = selectedPerson === "hope";
-    var cls = isHope ? "notable-quote-card hope" : "notable-quote-card";
+    var isPartner = selectedPerson === "partner";
+    var cls = isPartner ? "notable-quote-card partner" : "notable-quote-card";
     var label = q.label || "insight";
     return '<div class="' + cls + '">' +
       '<div class="quote-text">"' + escapeHtml(q.quote) + '"</div>' +
       '<div class="quote-meta">' +
-        '<span style="color:' + (isHope ? 'var(--pink)' : 'var(--accent)') + '">' + escapeHtml(q.speaker || "Unknown") + '</span>' +
+        '<span style="color:' + (isPartner ? 'var(--pink)' : 'var(--accent)') + '">' + escapeHtml(q.speaker || "Unknown") + '</span>' +
         '<span class="quote-label">' + escapeHtml(label) + '</span>' +
       '</div></div>';
   }).join("");
@@ -1372,7 +1379,7 @@ function renderWaryOf(d) {
   // Check pursue-withdraw
   const pw = a.pursueWithdraw;
   if (pw && pw.pattern !== "balanced") {
-    const labels = { "ben-pursues": "Ben is pursuing", "hope-pursues": "Hope is pursuing", "mutual-withdrawal": "Mutual withdrawal" };
+    const labels = { "self-pursues": selfName + " is pursuing", "partner-pursues": partnerName + " is pursuing", "mutual-withdrawal": "Mutual withdrawal" };
     warnings.push({ icon: "~", label: labels[pw.pattern] || pw.pattern, text: pw.description || "" });
   }
 
@@ -1410,9 +1417,9 @@ function renderLanguageEmotion(d) {
   }
 
   var html = "";
-  var emotions = selectedPerson === "ben" ? le.benEmotions : le.hopeEmotions;
-  var personName = selectedPerson === "ben" ? "Ben" : "Hope";
-  var tagClass = selectedPerson === "ben" ? "ben" : "hope";
+  var emotions = selectedPerson === "self" ? le.selfEmotions : le.partnerEmotions;
+  var personName = selectedPerson === "self" ? selfName : partnerName;
+  var tagClass = selectedPerson === "self" ? "self-person" : "partner-person";
 
   if (emotions && emotions.length > 0) {
     html += '<div style="margin-bottom:6px"><span style="font-size:10px;color:var(--text-dim)">' + personName + '\'s emotions:</span> ';
@@ -1786,11 +1793,11 @@ function renderBids(d) {
 
   if (summaryEl) {
     var person = selectedPerson;
-    var personName = person === "ben" ? "Ben" : "Hope";
-    var personColor = person === "ben" ? "var(--accent)" : "var(--pink)";
-    var personMade = person === "ben" ? (bids.benMade || 0) : (bids.hopeMade || 0);
-    var otherMade = person === "ben" ? (bids.hopeMade || 0) : (bids.benMade || 0);
-    var otherName = person === "ben" ? "Hope" : "Ben";
+    var personName = person === "self" ? selfName : partnerName;
+    var personColor = person === "self" ? "var(--accent)" : "var(--pink)";
+    var personMade = person === "self" ? (bids.selfMade || 0) : (bids.partnerMade || 0);
+    var otherMade = person === "self" ? (bids.partnerMade || 0) : (bids.selfMade || 0);
+    var otherName = person === "self" ? partnerName : selfName;
     var towardPct = total > 0 ? Math.round((bids.turnedToward || 0) / total * 100) : 0;
 
     summaryEl.innerHTML = '<span style="color:' + personColor + ';font-weight:600">' + personName + ' made ' + personMade + ' bids</span>' +
@@ -1816,14 +1823,14 @@ function renderPursueWithdraw(d) {
 
   var labels = {
     "balanced": "Balanced",
-    "ben-pursues": "Ben Pursues",
-    "hope-pursues": "Hope Pursues",
+    "self-pursues": selfName + " Pursues",
+    "partner-pursues": partnerName + " Pursues",
     "mutual-withdrawal": "Mutual Withdrawal",
   };
   var cls = {
     "balanced": "balanced",
-    "ben-pursues": "pursuing",
-    "hope-pursues": "pursuing",
+    "self-pursues": "pursuing",
+    "partner-pursues": "pursuing",
     "mutual-withdrawal": "withdrawal",
   };
 
@@ -1836,42 +1843,42 @@ function renderPursueWithdraw(d) {
 
 function renderCommunicationBalance(d) {
   var person = selectedPerson;
-  var personColor = person === "ben" ? "var(--accent)" : "var(--pink)";
-  var otherColor = person === "ben" ? "var(--pink)" : "var(--accent)";
+  var personColor = person === "self" ? "var(--accent)" : "var(--pink)";
+  var otherColor = person === "self" ? "var(--pink)" : "var(--accent)";
 
   // Message ratio
   var r = d.stats ? d.stats.messageRatio : null;
-  var ben = r ? (r.benPercent || 50) : 50;
-  var hope = r ? (r.hopePercent || 50) : 50;
+  var selfPct = r ? (r.selfPercent || 50) : 50;
+  var partnerPct = r ? (r.partnerPercent || 50) : 50;
 
   var ll = $("bal-ratio-left"), rl = $("bal-ratio-right");
   var lf = $("bal-ratio-fill-left"), rf = $("bal-ratio-fill-right");
 
   if (ll) {
-    ll.textContent = "Ben: " + Math.round(ben) + "%";
-    ll.style.fontWeight = person === "ben" ? "700" : "400";
-    ll.style.color = person === "ben" ? "var(--accent)" : "var(--text-dim)";
-    ll.style.opacity = person === "ben" ? "1" : "0.5";
+    ll.textContent = selfName + ": " + Math.round(selfPct) + "%";
+    ll.style.fontWeight = person === "self" ? "700" : "400";
+    ll.style.color = person === "self" ? "var(--accent)" : "var(--text-dim)";
+    ll.style.opacity = person === "self" ? "1" : "0.5";
   }
   if (rl) {
-    rl.textContent = "Hope: " + Math.round(hope) + "%";
-    rl.style.fontWeight = person === "hope" ? "700" : "400";
-    rl.style.color = person === "hope" ? "var(--pink)" : "var(--text-dim)";
-    rl.style.opacity = person === "hope" ? "1" : "0.5";
+    rl.textContent = partnerName + ": " + Math.round(partnerPct) + "%";
+    rl.style.fontWeight = person === "partner" ? "700" : "400";
+    rl.style.color = person === "partner" ? "var(--pink)" : "var(--text-dim)";
+    rl.style.opacity = person === "partner" ? "1" : "0.5";
   }
-  if (lf) { lf.style.width = ben + "%"; lf.style.opacity = person === "ben" ? "1" : "0.35"; }
-  if (rf) { rf.style.width = hope + "%"; rf.style.opacity = person === "hope" ? "1" : "0.35"; }
+  if (lf) { lf.style.width = selfPct + "%"; lf.style.opacity = person === "self" ? "1" : "0.35"; }
+  if (rf) { rf.style.width = partnerPct + "%"; rf.style.opacity = person === "partner" ? "1" : "0.35"; }
 
   // Initiator stats
   var initEl = $("initiator-stats");
   if (initEl) {
     var inits = (d.stats && d.stats.initiators) || {};
-    var benInits = inits.self || 0;
-    var hopeInits = inits.hope || 0;
-    if (person === "ben") {
-      initEl.innerHTML = '<span style="color:var(--accent);font-weight:700;font-size:14px">' + benInits + ' initiated</span> <span style="color:var(--text-dim);font-size:11px">(Hope: ' + hopeInits + ')</span>';
+    var selfInits = inits.self || 0;
+    var partnerInits = inits.partner || 0;
+    if (person === "self") {
+      initEl.innerHTML = '<span style="color:var(--accent);font-weight:700;font-size:14px">' + selfInits + ' initiated</span> <span style="color:var(--text-dim);font-size:11px">(' + partnerName + ': ' + partnerInits + ')</span>';
     } else {
-      initEl.innerHTML = '<span style="color:var(--pink);font-weight:700;font-size:14px">' + hopeInits + ' initiated</span> <span style="color:var(--text-dim);font-size:11px">(Ben: ' + benInits + ')</span>';
+      initEl.innerHTML = '<span style="color:var(--pink);font-weight:700;font-size:14px">' + partnerInits + ' initiated</span> <span style="color:var(--text-dim);font-size:11px">(' + selfName + ': ' + selfInits + ')</span>';
     }
   }
 
@@ -1885,12 +1892,12 @@ function renderCommunicationBalance(d) {
       if (sec < 3600) return Math.round(sec / 60) + "m";
       return (sec / 3600).toFixed(1) + "h";
     }
-    var benAvg = fmtTime(rt.self ? rt.self.avgSec : null);
-    var hopeAvg = fmtTime(rt.hope ? rt.hope.avgSec : null);
-    if (person === "ben") {
-      rtEl.innerHTML = '<span style="color:var(--accent);font-weight:700;font-size:14px">' + benAvg + ' avg reply</span> <span style="color:var(--text-dim);font-size:11px">(Hope: ' + hopeAvg + ')</span>';
+    var selfAvg = fmtTime(rt.self ? rt.self.avgSec : null);
+    var partnerAvg = fmtTime(rt.partner ? rt.partner.avgSec : null);
+    if (person === "self") {
+      rtEl.innerHTML = '<span style="color:var(--accent);font-weight:700;font-size:14px">' + selfAvg + ' avg reply</span> <span style="color:var(--text-dim);font-size:11px">(' + partnerName + ': ' + partnerAvg + ')</span>';
     } else {
-      rtEl.innerHTML = '<span style="color:var(--pink);font-weight:700;font-size:14px">' + hopeAvg + ' avg reply</span> <span style="color:var(--text-dim);font-size:11px">(Ben: ' + benAvg + ')</span>';
+      rtEl.innerHTML = '<span style="color:var(--pink);font-weight:700;font-size:14px">' + partnerAvg + ' avg reply</span> <span style="color:var(--text-dim);font-size:11px">(' + selfName + ': ' + selfAvg + ')</span>';
     }
   }
 }
@@ -1956,8 +1963,8 @@ async function toggleDailyCard(card) {
     }
 
     messagesEl.innerHTML = messages.map((msg) => {
-      const cls = msg.speaker === "self" ? "ben" : "hope";
-      const name = msg.speaker === "self" ? "Ben" : "Hope";
+      const cls = msg.speaker === "self" ? "self-speaker" : "partner-speaker";
+      const name = msg.speaker === "self" ? selfName : partnerName;
       const time = msg.timestamp
         ? new Date(msg.timestamp * 1000).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
         : "";

@@ -142,8 +142,8 @@ function parseWhatsAppExport(text: string): Array<{
       const timestamp = parseWhatsAppDate(dateStr, timeStr);
       if (!timestamp) { current = null; continue; }
 
-      // Determine speaker: if sender name contains partner name → "hope", else "self"
-      const speaker = sender.toLowerCase().includes(partnerLower) ? "hope" : "self";
+      // Determine speaker: if sender name contains partner name → "partner", else "self"
+      const speaker = sender.toLowerCase().includes(partnerLower) ? "partner" : "self";
       const hash = simpleHash(timestamp + sender + body);
 
       current = {
@@ -215,8 +215,8 @@ export function createRelationshipRouter(
 
     const totalMessages = stats.totalMessages ?? 0;
     const selfMessages = stats.selfMessages ?? 0;
-    const hopeMessages = stats.hopeMessages ?? 0;
-    const totalForRatio = selfMessages + hopeMessages || 1;
+    const partnerMessages = stats.partnerMessages ?? 0;
+    const totalForRatio = selfMessages + partnerMessages || 1;
 
     const daysTracked = stats.firstTimestamp && stats.lastTimestamp
       ? Math.max(1, Math.ceil((stats.lastTimestamp - stats.firstTimestamp) / 86400))
@@ -238,6 +238,10 @@ export function createRelationshipRouter(
     }
 
     res.json({
+      config: {
+        selfName: config.relationshipSelfName,
+        partnerName: config.relationshipPartnerName,
+      },
       monitoring: {
         lastMessageAt: health.lastMessageTimestamp
           ? new Date(health.lastMessageTimestamp * 1000).toISOString()
@@ -249,8 +253,8 @@ export function createRelationshipRouter(
         voiceMinutes: Math.round(totalVoiceMinutes * 10) / 10,
         daysTracked,
         messageRatio: {
-          benPercent: (selfMessages / totalForRatio) * 100,
-          hopePercent: (hopeMessages / totalForRatio) * 100,
+          selfPercent: (selfMessages / totalForRatio) * 100,
+          partnerPercent: (partnerMessages / totalForRatio) * 100,
         },
         initiators,
         responseTimes,
@@ -330,7 +334,7 @@ export function createRelationshipRouter(
     });
   });
 
-  // POST /api/relationship/backfill — fetch WhatsApp history for Hope's chat
+  // POST /api/relationship/backfill — fetch WhatsApp history for partner chat
   router.post("/backfill", requireAdminRole, async (req: Request, res: Response) => {
     try {
       const count = await backfillTrigger();
@@ -406,8 +410,8 @@ export function createRelationshipRouter(
 
     for (let i = 0; i < messages.length; i++) {
       const m = messages[i];
-      if (!m.speaker || !["self", "hope"].includes(m.speaker)) {
-        errors.push(`msg[${i}]: invalid speaker (must be "self" or "hope")`);
+      if (!m.speaker || !["self", "partner"].includes(m.speaker)) {
+        errors.push(`msg[${i}]: invalid speaker (must be "self" or "partner")`);
         continue;
       }
       if (!m.body || typeof m.body !== "string") {
@@ -479,7 +483,7 @@ export function createRelationshipRouter(
     });
   });
 
-  // POST /api/relationship/send-update — manually send a dashboard update to Hope
+  // POST /api/relationship/send-update — manually send a dashboard update via WhatsApp
   // Optional body: { frequency: "daily" | "weekly" } — defaults to current setting
   router.post("/send-update", requireAdminRole, async (req: Request, res: Response) => {
     const freq = req.body.frequency || store.getSetting("update_frequency") || "daily";
@@ -504,7 +508,7 @@ export function createRelationshipRouter(
     res.json({ message: message || "No analysis data available." });
   });
 
-  // POST /api/relationship/send-custom — send a custom message to Hope via WhatsApp
+  // POST /api/relationship/send-custom — send a custom message via WhatsApp
   router.post("/send-custom", requireAdminRole, async (req: Request, res: Response) => {
     const { message } = req.body;
     if (!message || typeof message !== "string" || !message.trim()) {
@@ -558,10 +562,12 @@ export function createRelationshipRouter(
       );
 
       // Format recent messages compactly
+      const selfName = config.relationshipSelfName;
+      const partnerName = config.relationshipPartnerName;
       const recentMsgText = recentMessages.map(m => {
         const date = new Date(m.timestamp * 1000).toISOString().split("T")[0];
         const time = new Date(m.timestamp * 1000).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" });
-        const speaker = m.speaker === "self" ? "Ben" : "Hope";
+        const speaker = m.speaker === "self" ? selfName : partnerName;
         const content = m.type === "voice"
           ? (m.transcript || m.body || "[voice note]")
           : (m.body || "[media]");
@@ -576,7 +582,7 @@ export function createRelationshipRouter(
       // Format daily counts
       const countsText = dailyCounts.map(d => `${d.day}: ${d.count} msgs`).join(", ");
 
-      const systemPrompt = `You are a relationship counselor AI with access to Ben and Hope's communication data. You help them understand their relationship patterns using Gottman and Esther Perel frameworks.
+      const systemPrompt = `You are a relationship counselor AI with access to ${selfName} and ${partnerName}'s communication data. You help them understand their relationship patterns using Gottman and Esther Perel frameworks.
 
 RELATIONSHIP DATA CONTEXT:
 
@@ -594,7 +600,7 @@ ${countsText || "No data."}
 ${recentMsgText || "No recent messages."}
 
 INSTRUCTIONS:
-- Answer questions about Ben and Hope's relationship based on the data above.
+- Answer questions about ${selfName} and ${partnerName}'s relationship based on the data above.
 - If the user asks about conversations older than 7 days, use the fetch_messages tool to retrieve them.
 - Be warm, supportive, and insightful. Reference specific quotes when relevant.
 - Keep responses concise but meaningful.`;
@@ -647,7 +653,7 @@ INSTRUCTIONS:
           const fetchedText = fetchedMessages.map(m => {
             const date = new Date(m.timestamp * 1000).toISOString().split("T")[0];
             const time = new Date(m.timestamp * 1000).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" });
-            const speaker = m.speaker === "self" ? "Ben" : "Hope";
+            const speaker = m.speaker === "self" ? selfName : partnerName;
             const content = m.type === "voice"
               ? (m.transcript || m.body || "[voice note]")
               : (m.body || "[media]");

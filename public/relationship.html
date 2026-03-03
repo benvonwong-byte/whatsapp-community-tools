@@ -178,17 +178,17 @@
     }
 
     /* Per-person action card variants */
-    .action-card-ben { background: linear-gradient(135deg, #1a2a2a, #1e1e1e); border: 1px solid var(--accent); border-left: 4px solid var(--accent); }
-    .action-card-ben .action-card-label { color: var(--accent); }
-    .action-card-hope { background: linear-gradient(135deg, #2a1a2a, #1e1e1e); border: 1px solid var(--pink); border-left: 4px solid var(--pink); }
-    .action-card-hope .action-card-label { color: var(--pink); }
+    .action-card-self { background: linear-gradient(135deg, #1a2a2a, #1e1e1e); border: 1px solid var(--accent); border-left: 4px solid var(--accent); }
+    .action-card-self .action-card-label { color: var(--accent); }
+    .action-card-partner { background: linear-gradient(135deg, #2a1a2a, #1e1e1e); border: 1px solid var(--pink); border-left: 4px solid var(--pink); }
+    .action-card-partner .action-card-label { color: var(--pink); }
     .action-card-together { background: linear-gradient(135deg, #1a2a1a, #1e1e1e); border: 1px solid var(--green); border-left: 4px solid var(--green); }
     .action-card-together .action-card-label { color: var(--green); }
 
     /* Notable quotes */
     .notable-quotes-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     .notable-quote-card { background: var(--bg); border-radius: 8px; padding: 12px; border-left: 3px solid var(--accent); }
-    .notable-quote-card.hope { border-left-color: var(--pink); }
+    .notable-quote-card.partner { border-left-color: var(--pink); }
     .notable-quote-card .quote-text { font-style: italic; font-size: 13px; line-height: 1.5; color: var(--text); margin-bottom: 6px; }
     .notable-quote-card .quote-meta { font-size: 10px; color: var(--text-dim); display: flex; justify-content: space-between; }
     .notable-quote-card .quote-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px; padding: 1px 6px; border-radius: 999px; background: var(--surface2); }
@@ -239,8 +239,8 @@
     /* Language emotion */
     .emotion-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
     .emotion-tag { font-size: 10px; padding: 2px 8px; border-radius: 999px; background: var(--surface2); color: var(--text-dim); }
-    .emotion-tag.ben { border: 1px solid var(--accent); color: var(--accent); }
-    .emotion-tag.hope { border: 1px solid var(--pink); color: var(--pink); }
+    .emotion-tag.self-person { border: 1px solid var(--accent); color: var(--accent); }
+    .emotion-tag.partner-person { border: 1px solid var(--pink); color: var(--pink); }
     .language-note { font-size: 11px; color: var(--text-dim); line-height: 1.5; margin-top: 4px; }
 
     /* Legacy analysis layout (kept for JS compatibility) */
@@ -381,8 +381,8 @@
       font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
       padding-bottom: 8px; border-bottom: 2px solid var(--border); margin-bottom: 8px;
     }
-    .rec-header.ben { color: var(--accent); border-color: var(--accent); }
-    .rec-header.hope { color: var(--pink); border-color: var(--pink); }
+    .rec-header.self { color: var(--accent); border-color: var(--accent); }
+    .rec-header.partner { color: var(--pink); border-color: var(--pink); }
     .rec-header.both { color: var(--green); border-color: var(--green); }
     .rec-list { list-style: none; padding: 0; margin: 0; }
     .rec-list li {
@@ -414,8 +414,8 @@
     .message-item { padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 12px; line-height: 1.4; }
     .message-item:last-child { border-bottom: none; }
     .message-sender { font-weight: 600; font-size: 11px; margin-bottom: 1px; }
-    .message-sender.ben { color: var(--accent); }
-    .message-sender.hope { color: var(--pink); }
+    .message-sender.self-speaker { color: var(--accent); }
+    .message-sender.partner-speaker { color: var(--pink); }
     .message-time { font-size: 10px; color: var(--text-dim); margin-left: 6px; font-weight: 400; }
     .message-text { color: var(--text-dim); word-break: break-word; }
     .message-type-badge { display: inline-block; font-size: 9px; padding: 0px 4px; border-radius: 3px; background: var(--surface); color: var(--text-dim); margin-left: 4px; }
@@ -576,13 +576,13 @@
       font-family: inherit;
     }
     .person-toggle-btn:hover { color: var(--text); }
-    .person-toggle-btn.active[data-person="ben"] { background: var(--accent); color: #000; }
-    .person-toggle-btn.active[data-person="hope"] { background: var(--pink); color: #fff; }
+    .person-toggle-btn.active[data-person="self"] { background: var(--accent); color: #000; }
+    .person-toggle-btn.active[data-person="partner"] { background: var(--pink); color: #fff; }
     .person-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
-    .person-dot.ben-dot { background: var(--accent); }
-    .person-dot.hope-dot { background: var(--pink); }
-    .person-toggle-btn.active .person-dot.ben-dot { background: #000; }
-    .person-toggle-btn.active .person-dot.hope-dot { background: #fff; }
+    .person-dot.self-dot { background: var(--accent); }
+    .person-dot.partner-dot { background: var(--pink); }
+    .person-toggle-btn.active .person-dot.self-dot { background: #000; }
+    .person-toggle-btn.active .person-dot.partner-dot { background: #fff; }
 
     /* Individual action row */
     .individual-action-row {
@@ -740,7 +740,7 @@
           <option value="11">11 AM</option>
           <option value="12">12 PM</option>
         </select>
-        <button id="send-update-btn" class="action-btn" title="Send dashboard update to Hope now">Send Now</button>
+        <button id="send-update-btn" class="action-btn" title="Send dashboard update now">Send Now</button>
         <button id="preview-update-btn" class="action-btn" title="Preview the update message">Preview</button>
       </div>
 
@@ -752,23 +752,23 @@
       <div class="zone" id="zone-snapshot">
         <div class="zone-label">LATEST SNAPSHOT</div>
 
-        <!-- Person Toggle + Text Hope button -->
+        <!-- Person Toggle + Text Partner button -->
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
           <div class="person-toggle" id="person-toggle" style="margin-bottom:0;">
-            <button class="person-toggle-btn active" data-person="ben">
-              <span class="person-dot ben-dot"></span> Ben
+            <button class="person-toggle-btn active" data-person="self">
+              <span class="person-dot self-dot"></span> Self
             </button>
-            <button class="person-toggle-btn" data-person="hope">
-              <span class="person-dot hope-dot"></span> Hope
+            <button class="person-toggle-btn" data-person="partner">
+              <span class="person-dot partner-dot"></span> Partner
             </button>
           </div>
-          <button id="text-hope-btn" class="action-btn" style="display:none;background:var(--pink);color:#fff;border-color:var(--pink);font-weight:600;" title="Send today's summary to Hope via WhatsApp">Text Hope</button>
+          <button id="text-partner-btn" class="action-btn" style="display:none;background:var(--pink);color:#fff;border-color:var(--pink);font-weight:600;" title="Send today's summary to partner via WhatsApp">Text Partner</button>
         </div>
 
         <!-- Action Cards (person + together) -->
         <div class="individual-action-row">
-          <div class="action-card action-card-ben" id="individual-action-card">
-            <div class="action-card-label" id="individual-action-label">What Ben should do</div>
+          <div class="action-card action-card-self" id="individual-action-card">
+            <div class="action-card-label" id="individual-action-label">What to focus on</div>
             <div class="action-card-text" id="individual-action-text">Run an analysis to get recommendations.</div>
             <div class="action-card-context" id="individual-action-context"></div>
           </div>
@@ -912,7 +912,7 @@
             <div class="balance-item">
               <div class="ratio-label">
                 <span id="bal-ratio-left">Ben: 50%</span>
-                <span id="bal-ratio-right">Hope: 50%</span>
+                <span id="bal-ratio-right">Partner: 50%</span>
               </div>
               <div class="ratio-bar">
                 <div id="bal-ratio-fill-left" class="ratio-fill-left" style="width:50%"></div>
@@ -1004,7 +1004,7 @@
       </div>
       <pre id="preview-content" style="white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.5;color:var(--text);font-family:inherit;"></pre>
       <div style="margin-top:14px;text-align:right;">
-        <button id="preview-send" class="analyze-btn" style="font-size:12px;padding:6px 16px;">Send to Hope</button>
+        <button id="preview-send" class="analyze-btn" style="font-size:12px;padding:6px 16px;">Send to Partner</button>
       </div>
     </div>
   </div>

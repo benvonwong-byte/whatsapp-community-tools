@@ -365,8 +365,8 @@ function renderUpcomingEvents() {
     const dayStr = dateObj ? dateObj.getDate() : "?";
 
     let details = [];
-    if (evt.start_time) details.push(evt.start_time);
-    if (evt.location) details.push(evt.location);
+    if (evt.start_time) details.push(escapeHtml(evt.start_time));
+    if (evt.location) details.push(escapeHtml(evt.location));
     const detailStr = details.join(" &middot; ");
 
     const nameHtml = evt.url

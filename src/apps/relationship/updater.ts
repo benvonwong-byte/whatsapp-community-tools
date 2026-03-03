@@ -12,7 +12,7 @@ function getModel() {
 }
 
 export interface Recommendation {
-  for: "Hope" | "Ben" | "Both";
+  for: string; // config.relationshipSelfName, config.relationshipPartnerName, or "Both"
   text: string;
   window: "24h" | "48h" | "week";
 }
@@ -23,13 +23,15 @@ export interface MultiWindowRecs {
 
 /** Format messages into a readable conversation string */
 function formatConversation(messages: RelationshipMessage[]): string {
+  const selfName = config.relationshipSelfName;
+  const partnerName = config.relationshipPartnerName;
   return messages.map((m) => {
     const time = new Date(m.timestamp * 1000).toLocaleTimeString("en-US", {
       hour: "numeric",
       minute: "2-digit",
       timeZone: "America/New_York",
     });
-    const speaker = m.speaker === "self" ? "Ben" : "Hope";
+    const speaker = m.speaker === "self" ? selfName : partnerName;
     const sourceTag = m.source === "in-person" ? "[in-person] " : "";
     const content = m.type === "voice" ? `[voice note] ${m.transcript}` : m.body;
     return `[${time}] ${sourceTag}${speaker}: ${content}`;
@@ -76,7 +78,10 @@ async function generateMultiWindowRecommendations(
     windowSections.push(`== 2-7 DAYS AGO (${msgs7dOnly.length} messages) ==\n${conv7d}`);
   }
 
-  const prompt = `You are a relationship coach for Ben and Hope (a couple). You have their conversations from three time windows below. Generate specific, actionable recommendations based on what you see.
+  const selfName = config.relationshipSelfName;
+  const partnerName = config.relationshipPartnerName;
+
+  const prompt = `You are a relationship coach for ${selfName} and ${partnerName} (a couple). You have their conversations from three time windows below. Generate specific, actionable recommendations based on what you see.
 
 ${windowSections.join("\n\n")}
 ${analysisContext}
@@ -87,7 +92,7 @@ INSTRUCTIONS:
   - "24h" recs: based on today's conversations (always include at least 1-2 if there are recent messages)
   - "48h" recs: patterns or follow-ups from the last couple days (only if there's something notable)
   - "week" recs: trends, recurring patterns, or things that have been building over the week (only if there's a real trend worth calling out)
-- Each rec should be for "Hope", "Ben", or "Both"
+- Each rec should be for "${partnerName}", "${selfName}", or "Both"
 - Each must reference something SPECIFIC from the conversations — no generic advice
 - Keep each to 1-2 sentences max
 - If a time window has no messages or nothing interesting, skip it entirely — don't pad with filler
@@ -95,7 +100,7 @@ INSTRUCTIONS:
 Respond with ONLY a JSON object (no markdown code fences):
 {
   "recommendations": [
-    { "for": "Hope"|"Ben"|"Both", "text": "<specific actionable recommendation>", "window": "24h"|"48h"|"week" }
+    { "for": "${partnerName}"|"${selfName}"|"Both", "text": "<specific actionable recommendation>", "window": "24h"|"48h"|"week" }
   ]
 }
 
@@ -116,7 +121,7 @@ JSON:`;
     const parsed = JSON.parse(text);
     if (!parsed.recommendations || !Array.isArray(parsed.recommendations)) return null;
     // Validate individual items and clamp to 6 max
-    const validFor = new Set(["Hope", "Ben", "Both"]);
+    const validFor = new Set([config.relationshipPartnerName, config.relationshipSelfName, "Both"]);
     const validWindow = new Set(["24h", "48h", "week"]);
     parsed.recommendations = parsed.recommendations
       .filter((r: any) =>
@@ -134,8 +139,8 @@ JSON:`;
 
 /** Map a Recommendation to its emoji prefix */
 function recEmoji(rec: Recommendation): string {
-  if (rec.for === "Hope") return "💗";
-  if (rec.for === "Ben") return "💙";
+  if (rec.for === config.relationshipPartnerName) return "💗";
+  if (rec.for === config.relationshipSelfName) return "💙";
   return "🌱";
 }
 
@@ -170,11 +175,11 @@ function formatDailyUpdate(
   } else {
     // Fall back to stored analysis recommendations
     const recs = m.recommendations || {};
-    const hopeRec = (recs.forHope && recs.forHope[0]) || null;
-    const benRec = (recs.forBen && recs.forBen[0]) || null;
+    const partnerRec = (recs.forPartner && recs.forPartner[0]) || null;
+    const selfRec = (recs.forSelf && recs.forSelf[0]) || null;
     const togetherRec = (recs.forBoth && recs.forBoth[0]) || null;
-    if (hopeRec) lines.push(`💗 *Hope:* ${hopeRec}`);
-    if (benRec) lines.push(`💙 *Ben:* ${benRec}`);
+    if (partnerRec) lines.push(`💗 *${config.relationshipPartnerName}:* ${partnerRec}`);
+    if (selfRec) lines.push(`💙 *${config.relationshipSelfName}:* ${selfRec}`);
     if (togetherRec) lines.push(`🌱 *Together:* ${togetherRec}`);
   }
 
@@ -241,11 +246,11 @@ function formatWeeklyUpdate(
   } else {
     // Fall back to stored analysis recommendations
     const recs = latestM.recommendations || {};
-    const hopeRec = (recs.forHope && recs.forHope[0]) || null;
-    const benRec = (recs.forBen && recs.forBen[0]) || null;
+    const partnerRec = (recs.forPartner && recs.forPartner[0]) || null;
+    const selfRec = (recs.forSelf && recs.forSelf[0]) || null;
     const togetherRec = (recs.forBoth && recs.forBoth[0]) || null;
-    if (hopeRec) lines.push(`💗 *Hope:* ${hopeRec}`);
-    if (benRec) lines.push(`💙 *Ben:* ${benRec}`);
+    if (partnerRec) lines.push(`💗 *${config.relationshipPartnerName}:* ${partnerRec}`);
+    if (selfRec) lines.push(`💙 *${config.relationshipSelfName}:* ${selfRec}`);
     if (togetherRec) lines.push(`🌱 *Together:* ${togetherRec}`);
   }
 

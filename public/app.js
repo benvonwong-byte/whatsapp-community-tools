@@ -94,17 +94,35 @@ async function loadData() {
       fetches.push(adminFetch("/api/groups/blocked"));
     }
 
-    const results = await Promise.all(fetches);
-    allEvents = await results[0].json();
-    categories = await results[1].json();
-    catMap = {};
-    for (const c of categories) catMap[c.id] = c;
-    dashboardStats = await results[2].json();
-    recentEvents = await results[3].json();
-    if (isAdmin && results[4]) {
-      const blockedList = await results[4].json();
-      blockedGroups = new Set(blockedList);
+    const results = await Promise.allSettled(fetches);
+
+    // Helper to safely extract JSON from a settled result
+    async function settled(idx) {
+      if (results[idx].status !== "fulfilled") return null;
+      try { return await results[idx].value.json(); } catch { return null; }
     }
+
+    const eventsData = await settled(0);
+    if (eventsData) allEvents = eventsData;
+
+    const categoriesData = await settled(1);
+    if (categoriesData) {
+      categories = categoriesData;
+      catMap = {};
+      for (const c of categories) catMap[c.id] = c;
+    }
+
+    const statsData = await settled(2);
+    if (statsData) dashboardStats = statsData;
+
+    const recentData = await settled(3);
+    if (recentData) recentEvents = recentData;
+
+    if (isAdmin && results[4]) {
+      const blockedData = await settled(4);
+      if (blockedData) blockedGroups = new Set(blockedData);
+    }
+
     lastDataFetch = new Date();
     renderCurrentView();
   } catch (err) {

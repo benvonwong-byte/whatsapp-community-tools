@@ -13,7 +13,7 @@ export function createCallsRouter(store: FriendsStore): Router {
   ]);
   const upload = multer({
     storage: multer.memoryStorage(),
-    limits: { fileSize: 200 * 1024 * 1024 }, // 200MB for longer calls
+    limits: { fileSize: 50 * 1024 * 1024 }, // 50MB max upload
     fileFilter: (_req, file, cb) => {
       if (ALLOWED_AUDIO_TYPES.has(file.mimetype)) {
         cb(null, true);

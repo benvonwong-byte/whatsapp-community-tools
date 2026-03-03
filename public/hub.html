@@ -135,7 +135,7 @@
       <div class="card-accent"></div>
       <div class="card-icon">💕</div>
       <div class="card-title">Relationship Health</div>
-      <div class="card-desc">Gottman &amp; Perel analysis of communication patterns with Hope.</div>
+      <div class="card-desc">Gottman &amp; Perel analysis of relationship communication patterns.</div>
     </a>
 
     <a class="card card-friends" href="/friends.html" id="link-friends">
@@ -178,21 +178,25 @@
   <div class="footer" id="footer"></div>
 
   <script>
-    // Carry admin token to all links
+    // Persist admin token from URL into localStorage, then strip it from the URL
     const params = new URLSearchParams(window.location.search);
-    const token = params.get("token") || params.get("admin") || localStorage.getItem("adminToken");
+    const urlToken = params.get("token") || params.get("admin");
+    if (urlToken) {
+      localStorage.setItem("adminToken", urlToken);
+      // Remove token from URL to avoid leaking in browser history / referer headers
+      params.delete("token");
+      params.delete("admin");
+      const clean = params.toString();
+      history.replaceState(null, "", window.location.pathname + (clean ? "?" + clean : ""));
+    }
+    const token = localStorage.getItem("adminToken");
     const grid = document.querySelector(".grid");
     const subtitle = document.querySelector(".subtitle");
     const gate = document.getElementById("login-gate");
     const footer = document.getElementById("footer");
 
     if (token) {
-      localStorage.setItem("adminToken", token);
-      document.querySelectorAll(".card").forEach(link => {
-        const url = new URL(link.href, window.location.origin);
-        url.searchParams.set("token", token);
-        link.href = url.toString();
-      });
+      // Pass token via localStorage — shared.js reads it automatically
       footer.innerHTML = '<span style="color:var(--green)">&#x2713;</span> Logged in';
     } else {
       // Hide dashboard grid, show login gate

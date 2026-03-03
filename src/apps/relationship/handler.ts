@@ -6,7 +6,7 @@ export { transcribeVoiceNote };
 
 /**
  * Create a raw message listener for the Relationship app.
- * Captures text messages and voice notes from the private chat with Hope.
+ * Captures text messages and voice notes from the configured private chat.
  */
 export function createRelationshipHandler(store: RelationshipStore) {
   const chatNameLower = config.relationshipChatName.toLowerCase();
@@ -20,7 +20,7 @@ export function createRelationshipHandler(store: RelationshipStore) {
     if (store.isDuplicate(msg.id._serialized)) return;
 
     // Determine speaker
-    const speaker = msg.fromMe ? "self" : "hope";
+    const speaker = msg.fromMe ? "self" : "partner";
 
     const msgType = (msg.type as string) || "chat";
 

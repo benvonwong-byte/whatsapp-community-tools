@@ -93,7 +93,7 @@ export function createRecordingRouter(
   // POST /api/recording/save-transcript
   // Saves speaker-assigned utterances directly to the relationship store.
   // Expected body: {
-  //   utterances: [{ speaker: "self"|"hope", body: string, timestamp: number }]
+  //   utterances: [{ speaker: "self"|"partner", body: string, timestamp: number }]
   //   source?: string  (defaults to "in-person")
   // }
   router.post("/save-transcript", (req: Request, res: Response) => {
@@ -118,8 +118,8 @@ export function createRecordingRouter(
     for (let i = 0; i < utterances.length; i++) {
       const u = utterances[i];
 
-      if (!u.speaker || !["self", "hope"].includes(u.speaker)) {
-        errors.push(`utterance[${i}]: invalid speaker "${u.speaker}" (must be "self" or "hope")`);
+      if (!u.speaker || !["self", "partner"].includes(u.speaker)) {
+        errors.push(`utterance[${i}]: invalid speaker "${u.speaker}" (must be "self" or "partner")`);
         continue;
       }
       if (!u.body || typeof u.body !== "string" || u.body.length > MAX_BODY_LENGTH) {

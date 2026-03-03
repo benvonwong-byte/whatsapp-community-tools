@@ -229,9 +229,7 @@ export class MetacrisisStore extends SettingsStore {
     insertDefaults();
 
     // Fix any @lid sender names with known overrides
-    const SENDER_FIXES: Record<string, string> = {
-      "116084476788850:76@lid": "Benjamin Von Wong",
-    };
+    const SENDER_FIXES: Record<string, string> = config.senderNameOverrides;
     for (const [rawId, displayName] of Object.entries(SENDER_FIXES)) {
       this.db.prepare(`UPDATE metacrisis_messages SET sender_name = ? WHERE sender = ? AND (sender_name = ? OR sender_name = '' OR sender_name IS NULL)`).run(displayName, rawId, rawId);
       this.db.prepare(`UPDATE metacrisis_links SET sender_name = ? WHERE sender_name = ?`).run(displayName, rawId);

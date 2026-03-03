@@ -4,7 +4,7 @@ import { SettingsStore } from "../../utils/base-store";
 
 export interface RelationshipMessage {
   id: string;
-  speaker: "self" | "hope";
+  speaker: string;
   body: string;
   transcript: string;
   timestamp: number;
@@ -121,7 +121,7 @@ export class RelationshipStore extends SettingsStore {
         SELECT
           COUNT(*) as totalMessages,
           SUM(CASE WHEN speaker = 'self' THEN 1 ELSE 0 END) as selfMessages,
-          SUM(CASE WHEN speaker = 'hope' THEN 1 ELSE 0 END) as hopeMessages,
+          SUM(CASE WHEN speaker != 'self' THEN 1 ELSE 0 END) as partnerMessages,
           SUM(CASE WHEN type = 'voice' THEN 1 ELSE 0 END) as voiceMessages,
           MIN(timestamp) as firstTimestamp,
           MAX(timestamp) as lastTimestamp
@@ -131,7 +131,7 @@ export class RelationshipStore extends SettingsStore {
         SELECT
           COUNT(*) as totalMessages,
           SUM(CASE WHEN speaker = 'self' THEN 1 ELSE 0 END) as selfMessages,
-          SUM(CASE WHEN speaker = 'hope' THEN 1 ELSE 0 END) as hopeMessages,
+          SUM(CASE WHEN speaker != 'self' THEN 1 ELSE 0 END) as partnerMessages,
           SUM(CASE WHEN type = 'voice' THEN 1 ELSE 0 END) as voiceMessages,
           MIN(timestamp) as firstTimestamp,
           MAX(timestamp) as lastTimestamp
