@@ -66,8 +66,6 @@ export interface MetacrisisHandlerDiagnostics {
  * extracts and categorizes URLs found in messages.
  */
 export function createMetacrisisHandler(store: MetacrisisStore) {
-  const chatNameLower = config.metacrisisChatName.toLowerCase();
-
   // Diagnostics
   let lastCaptureTs = 0;
   let captureCount = 0;
@@ -77,7 +75,7 @@ export function createMetacrisisHandler(store: MetacrisisStore) {
     // Log all group messages for diagnostics
     if (chat.isGroup) {
       lastSeenGroup = chat.name;
-      if (chat.name.toLowerCase().includes(chatNameLower)) {
+      if (store.isGroupMonitored(chat.name)) {
         console.log(`[metacrisis] SAW: type=${msg.type} hasBody=${!!msg.body} from=${msg.author || msg.from}`);
       }
     }
@@ -85,8 +83,8 @@ export function createMetacrisisHandler(store: MetacrisisStore) {
     // Only process group chats
     if (!chat.isGroup) return;
 
-    // Only process the specific Metacrisis group
-    if (!chat.name.toLowerCase().includes(chatNameLower)) return;
+    // Only process monitored groups
+    if (!store.isGroupMonitored(chat.name)) return;
 
     // Skip duplicates
     if (store.isDuplicate(msg.id._serialized)) return;
@@ -140,7 +138,7 @@ export function createMetacrisisHandler(store: MetacrisisStore) {
   (handler as any).getDiagnostics = (): MetacrisisHandlerDiagnostics => ({
     lastCaptureTs,
     captureCount,
-    chatNameTarget: config.metacrisisChatName,
+    chatNameTarget: "monitored_groups",
     lastSeenGroup,
   });
 

@@ -1,16 +1,7 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { getLLM } from "../../providers/llm";
 import { config } from "../../config";
 import { MetacrisisStore, MetacrisisMessage, MetacrisisEvent } from "./store";
 import { fetchPageText } from "../../verifier";
-
-let geminiModel: any = null;
-function getModel() {
-  if (!geminiModel) {
-    const genAI = new GoogleGenerativeAI(config.geminiApiKey);
-    geminiModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-  }
-  return geminiModel;
-}
 
 // ── Helpers ──
 
@@ -42,16 +33,6 @@ function getDateNDaysAgo(n: number): string {
 
 function getTodayDate(): string {
   return new Date().toISOString().split("T")[0];
-}
-
-function parseGeminiJson(text: string): any {
-  let jsonStr = text.trim();
-  if (jsonStr.startsWith("```")) {
-    jsonStr = jsonStr
-      .replace(/^```(?:json)?\n?/, "")
-      .replace(/\n?```$/, "");
-  }
-  return JSON.parse(jsonStr);
 }
 
 function formatEventsForPrompt(events: MetacrisisEvent[]): string {
@@ -111,10 +92,7 @@ export async function runDailyDigest(store: MetacrisisStore): Promise<void> {
   console.log(`[metacrisis-daily] Digesting ${messages.length} messages for ${yesterday}...`);
 
   try {
-    const model = getModel();
-    const result = await model.generateContent(buildDailyDigestPrompt(truncated, messages.length, yesterday));
-    const text = result.response.text();
-    const parsed = parseGeminiJson(text);
+    const parsed = await getLLM().generateJSON<any>(buildDailyDigestPrompt(truncated, messages.length, yesterday));
 
     const topics = parsed.keyTopics || [];
     const topicNames = topics.map((t: any) => t.topic || t);
@@ -206,12 +184,9 @@ export async function runWeeklySummary(store: MetacrisisStore): Promise<void> {
   console.log(`[metacrisis-weekly] Summarizing ${messages.length} messages for week ${dateRange}...`);
 
   try {
-    const model = getModel();
-    const result = await model.generateContent(buildWeeklySummaryPrompt(truncated, messages.length, dateRange, eventsBlock));
-    const text = result.response.text();
-    const parsed = parseGeminiJson(text);
+    const parsed = await getLLM().generateJSON<any>(buildWeeklySummaryPrompt(truncated, messages.length, dateRange, eventsBlock));
 
-    // Build formatted WhatsApp message if Gemini didn't provide one
+    // Build formatted WhatsApp message if LLM didn't provide one
     const whatsAppMsg = parsed.formattedWhatsApp || buildDefaultWhatsAppMessage(parsed, dateRange);
 
     store.saveSummary(
@@ -266,7 +241,6 @@ async function extractEventDetails(url: string, pageText: string, html?: string)
   endTime: string | null; location: string; description: string;
 }> {
   try {
-    const model = getModel();
     const today = new Date().toISOString().split("T")[0];
 
     // Use structured data if we have the full HTML
@@ -278,7 +252,7 @@ async function extractEventDetails(url: string, pageText: string, html?: string)
       if (jsonLd) context = `JSON-LD:\n${jsonLd.slice(0, 4000)}\n\n${embedded ? `EMBEDDED DATA:\n${embedded}\n\n` : ""}META:\n${meta}\n\n${context}`;
     }
 
-    const result = await model.generateContent(`Extract event details from this page. Today's date is ${today}.
+    const prompt = `Extract event details from this page. Today's date is ${today}.
 URL: ${url}
 
 ${context}
@@ -288,10 +262,9 @@ Look carefully at structured data, meta tags, and page text. Resolve relative da
 Respond with ONLY a JSON object:
 {"name":"Event Name","date":"YYYY-MM-DD","startTime":"HH:MM","endTime":"HH:MM","location":"Venue, City","description":"Brief 1-sentence description of what the event is about"}
 
-Use null for any field you cannot determine. JSON:`);
+Use null for any field you cannot determine. JSON:`;
 
-    const text = result.response.text();
-    return parseGeminiJson(text);
+    return await getLLM().generateJSON<any>(prompt);
   } catch (err: any) {
     console.error(`[metacrisis-events] Failed to extract details from ${url}:`, err?.message || err);
     return { name: "", date: null, startTime: null, endTime: null, location: "", description: "" };
@@ -402,10 +375,8 @@ export async function scrapeLinksMeta(store: MetacrisisStore): Promise<number> {
       let eventDate: string | null = null;
       let eventLocation: string | null = null;
       try {
-        const model = getModel();
         const today = new Date().toISOString().split("T")[0];
-        const result = await model.generateContent(
-          `You are summarizing a shared link for a community newsletter. Today's date is ${today}.
+        const prompt = `You are summarizing a shared link for a community newsletter. Today's date is ${today}.
 
 Read the page content carefully — look at structured data, meta tags, and page text to understand what this is about.
 
@@ -436,10 +407,8 @@ CATEGORY & EVENT RULES:
 - Set category based on actual content, not just URL.
 - For events: extract the exact date (resolve relative dates like "this Tuesday" using today=${today}), start/end times, and location from the page content. Check structured data and meta tags first.
 
-JSON:`
-        );
-        const text = result.response.text().trim();
-        const parsed = parseGeminiJson(text);
+JSON:`;
+        const parsed = await getLLM().generateJSON<any>(prompt);
         summary = (parsed.summary || "").slice(0, 400);
         if (parsed.category && ["article", "video", "event", "podcast", "other"].includes(parsed.category)) {
           aiCategory = parsed.category;
@@ -757,10 +726,8 @@ export async function scrapeUrlForQuickShare(url: string): Promise<{
   }
 
   try {
-    const model = getModel();
     const today = new Date().toISOString().split("T")[0];
-    const result = await model.generateContent(
-      `You are summarizing a link for sharing in a community WhatsApp group. Today's date is ${today}.
+    const prompt = `You are summarizing a link for sharing in a community WhatsApp group. Today's date is ${today}.
 
 URL: ${url}
 Title: ${title}
@@ -784,10 +751,8 @@ RULES:
 - For non-events: date, time, and location should be null.
 - NEVER write generic descriptions like "This page contains an event". Be specific.
 
-JSON:`
-    );
-    const text = result.response.text().trim();
-    const parsed = parseGeminiJson(text);
+JSON:`;
+    const parsed = await getLLM().generateJSON<any>(prompt);
     return {
       title: parsed.title || title,
       description: (parsed.description || "").slice(0, 400),

@@ -1,5 +1,4 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import { config } from "./config";
+import { getLLM } from "./providers/llm";
 import { categories, getCategorySummary } from "./categories";
 import { BufferedMessage } from "./whatsapp";
 
@@ -72,15 +71,6 @@ Valid category IDs: ${categories.map((c) => c.id).join(", ")}
 JSON array:`;
 }
 
-let geminiModel: any = null;
-function getModel() {
-  if (!geminiModel) {
-    const genAI = new GoogleGenerativeAI(config.geminiApiKey);
-    geminiModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-  }
-  return geminiModel;
-}
-
 export async function extractEvents(
   messages: BufferedMessage[]
 ): Promise<ExtractedEvent[]> {
@@ -89,17 +79,7 @@ export async function extractEvents(
   const prompt = buildPrompt(messages);
 
   try {
-    const model = getModel();
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
-
-    // Extract JSON from the response (handle markdown code blocks)
-    let jsonStr = text.trim();
-    if (jsonStr.startsWith("```")) {
-      jsonStr = jsonStr.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
-    }
-
-    const parsed = JSON.parse(jsonStr);
+    const parsed = await getLLM().generateJSON<any[]>(prompt);
 
     if (!Array.isArray(parsed)) {
       console.warn("[extractor] LLM returned non-array response, skipping");
@@ -134,7 +114,7 @@ export async function extractEvents(
 
     return events;
   } catch (err) {
-    console.error("[extractor] Error calling Gemini API:", err);
+    console.error("[extractor] Error calling LLM API:", err);
     throw err; // Re-throw so callers know extraction failed (vs. legitimately 0 events)
   }
 }

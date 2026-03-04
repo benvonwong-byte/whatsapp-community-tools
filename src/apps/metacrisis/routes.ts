@@ -378,6 +378,37 @@ export function createMetacrisisRouter(
     }
   });
 
+  // ── Group Monitoring Management ──
+
+  // GET /api/metacrisis/groups/monitored — list monitored groups
+  router.get("/groups/monitored", (_req: Request, res: Response) => {
+    res.json(store.getMonitoredGroups());
+  });
+
+  // POST /api/metacrisis/groups/monitor — add a group to monitoring
+  // Body: { chatName: string, announcementChat?: string }
+  router.post("/groups/monitor", (req: Request, res: Response) => {
+    const { chatName, announcementChat } = req.body;
+    if (!chatName || typeof chatName !== "string") {
+      res.status(400).json({ error: "chatName is required" });
+      return;
+    }
+    store.addMonitoredGroup(chatName.trim(), announcementChat?.trim());
+    res.json({ ok: true, chatName: chatName.trim() });
+  });
+
+  // DELETE /api/metacrisis/groups/monitor — remove a group from monitoring
+  // Body: { chatName: string }
+  router.delete("/groups/monitor", (req: Request, res: Response) => {
+    const { chatName } = req.body;
+    if (!chatName || typeof chatName !== "string") {
+      res.status(400).json({ error: "chatName is required" });
+      return;
+    }
+    store.removeMonitoredGroup(chatName.trim());
+    res.json({ ok: true, chatName: chatName.trim() });
+  });
+
   // PUT /api/metacrisis/settings — update settings
   router.put("/settings", (req: Request, res: Response) => {
     const allowedKeys = [

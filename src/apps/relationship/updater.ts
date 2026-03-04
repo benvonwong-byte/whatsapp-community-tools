@@ -1,15 +1,6 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { getLLM } from "../../providers/llm";
 import { config } from "../../config";
 import { RelationshipStore, RelationshipAnalysis, RelationshipMessage } from "./store";
-
-let geminiModel: any = null;
-function getModel() {
-  if (!geminiModel) {
-    const genAI = new GoogleGenerativeAI(config.geminiApiKey);
-    geminiModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-  }
-  return geminiModel;
-}
 
 export interface Recommendation {
   for: string; // config.relationshipSelfName, config.relationshipPartnerName, or "Both"
@@ -107,18 +98,7 @@ Respond with ONLY a JSON object (no markdown code fences):
 JSON:`;
 
   try {
-    const model = getModel();
-    const result = await model.generateContent(prompt);
-    let text = result.response.text().trim();
-    if (text.startsWith("```")) {
-      text = text.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
-    }
-    const firstBrace = text.indexOf("{");
-    const lastBrace = text.lastIndexOf("}");
-    if (firstBrace !== -1 && lastBrace !== -1) {
-      text = text.slice(firstBrace, lastBrace + 1);
-    }
-    const parsed = JSON.parse(text);
+    const parsed = await getLLM().generateJSON<any>(prompt);
     if (!parsed.recommendations || !Array.isArray(parsed.recommendations)) return null;
     // Validate individual items and clamp to 6 max
     const validFor = new Set([config.relationshipPartnerName, config.relationshipSelfName, "Both"]);
@@ -298,7 +278,7 @@ function formatDateStr(dateStr: string): string {
  * Build the update message based on frequency setting.
  * Fetches messages from multiple time windows (24h, 48h, 7d) and generates
  * a variable number of AI recommendations. Falls back to stored analysis
- * recommendations if Gemini call fails or no recent messages.
+ * recommendations if LLM call fails or no recent messages.
  */
 export async function buildUpdateMessage(
   store: RelationshipStore,

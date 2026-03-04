@@ -1,8 +1,7 @@
 import { Router, Request, Response } from "express";
 import multer from "multer";
-import { AssemblyAI } from "assemblyai";
 import { RelationshipStore } from "../relationship/store";
-import { config } from "../../config";
+import { getSpeakerTranscriber } from "../../providers/transcription";
 
 function simpleHash(str: string): string {
   let hash = 0;
@@ -33,18 +32,6 @@ export function createRecordingRouter(
     },
   });
 
-  // Initialize AssemblyAI client lazily
-  let client: AssemblyAI | null = null;
-  function getClient(): AssemblyAI {
-    if (!client) {
-      if (!config.assemblyAiApiKey) {
-        throw new Error("ASSEMBLYAI_API_KEY not configured");
-      }
-      client = new AssemblyAI({ apiKey: config.assemblyAiApiKey });
-    }
-    return client;
-  }
-
   // POST /api/recording/transcribe
   // Receives audio file via multipart/form-data, uploads to AssemblyAI,
   // returns transcript with speaker-labeled utterances.
@@ -57,32 +44,18 @@ export function createRecordingRouter(
 
       console.log(`[recording] Received audio: ${req.file.size} bytes, type: ${req.file.mimetype}`);
 
-      const assemblyClient = getClient();
-
-      const uploadUrl = await assemblyClient.files.upload(req.file.buffer);
-      console.log("[recording] Uploaded to AssemblyAI:", uploadUrl);
-
-      const transcript = await assemblyClient.transcripts.transcribe({
-        audio_url: uploadUrl,
-        speaker_labels: true,
-        speech_models: ["universal-3-pro"],
-      });
-
-      if (transcript.status === "error") {
-        console.error("[recording] Transcription error:", transcript.error);
-        res.status(500).json({ error: transcript.error });
+      const transcriber = getSpeakerTranscriber();
+      if (!transcriber.supportsSpeakerDiarization) {
+        // Fall back to plain transcription
+        const text = await transcriber.transcribe(req.file.buffer.toString("base64"), req.file.mimetype);
+        res.json({ id: "local", text, utterances: [{ speaker: "A", text, start: 0, end: 0 }] });
         return;
       }
-
+      const result = await transcriber.transcribeWithSpeakers(req.file.buffer, req.file.mimetype);
       res.json({
-        id: transcript.id,
-        text: transcript.text,
-        utterances: (transcript.utterances || []).map((u) => ({
-          speaker: u.speaker,
-          text: u.text,
-          start: u.start,
-          end: u.end,
-        })),
+        id: "transcript",
+        text: result.text,
+        utterances: result.utterances,
       });
     } catch (err: any) {
       console.error("[recording] Transcription failed:", err);

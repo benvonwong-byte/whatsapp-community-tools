@@ -25,7 +25,7 @@ export const config = {
   ollamaModel: process.env.OLLAMA_MODEL || "llama3",
   ollamaUrl: process.env.OLLAMA_URL || "http://localhost:11434",
   llmProvider: (process.env.LLM_PROVIDER || "") as LLMProviderName | "",
-  transcriptionProvider: (process.env.TRANSCRIPTION_PROVIDER || "assemblyai") as TranscriptionProviderName,
+  transcriptionProvider: (process.env.TRANSCRIPTION_PROVIDER || "") as TranscriptionProviderName | "",
   adminToken: process.env.ADMIN_TOKEN || crypto.randomBytes(32).toString("hex"),
   adminEmail: process.env.ADMIN_EMAIL || "",
   adminPassword: process.env.ADMIN_PASSWORD || "",

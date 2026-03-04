@@ -4,6 +4,8 @@ import { AnalyzeProgress } from "./analyzer";
 import { buildUpdateMessage } from "./updater";
 import { config } from "../../config";
 import { requireAdminRole } from "../../middleware/auth";
+import { getLLM } from "../../providers/llm";
+import type { ChatMessage, ToolDefinition } from "../../providers/llm";
 
 /** Parse a stored analysis into a frontend-friendly shape */
 function parseAnalysisForFrontend(a: RelationshipAnalysis) {
@@ -541,14 +543,8 @@ export function createRelationshipRouter(
       res.status(400).json({ error: "Missing 'messages' array" });
       return;
     }
-    if (!config.geminiApiKey) {
-      res.status(503).json({ error: "No GEMINI_API_KEY configured" });
-      return;
-    }
-
     try {
-      const { GoogleGenerativeAI, SchemaType } = await import("@google/generative-ai");
-      const genAI = new GoogleGenerativeAI(config.geminiApiKey);
+      const llm = getLLM();
 
       // Build tiered context (Tier 1 — always included)
       const allSummaries = store.getAllAnalysisSummaries();
@@ -605,51 +601,37 @@ INSTRUCTIONS:
 - Be warm, supportive, and insightful. Reference specific quotes when relevant.
 - Keep responses concise but meaningful.`;
 
-      // Create model with function calling
-      const model = genAI.getGenerativeModel({
-        model: "gemini-2.5-flash",
-        systemInstruction: systemPrompt,
-        tools: [{
-          functionDeclarations: [{
-            name: "fetch_messages",
-            description: "Fetch full message history for a specific date range. Use this when the user asks about conversations that happened more than 7 days ago.",
-            parameters: {
-              type: SchemaType.OBJECT,
-              properties: {
-                start_date: { type: SchemaType.STRING, description: "Start date in YYYY-MM-DD format" },
-                end_date: { type: SchemaType.STRING, description: "End date in YYYY-MM-DD format" },
-              },
-              required: ["start_date", "end_date"],
-            },
-          }],
-        }],
-      });
+      // Build tools
+      const tools: ToolDefinition[] = [{
+        name: "fetch_messages",
+        description: "Fetch full message history for a specific date range. Use this when the user asks about conversations that happened more than 7 days ago.",
+        parameters: {
+          type: "object",
+          properties: {
+            start_date: { type: "string", description: "Start date in YYYY-MM-DD format" },
+            end_date: { type: "string", description: "End date in YYYY-MM-DD format" },
+          },
+          required: ["start_date", "end_date"],
+        },
+      }];
 
-      // Build Gemini chat history from previous messages (cap at last 20)
+      // Convert chat messages (cap at 20)
       const trimmed = chatMessages.slice(-20);
-      const history: any[] = [];
-      for (const m of trimmed.slice(0, -1)) {
-        history.push({
-          role: m.role === "assistant" ? "model" : "user",
-          parts: [{ text: m.content }],
-        });
-      }
-
-      const chat = model.startChat({ history });
-      const lastMessage = trimmed[trimmed.length - 1];
+      const llmMessages: ChatMessage[] = trimmed.map((m: any) => ({
+        role: m.role as "user" | "assistant",
+        content: m.content,
+      }));
 
       // Function-calling loop (max 3 iterations)
-      let finalResponse = "";
-      let result = await chat.sendMessage(lastMessage.content);
+      let response = await llm.chat(llmMessages, tools, systemPrompt);
 
       for (let i = 0; i < 3; i++) {
-        const calls = result.response.functionCalls();
-        if (!calls || calls.length === 0) break;
+        if (response.toolCalls.length === 0) break;
 
-        const fc = calls[0];
+        const fc = response.toolCalls[0];
         if (fc.name === "fetch_messages") {
-          const { start_date, end_date } = fc.args as any;
-          const fetchedMessages = store.getMessagesByRange(start_date, end_date);
+          const { start_date, end_date } = fc.args as { start_date: string; end_date: string };
+          const fetchedMessages = store.getMessagesByRange(start_date as string, end_date as string);
           const fetchedText = fetchedMessages.map(m => {
             const date = new Date(m.timestamp * 1000).toISOString().split("T")[0];
             const time = new Date(m.timestamp * 1000).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" });
@@ -660,19 +642,22 @@ INSTRUCTIONS:
             return `[${date} ${time}] ${speaker}: ${content}`;
           }).join("\n");
 
-          // Send function response back to continue the conversation
-          result = await chat.sendMessage([{
-            functionResponse: {
-              name: "fetch_messages",
-              response: { result: fetchedText || "No messages found for this date range." },
-            },
-          }]);
+          // Add assistant turn with the function call reference
+          llmMessages.push({ role: "assistant", content: response.text || "" });
+
+          response = await llm.chatWithToolResult(
+            llmMessages,
+            fc,
+            fetchedText || "No messages found for this date range.",
+            tools,
+            systemPrompt
+          );
         } else {
           break;
         }
       }
 
-      finalResponse = result.response.text() || "I couldn't generate a response.";
+      const finalResponse = response.text || "I couldn't generate a response.";
       res.json({ response: finalResponse });
     } catch (err: any) {
       console.error("[relationship-chat] Error:", err?.message || err);

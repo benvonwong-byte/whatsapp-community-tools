@@ -1,8 +1,7 @@
 import { Router, Request, Response } from "express";
 import multer from "multer";
-import { AssemblyAI } from "assemblyai";
 import { FriendsStore } from "../friends/store";
-import { config } from "../../config";
+import { getSpeakerTranscriber } from "../../providers/transcription";
 
 export function createCallsRouter(store: FriendsStore): Router {
   const router = Router();
@@ -23,50 +22,30 @@ export function createCallsRouter(store: FriendsStore): Router {
     },
   });
 
-  let client: AssemblyAI | null = null;
-  function getClient(): AssemblyAI {
-    if (!client) {
-      if (!config.assemblyAiApiKey) throw new Error("ASSEMBLYAI_API_KEY not configured");
-      client = new AssemblyAI({ apiKey: config.assemblyAiApiKey });
-    }
-    return client;
-  }
-
   // POST /api/calls/transcribe — upload audio, get transcription with speaker labels
   router.post("/transcribe", upload.single("audio"), async (req: Request, res: Response) => {
     try {
       if (!req.file) { res.status(400).json({ error: "No audio file provided" }); return; }
 
       console.log(`[calls] Received audio: ${req.file.size} bytes, type: ${req.file.mimetype}`);
-      const assemblyClient = getClient();
 
-      const uploadUrl = await assemblyClient.files.upload(req.file.buffer);
-      console.log("[calls] Uploaded to AssemblyAI:", uploadUrl);
-
-      const transcript = await assemblyClient.transcripts.transcribe({
-        audio_url: uploadUrl,
-        speaker_labels: true,
-        speech_models: ["universal-3-pro"],
-      });
-
-      if (transcript.status === "error") {
-        console.error("[calls] Transcription error:", transcript.error);
-        res.status(500).json({ error: transcript.error });
+      const transcriber = getSpeakerTranscriber();
+      if (!transcriber.supportsSpeakerDiarization) {
+        const text = await transcriber.transcribe(req.file.buffer.toString("base64"), req.file.mimetype);
+        res.json({
+          assemblyai_id: "local",
+          text,
+          utterances: [{ speaker: "A", text, start: 0, end: 0 }],
+          duration: 0,
+        });
         return;
       }
-
-      const utterances = (transcript.utterances || []).map(u => ({
-        speaker: u.speaker,
-        text: u.text,
-        start: u.start,
-        end: u.end,
-      }));
-
+      const result = await transcriber.transcribeWithSpeakers(req.file.buffer, req.file.mimetype);
       res.json({
-        assemblyai_id: transcript.id,
-        text: transcript.text,
-        utterances,
-        duration: transcript.audio_duration || 0,
+        assemblyai_id: "transcript",
+        text: result.text,
+        utterances: result.utterances,
+        duration: result.duration || 0,
       });
     } catch (err: any) {
       console.error("[calls] Transcription failed:", err);

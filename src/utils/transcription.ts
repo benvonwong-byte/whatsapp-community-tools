@@ -1,33 +1,17 @@
-import { config } from "../config";
+import { getTranscriber } from "../providers/transcription";
 
 /**
- * Transcribe a voice note using Groq Whisper API.
- * WhatsApp voice notes are OGG/Opus — Groq accepts them directly.
+ * Transcribe a voice note using the configured transcription provider.
+ * Returns empty string if no provider is configured (graceful degradation).
  */
 export async function transcribeVoiceNote(base64Data: string, mimetype: string): Promise<string> {
-  if (!config.groqApiKey) {
-    console.log("[transcription] No GROQ_API_KEY set, skipping voice transcription");
-    return "";
+  try {
+    return await getTranscriber().transcribe(base64Data, mimetype);
+  } catch (err: any) {
+    if (err?.message?.includes("No transcription provider")) {
+      console.log("[transcription] No provider configured, skipping voice transcription");
+      return "";
+    }
+    throw err;
   }
-
-  const buffer = Buffer.from(base64Data, "base64");
-  const blob = new Blob([buffer], { type: mimetype || "audio/ogg" });
-
-  const form = new FormData();
-  form.append("file", blob, "voice.ogg");
-  form.append("model", "whisper-large-v3");
-  form.append("response_format", "text");
-
-  const res = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${config.groqApiKey}` },
-    body: form,
-  });
-
-  if (!res.ok) {
-    const errText = await res.text().catch(() => "");
-    throw new Error(`Groq transcription failed (${res.status}): ${errText}`);
-  }
-
-  return (await res.text()).trim();
 }

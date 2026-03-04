@@ -3,7 +3,7 @@ process.env.TZ = "America/New_York";
 
 import fs from "fs";
 import path from "path";
-import { config } from "./config";
+import { config, resolveProvider } from "./config";
 import { WhatsAppClient, BufferedMessage } from "./whatsapp";
 import { extractEvents } from "./extractor";
 import { verifyEventDates, fetchPageText } from "./verifier";
@@ -758,11 +758,12 @@ async function main() {
     appRouters,
   });
 
-  // WhatsApp + Gemini are optional — skip if no API key
-  if (!config.geminiApiKey) {
+  // WhatsApp + LLM are optional — skip if no provider configured
+  const llmProvider = resolveProvider();
+  if (llmProvider === "ollama" && !config.llmProvider) {
     console.log(
-      "\nNo GEMINI_API_KEY set. Running in web-only mode." +
-      "\nAdd your key to .env and restart to enable WhatsApp scanning." +
+      "\nNo LLM provider configured. Running in web-only mode." +
+      "\nSet LLM_PROVIDER and an API key in .env (or install Ollama) to enable WhatsApp scanning." +
       "\nYou can seed sample events at: POST http://localhost:" + config.port + "/api/seed\n"
     );
     return;

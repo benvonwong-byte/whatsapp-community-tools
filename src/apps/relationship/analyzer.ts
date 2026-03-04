@@ -1,15 +1,6 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { getLLM } from "../../providers/llm";
 import { config } from "../../config";
 import { RelationshipStore, RelationshipMessage } from "./store";
-
-let geminiModel: any = null;
-function getModel() {
-  if (!geminiModel) {
-    const genAI = new GoogleGenerativeAI(config.geminiApiKey);
-    geminiModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-  }
-  return geminiModel;
-}
 
 // ── Progress tracking ──
 
@@ -187,8 +178,8 @@ Respond with ONLY a JSON object (no markdown code fences):
 JSON:`;
 }
 
-/** Parse Gemini's JSON response */
-function parseGeminiJson(rawText: string, progress?: AnalyzeProgress): any {
+/** Parse LLM's JSON response with error recovery */
+function parseLLMJson(rawText: string, progress?: AnalyzeProgress): any {
   let jsonStr = rawText.trim();
   if (jsonStr.startsWith("```")) {
     jsonStr = jsonStr.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
@@ -223,12 +214,10 @@ async function analyzeDay(
   const conversation = formatConversation(messages);
   const truncated = conversation.slice(0, 12000);
 
-  logProgress(progress, `  Sending ${messages.length} messages for ${date} to Gemini...`);
+  logProgress(progress, `  Sending ${messages.length} messages for ${date} to LLM...`);
 
-  const model = getModel();
-  const result = await model.generateContent(buildAnalysisPrompt(truncated, messages.length, date));
-  const text = result.response.text();
-  const parsed = parseGeminiJson(text, progress);
+  const text = await getLLM().generateText(buildAnalysisPrompt(truncated, messages.length, date));
+  const parsed = parseLLMJson(text, progress);
 
   logProgress(progress, `  ${date}: score ${parsed.metrics.overallHealthScore}/100`);
 

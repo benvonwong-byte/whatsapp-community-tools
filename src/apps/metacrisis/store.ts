@@ -198,6 +198,26 @@ export class MetacrisisStore extends SettingsStore {
       CREATE INDEX IF NOT EXISTS idx_meta_topics_topic ON metacrisis_topics(topic);
     `);
 
+    // Monitored groups table — tracks which WhatsApp groups are being summarized
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS monitored_groups (
+        chat_name TEXT PRIMARY KEY,
+        announcement_chat TEXT DEFAULT '',
+        enabled INTEGER DEFAULT 1,
+        created_at INTEGER DEFAULT (unixepoch())
+      );
+    `);
+
+    // Migrate: if METACRISIS_CHAT_NAME is set and no groups are monitored, add it
+    if (config.metacrisisChatName) {
+      const existing = this.db.prepare(`SELECT COUNT(*) as count FROM monitored_groups`).get() as any;
+      if (existing.count === 0) {
+        this.db.prepare(
+          `INSERT OR IGNORE INTO monitored_groups (chat_name, announcement_chat) VALUES (?, ?)`
+        ).run(config.metacrisisChatName, config.metacrisisAnnouncementChat || "");
+      }
+    }
+
     // Migrate links table: add description and event_date columns if missing
     const linkCols = this.db.prepare("PRAGMA table_info(metacrisis_links)").all() as any[];
     if (linkCols.length > 0 && !linkCols.find((c: any) => c.name === "description")) {
@@ -650,6 +670,32 @@ export class MetacrisisStore extends SettingsStore {
       ORDER BY mention_count DESC
       LIMIT 10
     `).all(days) as any[];
+  }
+
+  // ── Monitored Groups ──
+
+  isGroupMonitored(chatName: string): boolean {
+    // Check exact match first, then case-insensitive contains match
+    const row = this.db.prepare(
+      `SELECT 1 FROM monitored_groups WHERE enabled = 1 AND (chat_name = ? OR LOWER(?) LIKE '%' || LOWER(chat_name) || '%')`
+    ).get(chatName, chatName);
+    return !!row;
+  }
+
+  getMonitoredGroups(): Array<{ chat_name: string; announcement_chat: string; enabled: number; created_at: number }> {
+    return this.db.prepare(
+      `SELECT * FROM monitored_groups ORDER BY chat_name`
+    ).all() as any[];
+  }
+
+  addMonitoredGroup(chatName: string, announcementChat?: string): void {
+    this.db.prepare(
+      `INSERT OR REPLACE INTO monitored_groups (chat_name, announcement_chat) VALUES (?, ?)`
+    ).run(chatName, announcementChat || "");
+  }
+
+  removeMonitoredGroup(chatName: string): void {
+    this.db.prepare(`DELETE FROM monitored_groups WHERE chat_name = ?`).run(chatName);
   }
 
 }

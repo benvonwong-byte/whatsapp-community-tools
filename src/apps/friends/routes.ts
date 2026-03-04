@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import crypto from "crypto";
 import { FriendsStore } from "./store";
+import { getLLM } from "../../providers/llm";
 
 export interface SendProgress {
   active: boolean;
@@ -912,16 +913,7 @@ export function createFriendsRouter(
 
     try {
       // Step 1: Parse query — extract exact phrases for message search
-      const { GoogleGenerativeAI } = await import("@google/generative-ai");
-      const { config } = await import("../../config");
-      if (!config.geminiApiKey) {
-        res.status(503).json({ error: "AI search requires GEMINI_API_KEY" });
-        return;
-      }
-      const genAI = new GoogleGenerativeAI(config.geminiApiKey);
-      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-
-      const parseResult = await model.generateContent(`You parse natural language search queries into structured search parameters for a personal contacts database.
+      const parsed = await getLLM().generateJSON<any>(`You parse natural language search queries into structured search parameters for a personal contacts database.
 
 CRITICAL RULES:
 - "phrases": Keep the user's EXACT wording. Do NOT generalize or paraphrase. "guest room" stays "guest room", NOT "housing" or "accommodation".
@@ -943,14 +935,6 @@ Examples:
 - "people who surf" → {"phrases": ["surf", "surfing"], "name": null, "explanation": "People who surf"}
 
 User query: "${query.replace(/"/g, '\\"')}"`);
-
-      const parseText = parseResult.response.text();
-      const jsonMatch = parseText.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        res.status(500).json({ error: "Failed to parse search query" });
-        return;
-      }
-      const parsed = JSON.parse(jsonMatch[0]);
       const phrases: string[] = parsed.phrases || [];
 
       // Step 2: Search using extracted parameters

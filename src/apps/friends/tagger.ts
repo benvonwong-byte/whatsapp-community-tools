@@ -1,6 +1,5 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { getLLM } from "../../providers/llm";
 import { FriendsStore } from "./store";
-import { config } from "../../config";
 
 const TAG_PROMPT = `Analyze these messages from a contact and extract rich context tags across multiple categories.
 
@@ -27,7 +26,7 @@ const CATEGORY_PREFIXES: Record<string, string> = {
   emotion: "emo:",
 };
 
-/** Parse Gemini response and save tags for a contact. Returns tag count. */
+/** Parse LLM response and save tags for a contact. Returns tag count. */
 function saveTags(store: FriendsStore, contactId: string, text: string, timestamp: number): number {
   const objMatch = text.match(/\{[\s\S]*\}/);
   if (!objMatch) return 0;
@@ -67,21 +66,13 @@ function saveTags(store: FriendsStore, contactId: string, text: string, timestam
 
 /**
  * Run tag extraction for contacts that have enough buffered messages.
- * Uses Gemini 2.5 Flash for cost efficiency.
  * Returns the number of contacts processed.
  */
 export async function runTagExtraction(store: FriendsStore): Promise<number> {
-  if (!config.geminiApiKey) {
-    console.log("[tagger] No GEMINI_API_KEY, skipping tag extraction.");
-    return 0;
-  }
-
   const readyContacts = store.getTagBufferContacts(20);
   if (readyContacts.length === 0) return 0;
 
   console.log(`[tagger] ${readyContacts.length} contact(s) ready for tag extraction.`);
-  const genAI = new GoogleGenerativeAI(config.geminiApiKey);
-  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
   let processed = 0;
   for (const { contact_id, message_count } of readyContacts) {
@@ -92,8 +83,7 @@ export async function runTagExtraction(store: FriendsStore): Promise<number> {
         .join("\n")
         .slice(0, 8000);
 
-      const result = await model.generateContent(TAG_PROMPT + messageText);
-      const text = result.response.text();
+      const text = await getLLM().generateText(TAG_PROMPT + messageText);
       const latestTs = messages[messages.length - 1]?.timestamp || Math.floor(Date.now() / 1000);
 
       const tagCount = saveTags(store, contact_id, text, latestTs);
@@ -121,11 +111,6 @@ export async function runDirectTagExtraction(
   getChats: () => Promise<any[]>,
   limit = 15
 ): Promise<number> {
-  if (!config.geminiApiKey) {
-    console.log("[direct-tagger] No GEMINI_API_KEY, skipping.");
-    return 0;
-  }
-
   // Find contacts without tags, sorted by most messages (most likely to have good data)
   const allContacts = store.getContactsWithStats();
   const untagged = allContacts
@@ -139,9 +124,6 @@ export async function runDirectTagExtraction(
   }
 
   console.log(`[direct-tagger] ${untagged.length} untagged contact(s) to process (of ${allContacts.length} total).`);
-
-  const genAI = new GoogleGenerativeAI(config.geminiApiKey);
-  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
   let whatsappChats: any[] | null = null;
   try {
@@ -181,8 +163,7 @@ export async function runDirectTagExtraction(
 
       const messageText = textBodies.join("\n").slice(0, 8000);
 
-      const result = await model.generateContent(TAG_PROMPT + messageText);
-      const text = result.response.text();
+      const text = await getLLM().generateText(TAG_PROMPT + messageText);
       const timestamp = Math.floor(Date.now() / 1000);
 
       const tagCount = saveTags(store, contact.id, text, timestamp);
@@ -190,14 +171,11 @@ export async function runDirectTagExtraction(
         console.log(`[direct-tagger] ${contact.name}: ${tagCount} tags from ${textBodies.length} messages`);
         processed++;
       }
-
-      // Small delay to avoid rate limiting
-      await new Promise(r => setTimeout(r, 1000));
     } catch (err: any) {
       console.error(`[direct-tagger] Failed for ${contact.name}:`, err?.message || err);
       // If we hit rate limits, back off
-      if (err?.message?.includes("429") || err?.message?.includes("quota")) {
-        console.log("[direct-tagger] Rate limited, waiting 10s...");
+      if (err?.message?.includes("429") || err?.message?.includes("quota") || err?.message?.includes("rate")) {
+        console.log("[direct-tagger] LLM rate limited, waiting 10s...");
         await new Promise(r => setTimeout(r, 10000));
       }
     }
@@ -234,16 +212,8 @@ Tags:
  * Processes tags in batches by category to stay within token limits.
  */
 export async function runTagConsolidation(store: FriendsStore): Promise<{ merged: number; deleted: number; remaining: number }> {
-  if (!config.geminiApiKey) {
-    console.log("[consolidate] No GEMINI_API_KEY, skipping.");
-    return { merged: 0, deleted: 0, remaining: 0 };
-  }
-
   const allTags = store.getAllTags();
   console.log(`[consolidate] Starting with ${allTags.length} tags.`);
-
-  const genAI = new GoogleGenerativeAI(config.geminiApiKey);
-  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
   // Group tags by category prefix
   const categories: Record<string, typeof allTags> = { topic: [], loc: [], ctx: [], tone: [], emo: [] };
@@ -267,8 +237,7 @@ export async function runTagConsolidation(store: FriendsStore): Promise<{ merged
       const tagList = chunk.map(t => `${t.name} (${t.contact_count})`).join("\n");
 
       try {
-        const result = await model.generateContent(CONSOLIDATE_PROMPT + tagList);
-        const text = result.response.text();
+        const text = await getLLM().generateText(CONSOLIDATE_PROMPT + tagList);
         const jsonMatch = text.match(/\[[\s\S]*\]/);
         if (!jsonMatch) continue;
 
@@ -302,8 +271,6 @@ export async function runTagConsolidation(store: FriendsStore): Promise<{ merged
           }
         }
 
-        // Small delay to avoid rate limiting
-        await new Promise(r => setTimeout(r, 2000));
       } catch (err: any) {
         console.error(`[consolidate][${cat}] Failed:`, err?.message || err);
         if (err?.message?.includes("429")) {

@@ -1,50 +1,7 @@
-import { GoogleGenerativeAI, GenerateContentResult } from "@google/generative-ai";
+import { getLLM } from "./providers/llm";
 import { config } from "./config";
 import { ExtractedEvent } from "./extractor";
 import { EventStore, StoredEvent } from "./store";
-
-let geminiModel: any = null;
-function getModel() {
-  if (!geminiModel) {
-    const genAI = new GoogleGenerativeAI(config.geminiApiKey);
-    geminiModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-  }
-  return geminiModel;
-}
-
-// ── Rate-limited Gemini wrapper ──
-// Enforces a minimum interval between calls to stay within rate limits.
-let lastGeminiCall = 0;
-const MIN_GEMINI_INTERVAL = 2_000; // 2s between calls (Gemini has higher limits than Claude)
-
-async function rateLimitedGemini(
-  prompt: string,
-  retries = 3
-): Promise<string> {
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    // Enforce minimum interval between calls
-    const now = Date.now();
-    const wait = MIN_GEMINI_INTERVAL - (now - lastGeminiCall);
-    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-    lastGeminiCall = Date.now();
-
-    try {
-      const model = getModel();
-      const result: GenerateContentResult = await model.generateContent(prompt);
-      return result.response.text();
-    } catch (err: any) {
-      const status = err?.status || err?.httpStatusCode;
-      if (status === 429 && attempt < retries) {
-        const backoff = Math.min(30_000, 10_000 * (attempt + 1));
-        console.log(`[verifier] Rate limited (429), retrying in ${(backoff / 1000).toFixed(0)}s... (attempt ${attempt + 1}/${retries})`);
-        await new Promise((r) => setTimeout(r, backoff));
-        continue;
-      }
-      throw err;
-    }
-  }
-  throw new Error("Rate limit retries exhausted");
-}
 
 /** Strip HTML tags and extract readable text from a page. */
 function htmlToText(html: string): string {
@@ -160,7 +117,7 @@ interface VerifiedFields {
   name: string | null; // only set if page has a clearly better name
 }
 
-/** Ask Gemini to verify/correct event date from page content. */
+/** Ask LLM to verify/correct event date from page content. */
 async function verifyFromPage(
   event: ExtractedEvent,
   pageText: string
@@ -209,14 +166,7 @@ Set "changed" to true ONLY if you found different information on the page. If th
 JSON:`;
 
   try {
-    const text = await rateLimitedGemini(prompt);
-
-    let jsonStr = text.trim();
-    if (jsonStr.startsWith("```")) {
-      jsonStr = jsonStr.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
-    }
-
-    const parsed = JSON.parse(jsonStr);
+    const parsed = await getLLM().generateJSON<any>(prompt);
 
     if (!parsed.changed) return null; // No corrections needed
 
@@ -229,7 +179,7 @@ JSON:`;
       name: parsed.name || null,
     };
   } catch (err: any) {
-    console.log(`[verifier] Gemini verification failed for "${event.name}": ${err?.message || err}`);
+    console.log(`[verifier] LLM verification failed for "${event.name}": ${err?.message || err}`);
     return null;
   }
 }
@@ -346,13 +296,7 @@ Respond with ONLY a JSON object (no markdown):
 JSON:`;
 
   try {
-    const text = await rateLimitedGemini(prompt);
-    let jsonStr = text.trim();
-    if (jsonStr.startsWith("```")) {
-      jsonStr = jsonStr.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
-    }
-
-    const parsed = JSON.parse(jsonStr);
+    const parsed = await getLLM().generateJSON<any>(prompt);
 
     // Not in NYC area — delete
     if (parsed.isNYCArea === false) {
@@ -387,7 +331,7 @@ async function verifyStoredEventUrl(
     return { action: "delete" };
   }
 
-  // URL returned content — ask Gemini to verify
+  // URL returned content — ask LLM to verify
   const today = new Date().toISOString().split("T")[0];
   const prompt = `You are verifying an event by checking its event page.
 
@@ -431,13 +375,7 @@ RULES:
 JSON:`;
 
   try {
-    const text = await rateLimitedGemini(prompt);
-    let jsonStr = text.trim();
-    if (jsonStr.startsWith("```")) {
-      jsonStr = jsonStr.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
-    }
-
-    const parsed = JSON.parse(jsonStr);
+    const parsed = await getLLM().generateJSON<any>(prompt);
 
     // Page doesn't have event info — delete the event
     if (!parsed.hasEventInfo) {
@@ -467,7 +405,7 @@ JSON:`;
       },
     };
   } catch (err: any) {
-    console.log(`[verify-all] URL verification failed for "${event.name}": ${err?.message || err}`);
+    console.log(`[verify-all] LLM URL verification failed for "${event.name}": ${err?.message || err}`);
     return { action: "keep" }; // On error, don't delete
   }
 }
@@ -526,7 +464,7 @@ export interface DedupProgress {
   currentEvent?: string;
 }
 
-/** Use Gemini AI to identify duplicate events within a group. Returns arrays of duplicate indices. */
+/** Use AI to identify duplicate events within a group. Returns arrays of duplicate indices. */
 async function findDuplicatesAI(events: StoredEvent[]): Promise<number[][]> {
   const names = events.map((e, i) => `${i}: ${e.name}${e.location ? " @ " + e.location : ""}`).join("\n");
   const prompt = `You are a duplicate event detector. Given this numbered list of events happening on the same or adjacent dates, identify which ones are duplicates (same event listed multiple times with slightly different names or formatting).
@@ -541,17 +479,15 @@ Example: [[0, 3], [1, 5, 7]] means events 0&3 are duplicates, and events 1,5,7 a
 JSON:`;
 
   try {
-    const text = await rateLimitedGemini(prompt);
-    const cleaned = text.replace(/```json\s*/g, "").replace(/```/g, "").trim();
-    const parsed = JSON.parse(cleaned);
+    const parsed = await getLLM().generateJSON<number[][]>(prompt);
     if (Array.isArray(parsed)) return parsed.filter((g: any) => Array.isArray(g) && g.length >= 2);
   } catch (err: any) {
-    console.log(`[dedup-ai] Gemini parse error: ${err?.message || err}`);
+    console.log(`[dedup-ai] LLM parse error: ${err?.message || err}`);
   }
   return [];
 }
 
-/** AI-powered deduplication: uses Gemini to semantically identify duplicate events. */
+/** AI-powered deduplication: uses LLM to semantically identify duplicate events. */
 export async function deduplicateEvents(store: EventStore, progress: DedupProgress): Promise<number> {
   const events = store.getAllEvents();
   progress.total = events.length;
@@ -560,7 +496,7 @@ export async function deduplicateEvents(store: EventStore, progress: DedupProgre
   progress.phase = "running";
   progress.active = true;
 
-  console.log(`[dedup-ai] Scanning ${events.length} events for duplicates using Gemini AI...`);
+  console.log(`[dedup-ai] Scanning ${events.length} events for duplicates using AI...`);
 
   const deleted = new Set<string>();
 
@@ -639,7 +575,7 @@ export async function deduplicateEvents(store: EventStore, progress: DedupProgre
   return deleted.size;
 }
 
-/** AI-powered semantic search: uses Gemini to find events matching a query. */
+/** AI-powered semantic search: uses LLM to find events matching a query. */
 export async function searchEventsAI(store: EventStore, query: string): Promise<Array<{ hash: string; score: number }>> {
   const events = store.getAllEvents();
   const today = new Date().toISOString().slice(0, 10);
@@ -664,16 +600,14 @@ Consider semantic meaning — e.g. "healing" matches sound baths, reiki, meditat
 JSON:`;
 
   try {
-    const text = await rateLimitedGemini(prompt);
-    const cleaned = text.replace(/```json\s*/g, "").replace(/```/g, "").trim();
-    const parsed = JSON.parse(cleaned);
+    const parsed = await getLLM().generateJSON<any[]>(prompt);
     if (Array.isArray(parsed)) {
       return parsed
         .filter((r: any) => typeof r.index === "number" && typeof r.score === "number" && futureEvents[r.index])
         .map((r: any) => ({ hash: futureEvents[r.index].hash, score: r.score }));
     }
   } catch (err: any) {
-    console.log(`[search-ai] Gemini parse error: ${err?.message || err}`);
+    console.log(`[search-ai] LLM parse error: ${err?.message || err}`);
   }
   return [];
 }
@@ -686,7 +620,7 @@ function isLikelyOnline(event: StoredEvent): boolean {
   return /\b(zoom|online|virtual|remote|webinar|livestream|live stream)\b/.test(loc);
 }
 
-/** For events with no URL and insufficient source text, ask Gemini about location. */
+/** For events with no URL and insufficient source text, ask LLM about location. */
 async function checkLocationNYC(event: StoredEvent): Promise<boolean> {
   if (isLikelyOnline(event)) return true;
 
@@ -700,7 +634,7 @@ Description: ${(event.description || "").slice(0, 500)}
 Answer with ONLY "yes" or "no".`;
 
   try {
-    const text = await rateLimitedGemini(prompt);
+    const text = await getLLM().generateText(prompt);
     return text.trim().toLowerCase().startsWith("yes");
   } catch {
     return true; // On error, keep the event
@@ -726,7 +660,7 @@ export async function verifyAllStoredEvents(
 
   console.log(`[verify-all] Starting verification of ${events.length} events...`);
 
-  // Worker pool — concurrency can be higher with Gemini's rate limits
+  // Worker pool — concurrency managed by provider's rate limiter
   const concurrency = 3;
   let cursor = 0;
 
