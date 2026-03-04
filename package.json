@@ -9,11 +9,17 @@
     "build": "tsc",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": ["whatsapp", "events", "community", "nyc"],
+  "keywords": [
+    "whatsapp",
+    "events",
+    "community",
+    "nyc"
+  ],
   "author": "Benjamin Von Wong",
   "license": "MIT",
   "type": "commonjs",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
     "@google/generative-ai": "^0.24.1",
     "assemblyai": "^4.8.0",
     "better-sqlite3": "^12.6.2",

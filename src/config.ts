@@ -16,8 +16,16 @@ function parseJsonRecord(val: string | undefined): Record<string, string> {
   try { return JSON.parse(val); } catch { return {}; }
 }
 
+export type LLMProviderName = "gemini" | "anthropic" | "ollama";
+export type TranscriptionProviderName = "assemblyai" | "groq";
+
 export const config = {
   geminiApiKey: process.env.GEMINI_API_KEY || "",
+  anthropicApiKey: process.env.ANTHROPIC_API_KEY || "",
+  ollamaModel: process.env.OLLAMA_MODEL || "llama3",
+  ollamaUrl: process.env.OLLAMA_URL || "http://localhost:11434",
+  llmProvider: (process.env.LLM_PROVIDER || "") as LLMProviderName | "",
+  transcriptionProvider: (process.env.TRANSCRIPTION_PROVIDER || "assemblyai") as TranscriptionProviderName,
   adminToken: process.env.ADMIN_TOKEN || crypto.randomBytes(32).toString("hex"),
   adminEmail: process.env.ADMIN_EMAIL || "",
   adminPassword: process.env.ADMIN_PASSWORD || "",
@@ -52,8 +60,48 @@ export const config = {
   analysisHour: parseInt(process.env.ANALYSIS_HOUR || "0", 10),
 };
 
+/**
+ * Auto-detect which LLM provider to use based on available API keys.
+ *
+ * Priority:
+ *  1. Explicit `LLM_PROVIDER` env var
+ *  2. If ANTHROPIC_API_KEY is set → "anthropic"
+ *  3. If GEMINI_API_KEY is set   → "gemini"
+ *  4. Fall back to "ollama" (local, no key needed)
+ */
+export function resolveProvider(): LLMProviderName {
+  if (config.llmProvider) {
+    return config.llmProvider as LLMProviderName;
+  }
+  if (config.anthropicApiKey) return "anthropic";
+  if (config.geminiApiKey) return "gemini";
+  return "ollama";
+}
+
 export function validateConfig() {
-  if (!config.geminiApiKey) {
-    throw new Error("GEMINI_API_KEY is required. Set it in your .env file.");
+  const provider = resolveProvider();
+
+  switch (provider) {
+    case "gemini":
+      if (!config.geminiApiKey) {
+        throw new Error(
+          "GEMINI_API_KEY is required when using the Gemini provider. Set it in your .env file.",
+        );
+      }
+      break;
+    case "anthropic":
+      if (!config.anthropicApiKey) {
+        throw new Error(
+          "ANTHROPIC_API_KEY is required when using the Anthropic provider. Set it in your .env file.",
+        );
+      }
+      break;
+    case "ollama":
+      // No API key needed for Ollama — just needs a running server
+      break;
+    default:
+      throw new Error(
+        `Unknown LLM_PROVIDER "${provider}". Use "gemini", "anthropic", or "ollama".`,
+      );
   }
 }
