@@ -3,8 +3,9 @@ process.env.TZ = "America/New_York";
 
 import fs from "fs";
 import path from "path";
-import { config, resolveProvider } from "./config";
+import { config, resolveProvider, applyDbSettings } from "./config";
 import { WhatsAppClient, BufferedMessage } from "./whatsapp";
+import { AppSettingsStore } from "./utils/app-settings";
 import { extractEvents } from "./extractor";
 import { verifyEventDates, fetchPageText } from "./verifier";
 import { startServer, BackfillProgress } from "./server";
@@ -167,6 +168,14 @@ async function main() {
   // Always start the store and web server first
   const store = new EventStore();
   console.log("SQLite store initialized.");
+
+  // Load LLM config from DB (overrides .env if present)
+  const appSettingsStore = new AppSettingsStore();
+  const dbLLMConfig = appSettingsStore.getLLMConfig();
+  if (dbLLMConfig) {
+    applyDbSettings(dbLLMConfig);
+    console.log(`[setup] Loaded LLM config from DB: ${dbLLMConfig.provider}`);
+  }
 
   const whatsapp = new WhatsAppClient();
 
@@ -749,6 +758,7 @@ async function main() {
 
   startServer({
     store,
+    appSettingsStore,
     statusChecker: () => ({ whatsappConnected: whatsapp.isConnected() }),
     qrCodeGetter: () => whatsapp.getQrCode(),
     backfillTrigger: runBackfill,

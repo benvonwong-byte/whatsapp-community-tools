@@ -39,6 +39,15 @@ export function getLLM(): LLMProvider {
       cached = new AnthropicProvider(config.anthropicApiKey);
       break;
     }
+    case "openai": {
+      const { OpenAIProvider } = require("./openai") as typeof import("./openai");
+      cached = new OpenAIProvider(
+        config.openaiApiKey,
+        config.openaiBaseUrl || undefined,
+        config.openaiModel,
+      );
+      break;
+    }
     case "ollama": {
       const { OllamaProvider } = require("./ollama") as typeof import("./ollama");
       cached = new OllamaProvider(config.ollamaModel, config.ollamaUrl);
@@ -47,7 +56,7 @@ export function getLLM(): LLMProvider {
     default:
       throw new Error(
         `Unknown LLM provider "${provider}". ` +
-          `Set LLM_PROVIDER to "gemini", "anthropic", or "ollama".`,
+          `Set LLM_PROVIDER to "gemini", "anthropic", "openai", or "ollama".`,
       );
   }
 

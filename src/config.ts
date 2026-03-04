@@ -16,12 +16,15 @@ function parseJsonRecord(val: string | undefined): Record<string, string> {
   try { return JSON.parse(val); } catch { return {}; }
 }
 
-export type LLMProviderName = "gemini" | "anthropic" | "ollama";
+export type LLMProviderName = "gemini" | "anthropic" | "openai" | "ollama";
 export type TranscriptionProviderName = "assemblyai" | "groq";
 
 export const config = {
   geminiApiKey: process.env.GEMINI_API_KEY || "",
   anthropicApiKey: process.env.ANTHROPIC_API_KEY || "",
+  openaiApiKey: process.env.OPENAI_API_KEY || "",
+  openaiBaseUrl: process.env.OPENAI_BASE_URL || "",
+  openaiModel: process.env.OPENAI_MODEL || "gpt-4o-mini",
   ollamaModel: process.env.OLLAMA_MODEL || "llama3",
   ollamaUrl: process.env.OLLAMA_URL || "http://localhost:11434",
   llmProvider: (process.env.LLM_PROVIDER || "") as LLMProviderName | "",
@@ -75,6 +78,7 @@ export function resolveProvider(): LLMProviderName {
   }
   if (config.anthropicApiKey) return "anthropic";
   if (config.geminiApiKey) return "gemini";
+  if (config.openaiApiKey) return "openai";
   return "ollama";
 }
 
@@ -96,12 +100,62 @@ export function validateConfig() {
         );
       }
       break;
+    case "openai":
+      if (!config.openaiApiKey) {
+        throw new Error(
+          "OPENAI_API_KEY is required when using the OpenAI provider. Set it in your .env file or configure via /setup.",
+        );
+      }
+      break;
     case "ollama":
       // No API key needed for Ollama — just needs a running server
       break;
     default:
       throw new Error(
-        `Unknown LLM_PROVIDER "${provider}". Use "gemini", "anthropic", or "ollama".`,
+        `Unknown LLM_PROVIDER "${provider}". Use "gemini", "anthropic", "openai", or "ollama".`,
       );
+  }
+}
+
+/**
+ * Apply LLM settings from the database to the runtime config object.
+ * DB settings override env vars — call this before resolveProvider().
+ */
+export function applyDbSettings(dbConfig: {
+  provider: string;
+  apiKey: string;
+  baseUrl?: string;
+  model?: string;
+}): void {
+  const p = dbConfig.provider;
+
+  switch (p) {
+    case "anthropic":
+      config.anthropicApiKey = dbConfig.apiKey;
+      config.llmProvider = "anthropic";
+      break;
+    case "gemini":
+      config.geminiApiKey = dbConfig.apiKey;
+      config.llmProvider = "gemini";
+      break;
+    case "openai":
+    case "xai":
+    case "deepseek":
+    case "groq-llm":
+    case "together":
+    case "mistral":
+    case "openrouter":
+    case "qwen":
+      // All OpenAI-compatible providers route through the openai adapter
+      config.openaiApiKey = dbConfig.apiKey;
+      config.openaiBaseUrl = dbConfig.baseUrl || "";
+      config.openaiModel = dbConfig.model || "gpt-4o-mini";
+      config.llmProvider = "openai";
+      break;
+    case "ollama":
+      config.ollamaModel = dbConfig.model || "llama3";
+      if (dbConfig.baseUrl) config.ollamaUrl = dbConfig.baseUrl;
+      config.llmProvider = "ollama";
+      break;
   }
 }

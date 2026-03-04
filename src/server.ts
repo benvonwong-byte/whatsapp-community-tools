@@ -2,12 +2,14 @@ import express from "express";
 import rateLimit from "express-rate-limit";
 import fs from "fs";
 import path from "path";
-import { config } from "./config";
+import { config, applyDbSettings, resolveProvider } from "./config";
 import { EventStore } from "./store";
 import { categories } from "./categories";
 import { verifyAllStoredEvents, VerifyProgress, deduplicateEvents, DedupProgress, searchEventsAI } from "./verifier";
 import { requireAdmin, requireAuth, timingSafeEqual } from "./middleware/auth";
 import { markProgressDone, markProgressError } from "./utils/progress";
+import { AppSettingsStore } from "./utils/app-settings";
+import { resetLLM } from "./providers/llm";
 
 export interface BackfillProgress {
   active: boolean;
@@ -50,6 +52,7 @@ console.error = (...args: any[]) => { captureLog("error", args); origError(...ar
 
 export interface ServerOptions {
   store: EventStore;
+  appSettingsStore?: AppSettingsStore;
   statusChecker?: () => { whatsappConnected: boolean };
   qrCodeGetter?: () => string | null;
   backfillTrigger?: (hours: number) => Promise<number>;
@@ -94,7 +97,84 @@ export function startServer(opts: ServerOptions): void {
     next();
   });
 
+  // ── Setup / onboarding ──
+
+  const appSettings = opts.appSettingsStore;
+
+  // Helper: is LLM configured via .env OR DB?
+  const isLLMReady = (): boolean => {
+    if (config.llmProvider) return true;
+    if (config.anthropicApiKey || config.geminiApiKey || config.openaiApiKey) return true;
+    if (appSettings?.isLLMConfigured()) return true;
+    return false;
+  };
+
+  // Auto-redirect to /setup.html on first run when no LLM is configured
+  app.use((req, res, next) => {
+    if (
+      req.method === "GET" &&
+      (req.path === "/" || req.path === "/index.html" || req.path === "/hub.html") &&
+      !isLLMReady()
+    ) {
+      res.redirect("/setup.html");
+      return;
+    }
+    next();
+  });
+
   app.use(express.static(path.resolve(process.cwd(), "public")));
+
+  // Setup status: returns whether LLM is configured (never exposes API keys)
+  app.get("/api/setup/status", (_req, res) => {
+    const dbConfig = appSettings?.getLLMConfig();
+    const envProvider = resolveProvider();
+    const configured = isLLMReady();
+
+    res.json({
+      configured,
+      provider: configured ? (dbConfig?.provider || envProvider) : null,
+      source: dbConfig ? "database" : (configured ? "env" : null),
+    });
+  });
+
+  // Save LLM config: unauthenticated on first run, admin-only after
+  app.post("/api/setup/llm", (req, res, next) => {
+    // Allow unauthenticated access only when no LLM is configured
+    if (!isLLMReady()) {
+      next();
+      return;
+    }
+    // Otherwise require admin auth
+    requireAdmin(req, res, next);
+  }, (req, res) => {
+    if (!appSettings) {
+      res.status(503).json({ error: "App settings store not available" });
+      return;
+    }
+
+    const { provider, apiKey, baseUrl, model } = req.body;
+    if (!provider) {
+      res.status(400).json({ error: "Missing provider" });
+      return;
+    }
+    // Ollama doesn't need an API key
+    if (provider !== "ollama" && !apiKey) {
+      res.status(400).json({ error: "Missing apiKey" });
+      return;
+    }
+
+    // Save to DB
+    appSettings.saveLLMConfig({ provider, apiKey: apiKey || "", baseUrl, model });
+
+    // Apply to runtime config
+    applyDbSettings({ provider, apiKey: apiKey || "", baseUrl, model });
+
+    // Reset cached LLM so next getLLM() picks up new config
+    resetLLM();
+
+    console.log(`[setup] LLM provider configured: ${provider}`);
+    res.json({ ok: true, provider });
+  });
 
   // ── Public endpoints (read-only, safe for anyone) ──
 

@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Setup - Choose LLM Provider</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%E2%9A%99%EF%B8%8F</text></svg>">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --bg: #121212;
+      --surface: #1e1e1e;
+      --surface2: #2a2a2a;
+      --border: #333;
+      --text: #e0e0e0;
+      --text-dim: #888;
+      --accent: #4fc3f7;
+      --green: #00b894;
+      --yellow: #fdcb6e;
+      --red: #d63031;
+      --pink: #e84393;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      min-height: 100dvh;
+      padding: 24px;
+      -webkit-font-smoothing: antialiased;
+    }
+    .container {
+      max-width: 720px;
+      margin: 0 auto;
+    }
+    h1 {
+      font-size: 24px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      margin-bottom: 6px;
+      text-align: center;
+    }
+    .subtitle {
+      font-size: 13px;
+      color: var(--text-dim);
+      margin-bottom: 32px;
+      text-align: center;
+    }
+    .category-label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--text-dim);
+      margin: 24px 0 12px;
+    }
+    .category-label:first-of-type { margin-top: 0; }
+    .provider-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .provider-card {
+      background: var(--surface);
+      border: 2px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      cursor: pointer;
+      transition: all 0.2s;
+      position: relative;
+    }
+    .provider-card:hover {
+      border-color: var(--accent);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+    }
+    .provider-card.selected {
+      border-color: var(--accent);
+      background: #1a2a3a;
+    }
+    .provider-card .name {
+      font-size: 15px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .provider-card .detail {
+      font-size: 11px;
+      color: var(--text-dim);
+      line-height: 1.4;
+    }
+    .provider-card .pricing {
+      font-size: 11px;
+      color: var(--green);
+      margin-top: 6px;
+      font-weight: 600;
+    }
+    .provider-card .pricing.free { color: var(--green); }
+    .provider-card .pricing.paid { color: var(--yellow); }
+    .provider-card .pricing.premium { color: var(--pink); }
+
+    /* Config form */
+    .config-section {
+      margin-top: 32px;
+      display: none;
+    }
+    .config-section.visible { display: block; }
+    .config-section h2 {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 16px;
+    }
+    .form-group {
+      margin-bottom: 16px;
+    }
+    .form-group label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-dim);
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .input-wrap {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+    .input-wrap input {
+      width: 100%;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      color: var(--text);
+      font-size: 14px;
+      font-family: "SF Mono", "Fira Code", monospace;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .input-wrap input:focus {
+      border-color: var(--accent);
+    }
+    .input-wrap input[readonly] {
+      color: var(--text-dim);
+      cursor: default;
+    }
+    .toggle-vis {
+      position: absolute;
+      right: 8px;
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      cursor: pointer;
+      font-size: 13px;
+      padding: 4px 8px;
+    }
+    .toggle-vis:hover { color: var(--text); }
+    .help-text {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-top: 4px;
+      line-height: 1.5;
+    }
+    .help-text a { color: var(--accent); text-decoration: none; }
+    .help-text a:hover { text-decoration: underline; }
+    .btn-save {
+      display: block;
+      width: 100%;
+      padding: 14px;
+      background: var(--accent);
+      color: #000;
+      font-size: 15px;
+      font-weight: 700;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      margin-top: 24px;
+      transition: opacity 0.2s;
+    }
+    .btn-save:hover { opacity: 0.9; }
+    .btn-save:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .error-msg {
+      color: var(--red);
+      font-size: 13px;
+      margin-top: 8px;
+      display: none;
+    }
+    .already-configured {
+      text-align: center;
+      padding: 40px 0;
+      display: none;
+    }
+    .already-configured .check {
+      font-size: 48px;
+      margin-bottom: 12px;
+    }
+    .already-configured a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    .reconfigure-link {
+      text-align: center;
+      margin-top: 12px;
+      font-size: 12px;
+    }
+    .reconfigure-link a {
+      color: var(--text-dim);
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .reconfigure-link a:hover { color: var(--text); }
+    @media (max-width: 500px) {
+      .provider-grid { grid-template-columns: 1fr; }
+      h1 { font-size: 20px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Welcome! Choose an LLM Provider</h1>
+    <div class="subtitle">Select the AI model provider to power event extraction and analysis</div>
+
+    <!-- Already configured state -->
+    <div class="already-configured" id="already-configured">
+      <div class="check">&#x2705;</div>
+      <div style="font-size:15px;margin-bottom:8px">LLM provider is configured</div>
+      <div style="font-size:13px;color:var(--text-dim);margin-bottom:16px">
+        Currently using: <strong id="current-provider"></strong>
+      </div>
+      <a href="/hub.html">Go to Dashboard &rarr;</a>
+      <div class="reconfigure-link"><a id="reconfigure-link">Reconfigure provider</a></div>
+    </div>
+
+    <!-- Provider picker -->
+    <div id="picker-section">
+      <div class="category-label">Free / Cheapest</div>
+      <div class="provider-grid">
+        <div class="provider-card" data-provider="deepseek" data-base-url="https://api.deepseek.com/v1" data-model="deepseek-chat">
+          <div class="name">DeepSeek</div>
+          <div class="detail">DeepSeek V3 &mdash; strong reasoning, very low cost</div>
+          <div class="pricing free">$0.27/M input, $1.10/M output</div>
+        </div>
+        <div class="provider-card" data-provider="groq-llm" data-base-url="https://api.groq.com/openai/v1" data-model="llama-3.3-70b-versatile">
+          <div class="name">Groq</div>
+          <div class="detail">Llama 3.3 70B &mdash; extremely fast inference</div>
+          <div class="pricing free">Free tier available</div>
+        </div>
+        <div class="provider-card" data-provider="gemini" data-base-url="" data-model="">
+          <div class="name">Google Gemini</div>
+          <div class="detail">Gemini 2.5 Flash &mdash; large context, multimodal</div>
+          <div class="pricing free">Free tier: 15 req/min</div>
+        </div>
+      </div>
+
+      <div class="category-label">Best Value</div>
+      <div class="provider-grid">
+        <div class="provider-card" data-provider="openai" data-base-url="" data-model="gpt-4o-mini">
+          <div class="name">OpenAI GPT-4o mini</div>
+          <div class="detail">Fast, capable, tool-calling support</div>
+          <div class="pricing paid">$0.15/M input, $0.60/M output</div>
+        </div>
+        <div class="provider-card" data-provider="xai" data-base-url="https://api.x.ai/v1" data-model="grok-3-mini-fast">
+          <div class="name">xAI Grok</div>
+          <div class="detail">Grok 3 Mini &mdash; fast reasoning, generous limits</div>
+          <div class="pricing paid">$0.30/M input, $0.50/M output</div>
+        </div>
+      </div>
+
+      <div class="category-label">Premium</div>
+      <div class="provider-grid">
+        <div class="provider-card" data-provider="anthropic" data-base-url="" data-model="">
+          <div class="name">Anthropic Claude</div>
+          <div class="detail">Claude Sonnet &mdash; excellent reasoning and safety</div>
+          <div class="pricing premium">$3/M input, $15/M output</div>
+        </div>
+        <div class="provider-card" data-provider="openai" data-base-url="" data-model="gpt-4o">
+          <div class="name">OpenAI GPT-4o</div>
+          <div class="detail">Flagship model &mdash; best overall capability</div>
+          <div class="pricing premium">$2.50/M input, $10/M output</div>
+        </div>
+      </div>
+
+      <div class="category-label">Local</div>
+      <div class="provider-grid">
+        <div class="provider-card" data-provider="ollama" data-base-url="" data-model="llama3">
+          <div class="name">Ollama (Local)</div>
+          <div class="detail">Run models locally &mdash; free, private, no API key needed</div>
+          <div class="pricing free">Free (requires local install)</div>
+        </div>
+      </div>
+
+      <div class="category-label">Meta-Provider</div>
+      <div class="provider-grid">
+        <div class="provider-card" data-provider="openrouter" data-base-url="https://openrouter.ai/api/v1" data-model="openai/gpt-4o-mini">
+          <div class="name">OpenRouter</div>
+          <div class="detail">One API key &rarr; access all models (OpenAI, Claude, Llama, etc.)</div>
+          <div class="pricing paid">Pay-per-use, model pricing varies</div>
+        </div>
+        <div class="provider-card" data-provider="together" data-base-url="https://api.together.xyz/v1" data-model="meta-llama/Llama-3.3-70B-Instruct-Turbo">
+          <div class="name">Together.ai</div>
+          <div class="detail">Open-source models at scale &mdash; Llama, Mistral, and more</div>
+          <div class="pricing paid">From $0.20/M tokens</div>
+        </div>
+        <div class="provider-card" data-provider="mistral" data-base-url="https://api.mistral.ai/v1" data-model="mistral-small-latest">
+          <div class="name">Mistral</div>
+          <div class="detail">European AI lab &mdash; efficient, multilingual models</div>
+          <div class="pricing paid">From $0.10/M input tokens</div>
+        </div>
+      </div>
+
+      <!-- Config form -->
+      <div class="config-section" id="config-section">
+        <h2 id="config-title">Configure Provider</h2>
+
+        <div class="form-group" id="apikey-group">
+          <label for="apikey">API Key</label>
+          <div class="input-wrap">
+            <input type="password" id="apikey" placeholder="sk-..." autocomplete="off" spellcheck="false">
+            <button class="toggle-vis" id="toggle-apikey" type="button">Show</button>
+          </div>
+          <div class="help-text" id="apikey-help"></div>
+        </div>
+
+        <div class="form-group" id="baseurl-group" style="display:none">
+          <label for="baseurl">Base URL</label>
+          <div class="input-wrap">
+            <input type="text" id="baseurl" readonly>
+          </div>
+          <div class="help-text">Pre-configured for this provider</div>
+        </div>
+
+        <div class="form-group" id="model-group" style="display:none">
+          <label for="model">Model</label>
+          <div class="input-wrap">
+            <input type="text" id="model">
+          </div>
+          <div class="help-text">Default model (you can change this later)</div>
+        </div>
+
+        <button class="btn-save" id="btn-save" disabled>Save &amp; Continue</button>
+        <div class="error-msg" id="error-msg"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const SIGNUP_URLS = {
+      deepseek: "https://platform.deepseek.com/",
+      "groq-llm": "https://console.groq.com/",
+      gemini: "https://aistudio.google.com/apikey",
+      openai: "https://platform.openai.com/api-keys",
+      xai: "https://console.x.ai/",
+      anthropic: "https://console.anthropic.com/",
+      ollama: "https://ollama.com/download",
+      openrouter: "https://openrouter.ai/keys",
+      together: "https://api.together.xyz/settings/api-keys",
+      mistral: "https://console.mistral.ai/api-keys",
+    };
+
+    let selectedCard = null;
+    let selectedProvider = null;
+
+    // Check if already configured
+    fetch("/api/setup/status")
+      .then(r => r.json())
+      .then(data => {
+        if (data.configured) {
+          document.getElementById("current-provider").textContent = data.provider;
+          document.getElementById("already-configured").style.display = "block";
+          document.getElementById("picker-section").style.display = "none";
+        }
+      })
+      .catch(() => {});
+
+    // Reconfigure link
+    document.getElementById("reconfigure-link").addEventListener("click", () => {
+      document.getElementById("already-configured").style.display = "none";
+      document.getElementById("picker-section").style.display = "block";
+    });
+
+    // Provider card selection
+    document.querySelectorAll(".provider-card").forEach(card => {
+      card.addEventListener("click", () => {
+        // Deselect previous
+        if (selectedCard) selectedCard.classList.remove("selected");
+        card.classList.add("selected");
+        selectedCard = card;
+
+        const provider = card.dataset.provider;
+        const baseUrl = card.dataset.baseUrl;
+        const model = card.dataset.model;
+        selectedProvider = provider;
+
+        // Show config section
+        const section = document.getElementById("config-section");
+        section.classList.add("visible");
+
+        const name = card.querySelector(".name").textContent;
+        document.getElementById("config-title").textContent = "Configure " + name;
+
+        // API key
+        const apikeyGroup = document.getElementById("apikey-group");
+        const apikeyInput = document.getElementById("apikey");
+        const apikeyHelp = document.getElementById("apikey-help");
+        if (provider === "ollama") {
+          apikeyGroup.style.display = "none";
+          apikeyInput.value = "";
+        } else {
+          apikeyGroup.style.display = "block";
+          apikeyInput.value = "";
+          apikeyInput.focus();
+          const url = SIGNUP_URLS[provider] || "#";
+          apikeyHelp.innerHTML = 'Get your API key at <a href="' + url + '" target="_blank">' + url + '</a>';
+        }
+
+        // Base URL
+        const baseurlGroup = document.getElementById("baseurl-group");
+        const baseurlInput = document.getElementById("baseurl");
+        if (baseUrl) {
+          baseurlGroup.style.display = "block";
+          baseurlInput.value = baseUrl;
+        } else {
+          baseurlGroup.style.display = "none";
+          baseurlInput.value = "";
+        }
+
+        // Model
+        const modelGroup = document.getElementById("model-group");
+        const modelInput = document.getElementById("model");
+        if (model) {
+          modelGroup.style.display = "block";
+          modelInput.value = model;
+        } else {
+          modelGroup.style.display = "none";
+          modelInput.value = "";
+        }
+
+        updateSaveButton();
+        section.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    });
+
+    // Toggle API key visibility
+    document.getElementById("toggle-apikey").addEventListener("click", () => {
+      const input = document.getElementById("apikey");
+      const btn = document.getElementById("toggle-apikey");
+      if (input.type === "password") {
+        input.type = "text";
+        btn.textContent = "Hide";
+      } else {
+        input.type = "password";
+        btn.textContent = "Show";
+      }
+    });
+
+    // Enable/disable save button
+    function updateSaveButton() {
+      const btn = document.getElementById("btn-save");
+      const apikey = document.getElementById("apikey").value.trim();
+      if (selectedProvider === "ollama") {
+        btn.disabled = false;
+      } else {
+        btn.disabled = !apikey;
+      }
+    }
+    document.getElementById("apikey").addEventListener("input", updateSaveButton);
+
+    // Save
+    document.getElementById("btn-save").addEventListener("click", async () => {
+      const btn = document.getElementById("btn-save");
+      const errorEl = document.getElementById("error-msg");
+      errorEl.style.display = "none";
+      btn.disabled = true;
+      btn.textContent = "Saving...";
+
+      const body = {
+        provider: selectedProvider,
+        apiKey: document.getElementById("apikey").value.trim() || undefined,
+        baseUrl: document.getElementById("baseurl").value.trim() || undefined,
+        model: document.getElementById("model").value.trim() || undefined,
+      };
+
+      // Include admin token if available (for reconfiguration)
+      const headers = { "Content-Type": "application/json" };
+      const token = localStorage.getItem("adminToken");
+      if (token) headers["Authorization"] = "Bearer " + token;
+
+      try {
+        const res = await fetch("/api/setup/llm", {
+          method: "POST",
+          headers,
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || "Save failed");
+        }
+        // Success - redirect to hub
+        window.location.href = "/hub.html";
+      } catch (err) {
+        errorEl.textContent = err.message;
+        errorEl.style.display = "block";
+        btn.disabled = false;
+        btn.textContent = "Save & Continue";
+      }
+    });
+  </script>
+</body>
+</html>
