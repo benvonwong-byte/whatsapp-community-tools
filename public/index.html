@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Von Wong NYC-Based Events scrapped from WhatsApp</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📅</text></svg>">
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
+</head>
+<body>
+  <header>
+    <a href="/hub.html" style="color:#4fc3f7;text-decoration:none;font-size:13px;margin-right:8px;flex-shrink:0">&larr; Hub</a>
+    <h1>NYC Events <span class="kb-hint" title="Keys: 1-4 tabs, j/k navigate, f fav, Enter open, d dashboard">&#x2328;</span>
+      <span id="wa-status" class="wa-status disconnected" title="WhatsApp: checking...">
+        <span class="wa-dot"></span>
+        <span class="wa-label">Checking...</span>
+      </span>
+      <button id="refresh-btn" class="refresh-btn hidden" title="Scan for new events">&#8635; Scan</button>
+      <button id="verify-btn" class="verify-btn hidden" title="Verify all event dates via links">Verify</button>
+      <button id="dedup-btn" class="dedup-btn hidden" title="Remove duplicate events">Dedup</button>
+      <button id="logs-btn" class="logs-btn hidden" title="View server logs">Logs</button>
+      <button id="login-btn" class="login-btn" title="Admin login">Login</button>
+      <button id="logout-btn" class="logout-btn hidden" title="Logout">Logout</button>
+    </h1>
+    <nav id="view-tabs">
+      <button class="tab active" data-view="calendar">Calendar</button>
+      <button class="tab" data-view="list">List</button>
+      <button class="tab" data-view="categories">Categories</button>
+      <button class="tab" data-view="favorites">Favorites</button>
+    </nav>
+    <div class="search-bar">
+      <input type="text" id="search-input" placeholder="Search events by name, location, group, theme..." autocomplete="off">
+      <button id="search-clear" class="search-clear hidden">&times;</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- Search Results (shown when search is active) -->
+    <section id="view-search" class="view">
+      <div id="search-summary" class="search-summary"></div>
+      <div id="search-sort-controls" class="search-sort-controls hidden">
+        <select id="search-sort">
+          <option value="relevance">Sort: Relevance</option>
+          <option value="date">Sort: Date (Soonest)</option>
+          <option value="proximity">Sort: Nearest to Address</option>
+        </select>
+        <div id="proximity-input-wrap" class="proximity-input-wrap">
+          <input type="text" id="proximity-address"
+                 placeholder="Enter address or neighborhood..."
+                 autocomplete="street-address">
+          <button id="proximity-go" class="proximity-go">Go</button>
+          <span id="proximity-status" class="proximity-status"></span>
+        </div>
+      </div>
+      <div id="search-events" class="event-list"></div>
+      <div id="search-empty" class="empty-state hidden">No events match your search.</div>
+    </section>
+    <!-- Calendar View -->
+    <section id="view-calendar" class="view active">
+      <!-- Backfill Progress Bar -->
+      <div id="backfill-progress" class="backfill-progress hidden">
+        <div class="backfill-progress-header">
+          <span class="backfill-progress-icon">&#8635;</span>
+          <span id="backfill-progress-label" class="backfill-progress-label">Scanning WhatsApp messages...</span>
+        </div>
+        <div class="backfill-progress-bar">
+          <div id="backfill-progress-fill" class="backfill-progress-fill"></div>
+        </div>
+        <div class="backfill-progress-stats">
+          <span id="backfill-progress-detail"></span>
+          <span id="backfill-progress-events"></span>
+        </div>
+      </div>
+
+      <!-- Verify Progress Bar -->
+      <div id="verify-progress" class="backfill-progress verify-progress hidden">
+        <div class="backfill-progress-header">
+          <span class="backfill-progress-icon verify-icon">&#10003;</span>
+          <span id="verify-progress-label" class="backfill-progress-label">Verifying events...</span>
+        </div>
+        <div class="backfill-progress-bar">
+          <div id="verify-progress-fill" class="backfill-progress-fill"></div>
+        </div>
+        <div class="backfill-progress-stats">
+          <span id="verify-progress-detail"></span>
+          <span id="verify-progress-events"></span>
+        </div>
+      </div>
+
+      <!-- Dedup Progress Bar -->
+      <div id="dedup-progress" class="backfill-progress dedup-progress hidden">
+        <div class="backfill-progress-header">
+          <span class="backfill-progress-icon dedup-icon">&#x2702;</span>
+          <span id="dedup-progress-label" class="backfill-progress-label">Removing duplicates...</span>
+        </div>
+        <div class="backfill-progress-bar">
+          <div id="dedup-progress-fill" class="backfill-progress-fill"></div>
+        </div>
+        <div class="backfill-progress-stats">
+          <span id="dedup-progress-detail"></span>
+          <span id="dedup-progress-events"></span>
+        </div>
+      </div>
+
+      <!-- Latest Events Banner -->
+      <div id="recent-banner" class="recent-banner">
+        <div class="recent-banner-header">
+          <span class="recent-banner-title">Latest Events Added</span>
+          <span id="recent-banner-updated" class="recent-banner-updated"></span>
+          <button id="recent-banner-toggle" class="recent-banner-toggle">Hide</button>
+        </div>
+        <div id="recent-banner-list" class="recent-banner-list"></div>
+        <div id="recent-banner-empty" class="recent-banner-empty hidden">Waiting for WhatsApp messages...</div>
+      </div>
+
+      <!-- Calendar Category Filter Tabs -->
+      <div id="cal-cat-tabs" class="calendar-cat-tabs"></div>
+
+      <div class="calendar-controls">
+        <button id="cal-prev">&larr;</button>
+        <h2 id="cal-month-label"></h2>
+        <button id="cal-next">&rarr;</button>
+      </div>
+      <div class="calendar-grid">
+        <div class="calendar-header">
+          <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+        </div>
+        <div id="cal-days" class="calendar-days"></div>
+      </div>
+      <div id="cal-day-detail" class="day-detail hidden">
+        <h3 id="cal-day-label"></h3>
+        <div id="cal-day-events"></div>
+      </div>
+    </section>
+
+    <!-- List View -->
+    <section id="view-list" class="view">
+      <div class="list-controls">
+        <select id="list-filter">
+          <option value="all">All Categories</option>
+          <option value="favorites">Favorites Only</option>
+        </select>
+      </div>
+      <div id="list-events" class="event-list"></div>
+      <div id="list-empty" class="empty-state hidden">No events found.</div>
+    </section>
+
+    <!-- Categories View -->
+    <section id="view-categories" class="view">
+      <div id="cat-tabs" class="category-tabs"></div>
+      <div id="cat-swiper" class="category-swiper">
+        <!-- Panels injected by JS -->
+      </div>
+    </section>
+
+    <!-- Favorites View -->
+    <section id="view-favorites" class="view">
+      <div id="fav-events" class="event-list"></div>
+      <div id="fav-empty" class="empty-state">No favorites yet. Tap the heart on any event to save it.</div>
+    </section>
+  </main>
+
+  <!-- Dashboard Panel (persistent, collapsible) -->
+  <section id="dashboard-panel" class="dashboard-panel">
+    <button id="dash-toggle" class="dash-toggle">
+      <span class="dash-toggle-label">Dashboard</span>
+      <span id="dash-toggle-summary" class="dash-toggle-summary"></span>
+      <span class="dash-toggle-arrow">&#9660;</span>
+    </button>
+    <div id="dash-collapsible" class="dash-collapsible">
+      <div class="dash-inner">
+        <div class="dash-summary">
+          <div class="dash-stat">
+            <span class="dash-stat-value" id="dash-total-msgs">0</span>
+            <span class="dash-stat-label">Messages Scanned</span>
+          </div>
+          <div class="dash-stat">
+            <span class="dash-stat-value" id="dash-total-events">0</span>
+            <span class="dash-stat-label">Events Found</span>
+          </div>
+          <div class="dash-stat">
+            <span class="dash-stat-value" id="dash-overall-ratio">0%</span>
+            <span class="dash-stat-label">Overall Signal</span>
+          </div>
+        </div>
+        <div class="dash-sort-controls">
+          <span class="dash-section-title">Group Signal-to-Noise</span>
+          <select id="dash-sort">
+            <option value="ratio-desc">Ratio: High to Low</option>
+            <option value="ratio-asc">Ratio: Low to High</option>
+            <option value="events-desc">Events: Most First</option>
+            <option value="events-asc">Events: Least First</option>
+            <option value="lastActive-desc">Last Active: Recent</option>
+            <option value="lastActive-asc">Last Active: Oldest</option>
+          </select>
+        </div>
+        <div id="dash-monitor-summary" class="dash-monitor-summary"></div>
+        <div id="dash-groups" class="dash-groups"></div>
+        <div id="dash-empty" class="empty-state hidden">No data yet. Start scanning WhatsApp messages to see stats here.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Keyboard shortcuts help -->
+  <div id="kb-help-overlay" class="modal-overlay hidden">
+    <div class="modal kb-help-modal">
+      <button id="kb-help-close" class="modal-close">&times;</button>
+      <h2>Keyboard Shortcuts</h2>
+      <div class="kb-help-grid">
+        <div class="kb-help-section">
+          <h3>Navigation</h3>
+          <div class="kb-row"><kbd>1</kbd><span>Calendar view</span></div>
+          <div class="kb-row"><kbd>2</kbd><span>List view</span></div>
+          <div class="kb-row"><kbd>3</kbd><span>Categories view</span></div>
+          <div class="kb-row"><kbd>4</kbd><span>Favorites view</span></div>
+        </div>
+        <div class="kb-help-section">
+          <h3>Events</h3>
+          <div class="kb-row"><kbd>j</kbd> <kbd>&darr;</kbd><span>Next event</span></div>
+          <div class="kb-row"><kbd>k</kbd> <kbd>&uarr;</kbd><span>Previous event</span></div>
+          <div class="kb-row"><kbd>f</kbd><span>Toggle favorite</span></div>
+          <div class="kb-row"><kbd>Enter</kbd><span>Open event detail</span></div>
+        </div>
+        <div class="kb-help-section">
+          <h3>Other</h3>
+          <div class="kb-row"><kbd>/</kbd><span>Search events</span></div>
+          <div class="kb-row"><kbd>d</kbd><span>Toggle dashboard</span></div>
+          <div class="kb-row"><kbd>&larr;</kbd> <kbd>&rarr;</kbd><span>Switch category</span></div>
+          <div class="kb-row"><kbd>Esc</kbd><span>Close modal / search</span></div>
+          <div class="kb-row"><kbd>?</kbd><span>Show this help</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- QR Code overlay (admin mode, when disconnected) -->
+  <div id="qr-overlay" class="modal-overlay hidden">
+    <div class="modal qr-modal">
+      <button id="qr-close" class="modal-close">&times;</button>
+      <h2>Connect WhatsApp</h2>
+      <p class="qr-instructions">Scan this QR code with your WhatsApp app:<br>Settings &rarr; Linked Devices &rarr; Link a Device</p>
+      <div id="qr-canvas-container" class="qr-canvas-container">
+        <canvas id="qr-canvas"></canvas>
+      </div>
+      <p id="qr-waiting" class="qr-waiting">Waiting for QR code...</p>
+      <p id="qr-expired" class="qr-expired hidden">QR code expired. Waiting for a new one...</p>
+    </div>
+  </div>
+
+  <!-- Event detail modal -->
+  <div id="modal-overlay" class="modal-overlay hidden">
+    <div class="modal">
+      <button id="modal-close" class="modal-close">&times;</button>
+      <div id="modal-content"></div>
+    </div>
+  </div>
+
+  <!-- Server logs modal -->
+  <div id="logs-overlay" class="modal-overlay hidden">
+    <div class="modal logs-modal">
+      <button id="logs-close" class="modal-close">&times;</button>
+      <h2>Server Logs</h2>
+      <div class="logs-controls">
+        <select id="logs-filter">
+          <option value="">All</option>
+          <option value="error">Errors only</option>
+          <option value="warn">Warnings only</option>
+        </select>
+        <button id="logs-refresh" class="logs-refresh-btn">&#8635; Refresh</button>
+        <button id="logs-copy" class="logs-copy-btn">Copy</button>
+      </div>
+      <div id="logs-content" class="logs-content"></div>
+    </div>
+  </div>
+
+  <!-- Login modal -->
+  <div id="login-overlay" class="modal-overlay hidden">
+    <div class="modal login-modal">
+      <button id="login-close" class="modal-close">&times;</button>
+      <h2>Admin Login</h2>
+      <form id="login-form" autocomplete="on">
+        <input type="email" id="login-email" placeholder="Email" autocomplete="email" required>
+        <input type="password" id="login-password" placeholder="Password" autocomplete="current-password" required>
+        <div id="login-error" class="login-error hidden"></div>
+        <button type="submit" class="login-submit">Sign In</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Persistent keyboard shortcuts hint panel -->
+  <div id="kb-persistent-panel" class="kb-persistent-panel">
+    <div class="kb-persistent-header">
+      <span class="kb-persistent-title">Shortcuts</span>
+      <button id="kb-persistent-dismiss" class="kb-persistent-dismiss" title="Dismiss">&times;</button>
+    </div>
+    <div class="kb-persistent-body">
+      <div class="kb-p-row"><kbd>1</kbd>-<kbd>4</kbd> <span>Views</span></div>
+      <div class="kb-p-row"><kbd>j</kbd><kbd>k</kbd> <span>Nav events</span></div>
+      <div class="kb-p-row"><kbd>&larr;</kbd><kbd>&rarr;</kbd> <span>Categories</span></div>
+      <div class="kb-p-row"><kbd>Enter</kbd> <span>Open</span></div>
+      <div class="kb-p-row"><kbd>/</kbd> <span>Search</span></div>
+      <div class="kb-p-row"><kbd>f</kbd> <span>Favorite</span></div>
+      <div class="kb-p-row"><kbd>d</kbd> <span>Dashboard</span></div>
+      <div class="kb-p-row"><kbd>?</kbd> <span>All shortcuts</span></div>
+    </div>
+  </div>
+
+  <script src="shared.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

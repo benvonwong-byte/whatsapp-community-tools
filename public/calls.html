@@ -1,0 +1,791 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Call Recorder</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📞</text></svg>">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --bg: #121212;
+      --surface: #1e1e1e;
+      --surface2: #2a2a2a;
+      --border: #333;
+      --text: #e0e0e0;
+      --text-dim: #888;
+      --accent: #bb86fc;
+      --green: #00b894;
+      --red: #d63031;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      min-height: 100dvh;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .header {
+      position: sticky; top: 0; z-index: 100;
+      background: var(--bg); border-bottom: 1px solid var(--border);
+      padding: 14px 20px; display: flex; align-items: center; gap: 12px;
+    }
+    .header h1 { font-size: 18px; font-weight: 700; letter-spacing: -0.5px; flex: 1; }
+    .back-link { color: var(--accent); text-decoration: none; font-size: 13px; }
+    .back-link:hover { text-decoration: underline; }
+
+    .container { max-width: 700px; margin: 0 auto; padding: 24px 20px; }
+
+    /* Login gate */
+    #login-gate { text-align: center; padding: 60px 20px; }
+    #login-gate p { color: var(--text-dim); margin-bottom: 12px; }
+    .hidden { display: none !important; }
+
+    /* Recorder Section */
+    .recorder-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 32px 24px;
+      text-align: center;
+      margin-bottom: 24px;
+    }
+
+    /* Audio source selector */
+    .source-selector {
+      display: flex; gap: 8px; justify-content: center; margin-bottom: 20px;
+    }
+    .source-btn {
+      background: var(--surface2); color: var(--text-dim); border: 1px solid var(--border);
+      padding: 6px 16px; border-radius: 999px; font-size: 12px; cursor: pointer;
+      transition: all 0.15s; font-weight: 500;
+    }
+    .source-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
+    .source-btn:hover:not(.active) { border-color: var(--accent); color: var(--accent); }
+
+    /* Contact picker */
+    .contact-picker {
+      margin-bottom: 20px; position: relative;
+    }
+    .contact-picker input {
+      width: 100%; max-width: 300px; background: var(--surface2); color: var(--text);
+      border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px;
+      font-size: 13px; outline: none; text-align: center;
+    }
+    .contact-picker input:focus { border-color: var(--accent); }
+    .contact-picker input::placeholder { color: var(--text-dim); }
+    .contact-dropdown {
+      position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+      width: 300px; max-height: 200px; overflow-y: auto;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+      z-index: 10; display: none; margin-top: 4px;
+    }
+    .contact-dropdown.open { display: block; }
+    .contact-option {
+      padding: 8px 12px; font-size: 12px; cursor: pointer; border-bottom: 1px solid var(--border);
+    }
+    .contact-option:hover { background: var(--surface2); }
+    .contact-option:last-child { border-bottom: none; }
+    .selected-contact {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: var(--accent)22; color: var(--accent); padding: 4px 12px;
+      border-radius: 999px; font-size: 12px; margin-bottom: 12px;
+    }
+    .selected-contact .remove-contact {
+      cursor: pointer; opacity: 0.7; font-size: 14px;
+    }
+    .selected-contact .remove-contact:hover { opacity: 1; }
+
+    /* Record button */
+    .record-btn {
+      width: 80px; height: 80px; border-radius: 50%; border: 3px solid var(--accent);
+      background: transparent; cursor: pointer; position: relative;
+      transition: all 0.3s; margin: 16px auto; display: flex; align-items: center; justify-content: center;
+    }
+    .record-btn::after {
+      content: ""; width: 32px; height: 32px; border-radius: 50%;
+      background: var(--accent); transition: all 0.3s;
+    }
+    .record-btn.recording { border-color: var(--red); }
+    .record-btn.recording::after {
+      background: var(--red); border-radius: 4px; width: 24px; height: 24px;
+    }
+    .record-btn:hover { transform: scale(1.05); }
+    .record-label { font-size: 12px; color: var(--text-dim); margin-top: 8px; }
+
+    /* Timer */
+    .timer {
+      font-size: 2rem; font-variant-numeric: tabular-nums;
+      margin: 12px 0; opacity: 0; transition: opacity 0.3s;
+    }
+    .timer.visible { opacity: 1; }
+
+    /* Level meter */
+    .level-meter {
+      width: 200px; height: 4px; background: var(--surface2); border-radius: 2px;
+      margin: 8px auto; overflow: hidden; opacity: 0; transition: opacity 0.3s;
+    }
+    .level-meter.visible { opacity: 1; }
+    .level-meter .level-bar {
+      height: 100%; background: var(--accent); border-radius: 2px;
+      transition: width 0.05s linear; width: 0%;
+    }
+
+    /* Call type selector */
+    .call-type-row {
+      display: flex; gap: 6px; justify-content: center; margin-bottom: 16px;
+    }
+    .call-type-btn {
+      background: var(--surface2); color: var(--text-dim); border: 1px solid var(--border);
+      padding: 4px 12px; border-radius: 999px; font-size: 11px; cursor: pointer;
+    }
+    .call-type-btn.active { background: var(--accent)33; color: var(--accent); border-color: var(--accent); }
+
+    /* Processing / Results */
+    .processing-section, .results-section { display: none; }
+    .processing-section.visible, .results-section.visible { display: block; }
+
+    .spinner {
+      width: 40px; height: 40px; border: 3px solid var(--border);
+      border-top-color: var(--accent); border-radius: 50%;
+      animation: spin 0.8s linear infinite; margin: 20px auto;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Speaker assignment */
+    .speaker-map {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+      padding: 16px; margin: 16px 0;
+    }
+    .speaker-map h3 { font-size: 14px; margin-bottom: 12px; }
+    .speaker-row {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+    }
+    .speaker-label {
+      font-size: 12px; color: var(--text-dim); min-width: 70px;
+    }
+    .speaker-row input {
+      flex: 1; background: var(--surface2); color: var(--text);
+      border: 1px solid var(--border); border-radius: 6px;
+      padding: 6px 10px; font-size: 12px; outline: none;
+    }
+    .speaker-row input:focus { border-color: var(--accent); }
+
+    /* Transcript */
+    .transcript-container {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 12px; padding: 16px; margin: 16px 0;
+      max-height: 400px; overflow-y: auto;
+    }
+    .transcript-container h3 { font-size: 14px; margin-bottom: 12px; }
+    .utterance {
+      margin-bottom: 12px; padding-left: 10px;
+      border-left: 3px solid var(--accent);
+    }
+    .utterance .utt-speaker { font-size: 11px; font-weight: 600; color: var(--accent); margin-bottom: 2px; }
+    .utterance .utt-text { font-size: 13px; line-height: 1.5; color: var(--text); }
+
+    /* Action buttons */
+    .action-row {
+      display: flex; gap: 8px; justify-content: center; margin: 16px 0;
+    }
+    .action-btn {
+      background: var(--accent); color: #000; border: none;
+      padding: 8px 20px; border-radius: 999px; font-size: 12px;
+      font-weight: 600; cursor: pointer; transition: opacity 0.15s;
+    }
+    .action-btn:hover { opacity: 0.85; }
+    .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .action-btn.secondary {
+      background: var(--surface2); color: var(--text); border: 1px solid var(--border);
+    }
+
+    /* Call history */
+    .history-section {
+      margin-top: 32px;
+    }
+    .history-section h2 {
+      font-size: 16px; font-weight: 600; margin-bottom: 12px;
+    }
+    .call-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 12px; padding: 14px 16px; margin-bottom: 8px;
+      cursor: pointer; transition: border-color 0.15s;
+    }
+    .call-card:hover { border-color: var(--accent); }
+    .call-card-header {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 4px;
+    }
+    .call-card-title { font-size: 13px; font-weight: 600; flex: 1; }
+    .call-card-meta { font-size: 11px; color: var(--text-dim); }
+    .call-card-contact {
+      font-size: 11px; color: var(--accent); margin-bottom: 4px;
+    }
+    .call-card-preview {
+      font-size: 11px; color: var(--text-dim); line-height: 1.4;
+      overflow: hidden; text-overflow: ellipsis; display: -webkit-box;
+      -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    }
+    .call-card-actions {
+      display: flex; gap: 6px; margin-top: 8px;
+    }
+    .call-card-actions button {
+      background: var(--surface2); color: var(--text-dim); border: 1px solid var(--border);
+      padding: 3px 10px; border-radius: 999px; font-size: 10px; cursor: pointer;
+    }
+    .call-card-actions button:hover { color: var(--accent); border-color: var(--accent); }
+    .call-card-actions button.delete:hover { color: var(--red); border-color: var(--red); }
+
+    .empty-state { color: var(--text-dim); font-size: 13px; text-align: center; padding: 20px; }
+    .load-more { display: block; margin: 12px auto; }
+
+    /* Mobile */
+    @media (max-width: 600px) {
+      .container { padding: 16px 12px; }
+      .recorder-section { padding: 20px 16px; }
+      .contact-picker input { max-width: 100%; font-size: 16px; padding: 10px 14px; }
+      .contact-dropdown { width: 100%; left: 0; transform: none; }
+      .contact-option { padding: 12px 14px; font-size: 14px; }
+      .level-meter { width: 80%; }
+      .call-type-row { flex-wrap: wrap; }
+      .call-type-btn { padding: 10px 16px; font-size: 13px; }
+      .source-btn { padding: 10px 18px; font-size: 14px; }
+      .record-btn { width: 88px; height: 88px; }
+      .record-btn::after { width: 36px; height: 36px; }
+      .record-btn.recording::after { width: 28px; height: 28px; }
+      .call-card { padding: 16px; }
+      .call-card-title { font-size: 14px; }
+      .call-card-meta { font-size: 12px; }
+      .call-card-preview { font-size: 12px; }
+      .call-card-actions button { padding: 8px 14px; font-size: 12px; }
+      .action-btn { padding: 12px 20px; font-size: 14px; }
+      .action-row { flex-direction: column; }
+      .action-row .action-btn { width: 100%; }
+      .selected-contact { font-size: 14px; padding: 8px 14px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <a href="/hub.html" class="back-link">Hub</a>
+    <h1>Call Recorder</h1>
+  </div>
+
+  <div id="login-gate" class="hidden">
+    <p>Admin access required</p>
+  </div>
+
+  <div id="main-content" class="hidden">
+    <div class="container">
+      <!-- Recorder -->
+      <div class="recorder-section" id="recorder-section">
+        <div class="call-type-row">
+          <button class="call-type-btn active" data-type="phone">Phone</button>
+          <button class="call-type-btn" data-type="zoom">Zoom</button>
+          <button class="call-type-btn" data-type="meet">Meet</button>
+          <button class="call-type-btn" data-type="facetime">FaceTime</button>
+          <button class="call-type-btn" data-type="other">Other</button>
+        </div>
+
+        <div class="source-selector">
+          <button class="source-btn active" data-source="mic">Mic Only</button>
+          <button class="source-btn" data-source="system+mic">System + Mic</button>
+        </div>
+
+        <div class="contact-picker" id="contact-picker">
+          <div id="selected-contact-display" style="display:none;">
+            <span class="selected-contact">
+              <span id="selected-contact-name"></span>
+              <span class="remove-contact" id="remove-contact">&times;</span>
+            </span>
+          </div>
+          <input type="text" id="contact-search" placeholder="Search contact (optional)" autocomplete="off">
+          <div class="contact-dropdown" id="contact-dropdown"></div>
+        </div>
+
+        <div class="timer" id="timer">00:00</div>
+        <div class="level-meter" id="level-meter"><div class="level-bar" id="level-bar"></div></div>
+
+        <button class="record-btn" id="record-btn"></button>
+        <div class="record-label" id="record-label">Tap to Record</div>
+      </div>
+
+      <!-- Processing -->
+      <div class="processing-section" id="processing-section">
+        <div class="recorder-section">
+          <div class="spinner"></div>
+          <p style="color:var(--text-dim);font-size:13px;" id="processing-status">Transcribing audio...</p>
+        </div>
+      </div>
+
+      <!-- Results -->
+      <div class="results-section" id="results-section">
+        <div class="speaker-map" id="speaker-map" style="display:none;">
+          <h3>Assign Speaker Names</h3>
+          <div id="speaker-rows"></div>
+          <div class="action-row">
+            <button class="action-btn" id="save-speakers-btn">Save Speakers</button>
+          </div>
+        </div>
+
+        <div id="title-section" style="margin:16px 0;">
+          <input type="text" id="call-title-input" placeholder="Call title (optional)"
+            style="width:100%;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:13px;outline:none;">
+        </div>
+
+        <div class="transcript-container" id="transcript-container">
+          <h3>Transcript</h3>
+          <div id="transcript-body"></div>
+        </div>
+
+        <div class="action-row">
+          <button class="action-btn" id="save-call-btn">Save Recording</button>
+          <button class="action-btn secondary" id="discard-btn">Discard</button>
+        </div>
+      </div>
+
+      <!-- Call History -->
+      <div class="history-section" id="history-section">
+        <h2>Recent Calls</h2>
+        <div id="call-list"></div>
+        <button class="action-btn secondary load-more" id="load-more-calls" style="display:none;">Load More</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/shared.js"></script>
+  <script src="/calls-recorder.js"></script>
+  <script>
+    // ── State ──
+    let recorder = null;
+    let selectedContactId = null;
+    let selectedContactName = null;
+    let callType = "phone";
+    let audioSource = "mic";
+    let currentCallId = null;
+    let currentUtterances = [];
+    let currentTranscriptText = "";
+    let currentAssemblyId = "";
+    let currentDuration = 0;
+    let speakerMap = {};
+    let allContacts = [];
+    let callsOffset = 0;
+    const CALLS_PAGE = 20;
+
+    // ── Init ──
+    document.addEventListener("DOMContentLoaded", () => {
+      if (!isAdmin) {
+        $("login-gate").classList.remove("hidden");
+        return;
+      }
+      $("main-content").classList.remove("hidden");
+
+      recorder = new CallRecorder({
+        onStateChange: handleStateChange,
+        onTimer: (formatted) => { $("timer").textContent = formatted; },
+        onLevel: (level) => {
+          $("level-bar").style.width = (level * 100) + "%";
+        },
+      });
+
+      setupHandlers();
+      loadContacts();
+      loadCallHistory();
+    });
+
+    function setupHandlers() {
+      // Record button
+      $("record-btn").addEventListener("click", async () => {
+        if (recorder.state === "recording") {
+          await stopAndTranscribe();
+        } else {
+          await startRecording();
+        }
+      });
+
+      // Audio source
+      document.querySelectorAll(".source-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          if (recorder.state === "recording") return;
+          audioSource = btn.dataset.source;
+          document.querySelectorAll(".source-btn").forEach(b => b.classList.toggle("active", b.dataset.source === audioSource));
+        });
+      });
+
+      // Call type
+      document.querySelectorAll(".call-type-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          callType = btn.dataset.type;
+          document.querySelectorAll(".call-type-btn").forEach(b => b.classList.toggle("active", b.dataset.type === callType));
+        });
+      });
+
+      // Contact search
+      const searchInput = $("contact-search");
+      let searchTimer;
+      searchInput.addEventListener("input", () => {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => filterContacts(searchInput.value), 150);
+      });
+      searchInput.addEventListener("focus", () => {
+        if (searchInput.value || allContacts.length) filterContacts(searchInput.value);
+      });
+      document.addEventListener("click", (e) => {
+        if (!e.target.closest("#contact-picker")) $("contact-dropdown").classList.remove("open");
+      });
+
+      $("remove-contact").addEventListener("click", () => {
+        selectedContactId = null;
+        selectedContactName = null;
+        $("selected-contact-display").style.display = "none";
+        $("contact-search").style.display = "";
+        $("contact-search").value = "";
+      });
+
+      // Save / discard
+      $("save-call-btn").addEventListener("click", saveCall);
+      $("discard-btn").addEventListener("click", discardCall);
+      $("save-speakers-btn").addEventListener("click", applySpeakerNames);
+      $("load-more-calls").addEventListener("click", () => loadCallHistory(true));
+    }
+
+    // ── Recording ──
+
+    async function startRecording() {
+      try {
+        currentCallId = "call_" + Date.now() + "_" + Math.random().toString(36).substring(2, 8);
+        await recorder.start(audioSource);
+        $("record-btn").classList.add("recording");
+        $("record-label").textContent = "Tap to Stop";
+        $("timer").classList.add("visible");
+        $("level-meter").classList.add("visible");
+      } catch (err) {
+        alert("Failed to start recording: " + err.message);
+      }
+    }
+
+    async function stopAndTranscribe() {
+      $("record-btn").classList.remove("recording");
+      $("record-label").textContent = "Tap to Record";
+      $("timer").classList.remove("visible");
+      $("level-meter").classList.remove("visible");
+
+      const blob = await recorder.stop();
+      if (!blob) return;
+
+      currentDuration = recorder.durationSeconds;
+
+      // Show processing
+      $("recorder-section").style.display = "none";
+      $("processing-section").classList.add("visible");
+      $("processing-status").textContent = "Transcribing audio...";
+
+      // Abort flag to prevent race between timeout and in-flight fetch
+      let transcribeAborted = false;
+
+      // Timeout: abort if transcription takes longer than 5 minutes
+      const transcribeTimeout = setTimeout(() => {
+        transcribeAborted = true;
+        $("processing-status").textContent = "Transcription timed out. You can try again.";
+        setTimeout(() => {
+          $("processing-section").classList.remove("visible");
+          $("recorder-section").style.display = "";
+          recorder.reset();
+        }, 3000);
+      }, 5 * 60 * 1000);
+
+      try {
+        const formData = new FormData();
+        formData.append("audio", blob, "call." + (blob.type.includes("webm") ? "webm" : "mp4"));
+
+        const res = await adminFetch("/api/calls/transcribe", {
+          method: "POST",
+          body: formData,
+        });
+
+        clearTimeout(transcribeTimeout);
+        if (transcribeAborted) return; // Timeout already reset the UI
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || "Transcription failed");
+        }
+
+        const data = await res.json();
+        currentUtterances = data.utterances || [];
+        currentTranscriptText = data.text || "";
+        currentAssemblyId = data.assemblyai_id || "";
+        if (data.duration) currentDuration = Math.round(data.duration);
+
+        showResults();
+      } catch (err) {
+        clearTimeout(transcribeTimeout);
+        if (transcribeAborted) return; // Timeout already reset the UI
+        alert("Transcription error: " + err.message);
+        $("processing-section").classList.remove("visible");
+        $("recorder-section").style.display = "";
+        recorder.reset();
+      }
+    }
+
+    function showResults() {
+      $("processing-section").classList.remove("visible");
+      $("results-section").classList.add("visible");
+
+      // Speaker map
+      const speakers = [...new Set(currentUtterances.map(u => u.speaker))];
+      if (speakers.length >= 2) {
+        $("speaker-map").style.display = "";
+        const rows = $("speaker-rows");
+        rows.innerHTML = speakers.map(s =>
+          `<div class="speaker-row">
+            <span class="speaker-label">Speaker ${s}:</span>
+            <input type="text" data-speaker="${s}" placeholder="Name for Speaker ${s}">
+          </div>`
+        ).join("");
+        speakerMap = {};
+        speakers.forEach(s => { speakerMap[s] = "Speaker " + s; });
+      } else {
+        $("speaker-map").style.display = "none";
+      }
+
+      renderTranscript();
+    }
+
+    function applySpeakerNames() {
+      $("speaker-rows").querySelectorAll("input").forEach(inp => {
+        const speaker = inp.dataset.speaker;
+        const name = inp.value.trim();
+        if (name) speakerMap[speaker] = name;
+      });
+      renderTranscript();
+    }
+
+    function renderTranscript() {
+      const body = $("transcript-body");
+      if (!currentUtterances.length) {
+        body.innerHTML = currentTranscriptText
+          ? `<div style="font-size:13px;line-height:1.6;">${escapeHtml(currentTranscriptText)}</div>`
+          : '<div class="empty-state">No transcript available</div>';
+        return;
+      }
+      body.innerHTML = currentUtterances.map(u => {
+        const name = speakerMap[u.speaker] || ("Speaker " + u.speaker);
+        return `<div class="utterance">
+          <div class="utt-speaker">${escapeHtml(name)}</div>
+          <div class="utt-text">${escapeHtml(u.text)}</div>
+        </div>`;
+      }).join("");
+    }
+
+    // ── Save / Discard ──
+
+    async function saveCall() {
+      const btn = $("save-call-btn");
+      btn.disabled = true;
+      btn.textContent = "Saving...";
+
+      try {
+        const title = $("call-title-input").value.trim();
+        const res = await adminFetch("/api/calls/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: currentCallId,
+            contact_id: selectedContactId,
+            title,
+            call_type: callType,
+            duration_seconds: currentDuration,
+            transcript_text: currentTranscriptText,
+            utterances_json: JSON.stringify(currentUtterances),
+            speaker_map_json: JSON.stringify(speakerMap),
+            assemblyai_id: currentAssemblyId,
+            audio_captured: recorder.audioSource,
+            status: "done",
+            recorded_at: Math.floor(Date.now() / 1000),
+          }),
+        });
+
+        if (!res.ok) throw new Error("Save failed");
+
+        resetToIdle();
+        loadCallHistory();
+      } catch (err) {
+        alert("Failed to save: " + err.message);
+        btn.disabled = false;
+        btn.textContent = "Save Recording";
+      }
+    }
+
+    function discardCall() {
+      if (!confirm("Discard this recording?")) return;
+      resetToIdle();
+    }
+
+    function resetToIdle() {
+      recorder.reset();
+      $("results-section").classList.remove("visible");
+      $("processing-section").classList.remove("visible");
+      $("recorder-section").style.display = "";
+      $("call-title-input").value = "";
+      currentCallId = null;
+      currentUtterances = [];
+      currentTranscriptText = "";
+      currentAssemblyId = "";
+      speakerMap = {};
+    }
+
+    // ── Contacts ──
+
+    async function loadContacts() {
+      try {
+        const res = await adminFetch("/api/friends/contacts?limit=5000");
+        if (!res.ok) return;
+        const data = await res.json();
+        allContacts = (data.contacts || []).filter(c => !c.hidden);
+      } catch {}
+    }
+
+    function filterContacts(query) {
+      const dropdown = $("contact-dropdown");
+      const q = (query || "").toLowerCase().trim();
+      const matches = q
+        ? allContacts.filter(c => c.name.toLowerCase().includes(q)).slice(0, 15)
+        : allContacts.slice(0, 15);
+
+      if (matches.length === 0) {
+        dropdown.classList.remove("open");
+        return;
+      }
+
+      dropdown.innerHTML = matches.map(c =>
+        `<div class="contact-option" data-id="${escapeAttr(c.id)}" data-name="${escapeAttr(c.name)}">${escapeHtml(c.name)}</div>`
+      ).join("");
+
+      dropdown.querySelectorAll(".contact-option").forEach(opt => {
+        opt.addEventListener("click", () => {
+          selectedContactId = opt.dataset.id;
+          selectedContactName = opt.dataset.name;
+          $("selected-contact-name").textContent = selectedContactName;
+          $("selected-contact-display").style.display = "";
+          $("contact-search").style.display = "none";
+          dropdown.classList.remove("open");
+        });
+      });
+
+      dropdown.classList.add("open");
+    }
+
+    // ── Call History ──
+
+    async function loadCallHistory(more = false) {
+      if (!more) callsOffset = 0;
+
+      try {
+        const res = await adminFetch(`/api/calls?limit=${CALLS_PAGE}&offset=${callsOffset}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const calls = data.calls || [];
+
+        const list = $("call-list");
+        if (!more) list.innerHTML = "";
+
+        if (calls.length === 0 && !more) {
+          list.innerHTML = '<div class="empty-state">No recordings yet</div>';
+          $("load-more-calls").style.display = "none";
+          return;
+        }
+
+        for (const call of calls) {
+          list.appendChild(createCallCard(call));
+        }
+
+        callsOffset += calls.length;
+        $("load-more-calls").style.display = calls.length >= CALLS_PAGE ? "" : "none";
+      } catch (err) {
+        console.error("Failed to load calls:", err);
+      }
+    }
+
+    function createCallCard(call) {
+      const div = document.createElement("div");
+      div.className = "call-card";
+      div.dataset.callId = call.id;
+
+      const date = new Date(call.recorded_at * 1000);
+      const dateStr = date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+      const timeStr = date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+      const mins = Math.floor(call.duration_seconds / 60);
+      const secs = call.duration_seconds % 60;
+      const durStr = `${mins}:${String(secs).padStart(2, "0")}`;
+      const title = call.title || (call.call_type ? call.call_type.charAt(0).toUpperCase() + call.call_type.slice(1) + " call" : "Call");
+      const preview = (call.transcript_text || "").substring(0, 150);
+
+      div.innerHTML = `
+        <div class="call-card-header">
+          <div class="call-card-title">${escapeHtml(title)}</div>
+          <div class="call-card-meta">${durStr} · ${dateStr} ${timeStr}</div>
+        </div>
+        ${call.contact_name ? `<div class="call-card-contact">${escapeHtml(call.contact_name)}</div>` : ""}
+        ${preview ? `<div class="call-card-preview">${escapeHtml(preview)}</div>` : ""}
+        <div class="call-card-actions">
+          <button class="view-btn">View</button>
+          <button class="delete delete-call-btn">Delete</button>
+        </div>
+      `;
+
+      div.querySelector(".view-btn").addEventListener("click", (e) => {
+        e.stopPropagation();
+        viewCall(call.id);
+      });
+      div.querySelector(".delete-call-btn").addEventListener("click", (e) => {
+        e.stopPropagation();
+        deleteCall(call.id, div);
+      });
+
+      return div;
+    }
+
+    async function viewCall(callId) {
+      try {
+        const res = await adminFetch(`/api/calls/${callId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const call = data.call;
+
+        // Load into results view
+        currentCallId = call.id;
+        currentUtterances = JSON.parse(call.utterances_json || "[]");
+        currentTranscriptText = call.transcript_text || "";
+        currentAssemblyId = call.assemblyai_id || "";
+        currentDuration = call.duration_seconds;
+        speakerMap = JSON.parse(call.speaker_map_json || "{}");
+        if (call.contact_id) {
+          selectedContactId = call.contact_id;
+          selectedContactName = call.contact_name || call.contact_id;
+        }
+
+        $("call-title-input").value = call.title || "";
+        $("recorder-section").style.display = "none";
+        showResults();
+        $("save-call-btn").textContent = "Update";
+      } catch (err) {
+        alert("Failed to load call: " + err.message);
+      }
+    }
+
+    async function deleteCall(callId, cardEl) {
+      if (!confirm("Delete this recording?")) return;
+      try {
+        await adminFetch(`/api/calls/${callId}`, { method: "DELETE" });
+        cardEl.remove();
+      } catch (err) {
+        alert("Failed to delete: " + err.message);
+      }
+    }
+  </script>
+</body>
+</html>

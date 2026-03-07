@@ -1,0 +1,1247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Metacrisis Community Dashboard</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧠</text></svg>">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #121212;
+      --surface: #1e1e1e;
+      --surface2: #2a2a2a;
+      --border: #333;
+      --text: #e0e0e0;
+      --text-dim: #888;
+      --accent: #4fc3f7;
+      --green: #00b894;
+      --yellow: #fdcb6e;
+      --red: #d63031;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      min-height: 100dvh;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Header */
+    .header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .header h1 {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      flex: 1;
+    }
+
+    .back-link {
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+
+    .back-link:hover { text-decoration: underline; }
+
+    .summarize-btn {
+      background: var(--accent);
+      color: #000;
+      border: none;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 6px 16px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: opacity 0.15s;
+      white-space: nowrap;
+    }
+
+    .summarize-btn:hover { opacity: 0.85; }
+    .summarize-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* Main container */
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    /* Login gate */
+    .login-gate {
+      text-align: center;
+      padding: 80px 20px;
+      color: var(--text-dim);
+      font-size: 15px;
+      line-height: 1.6;
+    }
+
+    .login-gate a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    .login-gate a:hover { text-decoration: underline; }
+
+    /* Monitoring bar */
+    .monitor-bar {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 12px 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+
+    .monitor-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .monitor-dot.green { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .monitor-dot.yellow { background: var(--yellow); box-shadow: 0 0 6px var(--yellow); }
+    .monitor-dot.red { background: var(--red); box-shadow: 0 0 6px var(--red); }
+
+    .monitor-item {
+      font-size: 13px;
+      color: var(--text-dim);
+    }
+
+    .monitor-item strong {
+      color: var(--text);
+    }
+
+    /* Stats grid */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .stat-card {
+      background: var(--surface);
+      border-radius: 12px;
+      padding: 16px;
+      text-align: center;
+    }
+
+    .stat-value {
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--accent);
+    }
+
+    .stat-label {
+      font-size: 11px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-top: 4px;
+    }
+
+    /* Section panels */
+    .section {
+      background: var(--surface);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+
+    .section-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 16px;
+    }
+
+    /* Link category filter tabs */
+    .filter-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+
+    .filter-tab {
+      background: var(--surface2);
+      color: var(--text-dim);
+      border: 1px solid var(--border);
+      font-size: 12px;
+      font-weight: 500;
+      padding: 5px 14px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .filter-tab:hover {
+      border-color: var(--accent);
+      color: var(--text);
+    }
+
+    .filter-tab.active {
+      background: var(--accent);
+      color: #000;
+      border-color: var(--accent);
+    }
+
+    /* Link list */
+    .link-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      font-size: 13px;
+      flex-wrap: wrap;
+    }
+
+    .link-item:last-child {
+      border-bottom: none;
+    }
+
+    .link-url {
+      color: var(--accent);
+      text-decoration: none;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 400px;
+      flex-shrink: 1;
+    }
+
+    .link-url:hover { text-decoration: underline; }
+
+    .link-category-badge {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      flex-shrink: 0;
+    }
+
+    .link-category-badge.event { background: #6c5ce7; color: #fff; }
+    .link-category-badge.video { background: #e84393; color: #fff; }
+    .link-category-badge.podcast { background: #00b894; color: #fff; }
+    .link-category-badge.article { background: #fdcb6e; color: #000; }
+    .link-category-badge.other { background: var(--surface2); color: var(--text-dim); border: 1px solid var(--border); }
+
+    .link-meta {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-left: auto;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .link-empty {
+      text-align: center;
+      color: var(--text-dim);
+      font-size: 13px;
+      padding: 24px 0;
+    }
+
+    /* Leaderboard */
+    .leaderboard-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 0;
+    }
+
+    .leaderboard-rank {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-dim);
+      width: 28px;
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    .leaderboard-name {
+      font-size: 13px;
+      color: var(--text);
+      width: 120px;
+      flex-shrink: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .leaderboard-bar-bg {
+      flex: 1;
+      height: 8px;
+      background: var(--surface2);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .leaderboard-bar-fill {
+      height: 100%;
+      border-radius: 4px;
+      background: var(--accent);
+      transition: width 0.4s ease;
+    }
+
+    .leaderboard-count {
+      font-size: 12px;
+      color: var(--text-dim);
+      width: 48px;
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    .leaderboard-empty {
+      text-align: center;
+      color: var(--text-dim);
+      font-size: 13px;
+      padding: 24px 0;
+    }
+
+    /* Summary cards */
+    .summary-card {
+      background: var(--surface2);
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-bottom: 8px;
+      border-left: 3px solid var(--accent);
+    }
+
+    .summary-card-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      cursor: pointer;
+      flex-wrap: wrap;
+    }
+
+    .summary-card-date {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .summary-card-count {
+      font-size: 11px;
+      color: var(--text-dim);
+      background: var(--surface);
+      padding: 2px 8px;
+      border-radius: 999px;
+    }
+
+    .summary-push-status {
+      margin-left: auto;
+      flex-shrink: 0;
+    }
+
+    .push-badge {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: 999px;
+    }
+
+    .push-badge.pushed {
+      background: rgba(0, 184, 148, 0.15);
+      color: var(--green);
+    }
+
+    .push-btn {
+      background: var(--surface);
+      color: var(--accent);
+      border: 1px solid var(--accent);
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .push-btn:hover {
+      background: var(--accent);
+      color: #000;
+    }
+
+    .push-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .summary-topics {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+
+    .topic-tag {
+      font-size: 11px;
+      padding: 2px 10px;
+      border-radius: 999px;
+      background: rgba(79, 195, 247, 0.12);
+      color: var(--accent);
+    }
+
+    .summary-text {
+      font-size: 13px;
+      color: var(--text-dim);
+      line-height: 1.6;
+      margin-top: 10px;
+      display: none;
+      white-space: pre-wrap;
+    }
+
+    .summary-card.expanded .summary-text {
+      display: block;
+    }
+
+    .summary-expand-hint {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-top: 6px;
+      cursor: pointer;
+    }
+
+    .summary-card.expanded .summary-expand-hint {
+      display: none;
+    }
+
+    .summary-empty {
+      text-align: center;
+      color: var(--text-dim);
+      font-size: 13px;
+      padding: 24px 0;
+    }
+
+    /* Settings section */
+    .settings-toggle {
+      background: none;
+      border: none;
+      color: var(--accent);
+      font-size: 13px;
+      cursor: pointer;
+      padding: 0;
+      margin-bottom: 12px;
+    }
+
+    .settings-toggle:hover { text-decoration: underline; }
+
+    .settings-body {
+      display: none;
+    }
+
+    .settings-body.open {
+      display: block;
+    }
+
+    .settings-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+
+    .settings-label {
+      font-size: 13px;
+      color: var(--text-dim);
+      width: 130px;
+      flex-shrink: 0;
+    }
+
+    .settings-input,
+    .settings-select,
+    .settings-textarea {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 13px;
+      font-family: inherit;
+    }
+
+    .settings-select { min-width: 140px; }
+    .settings-input { width: 80px; }
+
+    .settings-textarea {
+      width: 100%;
+      min-height: 80px;
+      resize: vertical;
+    }
+
+    .settings-save-btn {
+      background: var(--accent);
+      color: #000;
+      border: none;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 8px 20px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: opacity 0.15s;
+      margin-top: 4px;
+    }
+
+    .settings-save-btn:hover { opacity: 0.85; }
+    .settings-save-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* Daily Digest */
+    .digest-who-list {
+      list-style: none;
+      padding: 0;
+    }
+
+    .digest-who-item {
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .digest-who-item:last-child { border-bottom: none; }
+
+    .digest-who-name {
+      font-weight: 600;
+      color: var(--accent);
+    }
+
+    .digest-mood {
+      font-size: 13px;
+      color: var(--text-dim);
+      line-height: 1.6;
+      padding: 10px 14px;
+      background: var(--surface2);
+      border-radius: 8px;
+      margin-top: 12px;
+    }
+
+    .digest-recs {
+      margin-top: 12px;
+      padding: 10px 14px;
+      background: rgba(253, 203, 110, 0.08);
+      border-left: 3px solid var(--yellow);
+      border-radius: 0 8px 8px 0;
+    }
+
+    .digest-recs-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--yellow);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+
+    .digest-rec-item {
+      font-size: 13px;
+      color: var(--text);
+      line-height: 1.5;
+      padding: 2px 0;
+    }
+
+    .digest-empty {
+      text-align: center;
+      color: var(--text-dim);
+      font-size: 13px;
+      padding: 24px 0;
+    }
+
+    .digest-date-label {
+      font-size: 12px;
+      color: var(--text-dim);
+      margin-bottom: 12px;
+    }
+
+    /* Upcoming Events */
+    .event-card {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+      padding: 12px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .event-card:last-child { border-bottom: none; }
+
+    .event-date-box {
+      flex-shrink: 0;
+      width: 48px;
+      text-align: center;
+      background: var(--surface2);
+      border-radius: 8px;
+      padding: 6px 4px;
+    }
+
+    .event-date-month {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .event-date-day {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1.1;
+    }
+
+    .event-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .event-name {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .event-name a {
+      color: var(--text);
+      text-decoration: none;
+    }
+
+    .event-name a:hover { color: var(--accent); }
+
+    .event-detail {
+      font-size: 12px;
+      color: var(--text-dim);
+      margin-top: 2px;
+    }
+
+    .events-empty {
+      text-align: center;
+      color: var(--text-dim);
+      font-size: 13px;
+      padding: 24px 0;
+    }
+
+    /* Topic Trends */
+    .topic-period-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .topic-period-tab {
+      background: var(--surface2);
+      color: var(--text-dim);
+      border: 1px solid var(--border);
+      font-size: 12px;
+      font-weight: 500;
+      padding: 5px 14px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .topic-period-tab:hover {
+      border-color: var(--accent);
+      color: var(--text);
+    }
+
+    .topic-period-tab.active {
+      background: var(--accent);
+      color: #000;
+      border-color: var(--accent);
+    }
+
+    .topic-bar-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 6px 0;
+    }
+
+    .topic-bar-name {
+      font-size: 13px;
+      color: var(--text);
+      width: 140px;
+      flex-shrink: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .topic-bar-bg {
+      flex: 1;
+      height: 8px;
+      background: var(--surface2);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .topic-bar-fill {
+      height: 100%;
+      border-radius: 4px;
+      background: #6c5ce7;
+      transition: width 0.4s ease;
+    }
+
+    .topic-bar-count {
+      font-size: 12px;
+      color: var(--text-dim);
+      width: 48px;
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    .topics-empty {
+      text-align: center;
+      color: var(--text-dim);
+      font-size: 13px;
+      padding: 24px 0;
+    }
+
+    /* Loading & error states */
+    .loading-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--text-dim);
+      font-size: 15px;
+    }
+
+    .loading-placeholder {
+      text-align: center;
+      color: var(--text-dim);
+      font-size: 13px;
+      padding: 24px 0;
+      opacity: 0.6;
+    }
+
+    .error-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--red);
+      font-size: 14px;
+    }
+
+    /* Composer blocks */
+    .composer-block {
+      padding: 14px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .composer-block:last-of-type { border-bottom: none; }
+
+    .composer-link-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 8px 4px;
+      border-bottom: 1px solid rgba(255,255,255,0.03);
+      transition: background 0.15s;
+    }
+
+    .composer-link-row:hover { background: rgba(255,255,255,0.02); }
+    .composer-link-row:last-child { border-bottom: none; }
+
+    .composer-link-row input[type="checkbox"] {
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    .composer-link-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .composer-link-title {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text);
+      margin-bottom: 2px;
+    }
+
+    .composer-link-title a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    .composer-link-summary {
+      font-size: 11px;
+      color: var(--text-dim);
+      line-height: 1.4;
+    }
+
+    .composer-link-meta {
+      font-size: 10px;
+      color: var(--text-dim);
+      opacity: 0.6;
+      margin-top: 3px;
+    }
+
+    .composer-summary-row {
+      padding: 10px 4px;
+      border-bottom: 1px solid rgba(255,255,255,0.03);
+    }
+
+    .composer-summary-row:last-child { border-bottom: none; }
+
+    .composer-summary-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+
+    .composer-summary-date {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .composer-summary-topics {
+      font-size: 10px;
+      color: var(--accent);
+    }
+
+    .composer-summary-body {
+      font-size: 11px;
+      color: var(--text-dim);
+      line-height: 1.5;
+      padding-left: 24px;
+    }
+
+    .composer-summary-who {
+      font-size: 10px;
+      color: var(--text-dim);
+      opacity: 0.7;
+      padding-left: 24px;
+      margin-top: 4px;
+    }
+
+    .composer-toggle-btn {
+      font-size: 10px;
+      padding: 2px 8px;
+      background: var(--surface2);
+      color: var(--text-dim);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .composer-toggle-btn:hover {
+      border-color: var(--accent);
+      color: var(--text);
+    }
+
+    .composer-section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+
+    .composer-section-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--accent);
+    }
+
+    .composer-section-count {
+      font-weight: 400;
+      color: var(--text-dim);
+      font-size: 11px;
+    }
+
+    .hidden { display: none !important; }
+
+    /* Quick Share */
+    .qs-input-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .qs-url-input {
+      flex: 1;
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 14px;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .qs-url-input:focus { border-color: var(--accent); }
+
+    .qs-url-input::placeholder { color: var(--text-dim); }
+
+    .qs-scrape-btn {
+      background: var(--accent);
+      color: #000;
+      border: none;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 10px 20px;
+      border-radius: 8px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: opacity 0.15s;
+    }
+
+    .qs-scrape-btn:hover { opacity: 0.85; }
+    .qs-scrape-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .qs-fields {
+      display: grid;
+      grid-template-columns: 80px 1fr;
+      gap: 8px 12px;
+      margin-bottom: 16px;
+      align-items: start;
+    }
+
+    .qs-field-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      padding-top: 8px;
+    }
+
+    .qs-field-input {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .qs-field-input:focus { border-color: var(--accent); }
+
+    .qs-field-textarea {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+      resize: vertical;
+      min-height: 60px;
+      transition: border-color 0.15s;
+    }
+
+    .qs-field-textarea:focus { border-color: var(--accent); }
+
+    .qs-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    /* Responsive */
+    @media (max-width: 600px) {
+      .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .header { padding: 12px 16px; flex-wrap: wrap; gap: 8px; }
+      .header h1 { font-size: 16px; }
+      .container { padding: 12px; }
+      .summarize-btn { padding: 10px 16px; font-size: 13px; }
+      .back-link { font-size: 14px; padding: 4px 0; }
+      .link-url { max-width: calc(100vw - 80px); font-size: 13px; }
+      .link-item { padding: 12px 0; }
+      .leaderboard-name { width: 90px; font-size: 13px; }
+      .settings-label { width: 100px; font-size: 13px; }
+      .monitor-bar { gap: 10px; flex-wrap: wrap; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <a href="/hub.html" class="back-link">&larr; Hub</a>
+    <h1>Metacrisis Community</h1>
+    <button id="summarize-btn" class="summarize-btn">Summarize Now</button>
+  </div>
+
+  <!-- Login gate -->
+  <div id="login-gate" class="login-gate hidden">
+    <p>Admin access required.</p>
+    <p>Please <a href="/">log in via the main app</a> first, then return here.</p>
+  </div>
+
+  <!-- Main content (hidden until auth confirmed) -->
+  <div id="main-content" class="container hidden">
+
+    <!-- Error state -->
+    <div id="error-state" class="error-state hidden"></div>
+
+    <!-- Loading state (kept for backwards compat but hidden immediately) -->
+    <div id="loading-state" class="loading-state hidden"></div>
+
+    <!-- Dashboard content (shown immediately, sections populate progressively) -->
+    <div id="dashboard" class="hidden">
+
+      <!-- Monitoring bar -->
+      <div class="monitor-bar">
+        <span id="monitor-dot" class="monitor-dot red"></span>
+        <span id="monitor-last-msg" class="monitor-item">Last message: <strong>--</strong></span>
+        <span id="monitor-today-count" class="monitor-item">Today: <strong>0</strong> messages</span>
+      </div>
+
+      <!-- Stats grid -->
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-value" id="stat-total-messages">0</div>
+          <div class="stat-label">Total Messages</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-summaries">0</div>
+          <div class="stat-label">Summaries</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-links">0</div>
+          <div class="stat-label">Links Shared</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-members">0</div>
+          <div class="stat-label">Active Members</div>
+        </div>
+      </div>
+
+      <!-- Quick Link Sharer -->
+      <div class="section" id="quick-share-section" style="border-left:3px solid var(--green);">
+        <div class="section-title" style="color:var(--green);">Quick Link Sharer</div>
+
+        <!-- URL input -->
+        <div class="qs-input-row">
+          <input type="text" class="qs-url-input" id="qs-url" placeholder="Paste a link to scrape and share...">
+          <button class="qs-scrape-btn" id="qs-scrape-btn">Scrape</button>
+        </div>
+
+        <!-- Editable fields (hidden until scraped) -->
+        <div id="qs-fields-container" class="hidden">
+          <div class="qs-fields">
+            <span class="qs-field-label">Title</span>
+            <input type="text" class="qs-field-input" id="qs-title">
+
+            <span class="qs-field-label">Date</span>
+            <input type="text" class="qs-field-input" id="qs-date" placeholder="e.g. 2026-03-15 (leave blank if not event)">
+
+            <span class="qs-field-label">Time</span>
+            <input type="text" class="qs-field-input" id="qs-time" placeholder="e.g. 18:30 (leave blank if not event)">
+
+            <span class="qs-field-label">Location</span>
+            <input type="text" class="qs-field-input" id="qs-location" placeholder="e.g. Brooklyn Commons (leave blank if not event)">
+
+            <span class="qs-field-label">Description</span>
+            <textarea class="qs-field-textarea" id="qs-description" rows="3"></textarea>
+          </div>
+
+          <!-- WhatsApp Preview (editable) -->
+          <div style="font-size:12px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">WhatsApp Preview</div>
+          <textarea id="qs-preview" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:14px;font-size:12px;color:var(--text);white-space:pre-wrap;word-wrap:break-word;line-height:1.6;max-height:300px;overflow-y:auto;font-family:inherit;width:100%;min-height:120px;resize:vertical;outline:none;transition:border-color 0.15s;" placeholder="Preview will appear here after scraping..."></textarea>
+
+          <!-- Action buttons -->
+          <div class="qs-actions">
+            <button id="qs-copy" class="push-btn" style="flex:1;">Copy to Clipboard</button>
+            <button id="qs-push" class="summarize-btn" style="flex:1;background:var(--green);">Community Chat</button>
+            <button id="qs-push-adjacent" class="summarize-btn" style="flex:1;background:#6c5ce7;">Adjacent Events</button>
+          </div>
+          <div id="qs-status" style="font-size:11px;color:var(--text-dim);margin-top:6px;text-align:center;"></div>
+        </div>
+      </div>
+
+      <!-- Daily Digest -->
+      <div class="section" id="digest-section">
+        <div class="section-title">Daily Digest</div>
+        <div id="digest-content"><div class="loading-placeholder">Loading digest...</div></div>
+      </div>
+
+      <!-- Weekly Update Composer -->
+      <div class="section" id="composer-section" style="border-left:3px solid var(--accent);">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:16px;">
+          <div>
+            <div class="section-title" style="margin-bottom:2px;">Weekly Update Composer</div>
+            <div id="composer-date-range" style="font-size:11px;color:var(--text-dim);"></div>
+          </div>
+          <div id="composer-last-sent" style="font-size:11px;color:var(--text-dim);background:var(--surface2);padding:4px 10px;border-radius:999px;"></div>
+        </div>
+
+        <!-- Events section -->
+        <div class="composer-block">
+          <div class="composer-section-header">
+            <span class="composer-section-label">Events <span id="composer-events-count" class="composer-section-count"></span></span>
+            <div style="display:flex;gap:8px;">
+              <button id="composer-events-all" class="composer-toggle-btn">All</button>
+              <button id="composer-events-none" class="composer-toggle-btn">None</button>
+            </div>
+          </div>
+          <div id="composer-events-list"></div>
+        </div>
+
+        <!-- Articles section -->
+        <div class="composer-block">
+          <div class="composer-section-header">
+            <span class="composer-section-label">Articles <span id="composer-articles-count" class="composer-section-count"></span></span>
+            <div style="display:flex;gap:8px;">
+              <button id="composer-articles-all" class="composer-toggle-btn">All</button>
+              <button id="composer-articles-none" class="composer-toggle-btn">None</button>
+            </div>
+          </div>
+          <div id="composer-articles-list"></div>
+        </div>
+
+        <!-- Videos section -->
+        <div class="composer-block">
+          <div class="composer-section-header">
+            <span class="composer-section-label">Videos <span id="composer-videos-count" class="composer-section-count"></span></span>
+            <div style="display:flex;gap:8px;">
+              <button id="composer-videos-all" class="composer-toggle-btn">All</button>
+              <button id="composer-videos-none" class="composer-toggle-btn">None</button>
+            </div>
+          </div>
+          <div id="composer-videos-list"></div>
+        </div>
+
+        <!-- Weekly Topics Summary -->
+        <div class="composer-block">
+          <span style="font-size:13px;font-weight:600;color:#6c5ce7;display:block;margin-bottom:8px;">Discussion Summary</span>
+          <div id="composer-topics-summary" style="font-size:12px;color:var(--text-dim);line-height:1.5;"></div>
+        </div>
+
+        <!-- Preview -->
+        <div style="margin-top:16px;">
+          <div style="font-size:12px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">WhatsApp Preview</div>
+          <pre id="composer-preview" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:14px;font-size:12px;color:var(--text);white-space:pre-wrap;word-wrap:break-word;line-height:1.6;max-height:400px;overflow-y:auto;font-family:inherit;"></pre>
+        </div>
+
+        <!-- Action buttons -->
+        <div style="display:flex;gap:8px;margin-top:12px;">
+          <button id="composer-copy" class="push-btn" style="flex:1;">Copy to Clipboard</button>
+          <button id="composer-push" class="summarize-btn" style="flex:1;">Push to Announcement Chat</button>
+        </div>
+        <div id="composer-status" style="font-size:11px;color:var(--text-dim);margin-top:6px;text-align:center;"></div>
+      </div>
+
+      <!-- Upcoming Events -->
+      <div class="section" id="events-section">
+        <div class="section-title">Upcoming Events</div>
+        <div id="events-list"><div class="loading-placeholder">Loading events...</div></div>
+      </div>
+
+      <!-- Topic Trends -->
+      <div class="section" id="topics-section">
+        <div class="section-title">Topic Trends</div>
+        <div class="topic-period-tabs" id="topic-period-tabs">
+          <button class="topic-period-tab active" data-period="week">This Week</button>
+          <button class="topic-period-tab" data-period="month">This Month</button>
+          <button class="topic-period-tab" data-period="quarter">3 Months</button>
+        </div>
+        <div id="topics-list"><div class="loading-placeholder">Loading topics...</div></div>
+      </div>
+
+      <!-- Link Organizer -->
+      <div class="section" id="links-section">
+        <div class="section-title">Link Organizer</div>
+        <div class="filter-tabs" id="link-filter-tabs">
+          <button class="filter-tab active" data-category="all">All</button>
+          <button class="filter-tab" data-category="event">Event</button>
+          <button class="filter-tab" data-category="video">Video</button>
+          <button class="filter-tab" data-category="podcast">Podcast</button>
+          <button class="filter-tab" data-category="article">Article</button>
+          <button class="filter-tab" data-category="other">Other</button>
+        </div>
+        <div id="links-list"><div class="loading-placeholder">Loading links...</div></div>
+      </div>
+
+      <!-- Member Leaderboard -->
+      <div class="section" id="leaderboard-section">
+        <div class="section-title">Member Leaderboard</div>
+        <div id="leaderboard-list"><div class="loading-placeholder">Loading leaderboard...</div></div>
+      </div>
+
+      <!-- Summaries -->
+      <div class="section" id="summaries-section">
+        <div class="section-title">Summaries</div>
+        <div id="summaries-list"><div class="loading-placeholder">Loading summaries...</div></div>
+      </div>
+
+      <!-- Push Settings -->
+      <div class="section" id="settings-section">
+        <div class="section-title">Push Settings</div>
+        <button class="settings-toggle" id="settings-toggle">Show settings</button>
+        <div class="settings-body" id="settings-body">
+          <div class="settings-row">
+            <span class="settings-label">Push Schedule</span>
+            <select class="settings-select" id="setting-schedule">
+              <option value="manual">Manual</option>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+            </select>
+          </div>
+          <div class="settings-row" id="setting-day-row">
+            <span class="settings-label">Push Day</span>
+            <select class="settings-select" id="setting-day">
+              <option value="monday">Monday</option>
+              <option value="tuesday">Tuesday</option>
+              <option value="wednesday">Wednesday</option>
+              <option value="thursday">Thursday</option>
+              <option value="friday">Friday</option>
+              <option value="saturday">Saturday</option>
+              <option value="sunday">Sunday</option>
+            </select>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">Push Hour (0-23)</span>
+            <input type="number" class="settings-input" id="setting-hour" min="0" max="23" value="9">
+          </div>
+          <div class="settings-row" style="align-items: flex-start;">
+            <span class="settings-label" style="margin-top: 8px;">Format Template</span>
+            <textarea class="settings-textarea" id="setting-template" placeholder="Use {{date}}, {{summary}}, {{topics}} placeholders"></textarea>
+          </div>
+          <button class="settings-save-btn" id="settings-save-btn">Save Settings</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="shared.js"></script>
+  <script src="metacrisis.js"></script>
+</body>
+</html>
