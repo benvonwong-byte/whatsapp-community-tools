@@ -44,6 +44,12 @@ export class WhatsAppClient {
     "--disable-gpu",
     "--no-first-run",
     "--disable-extensions",
+    "--js-flags=--max-old-space-size=256",
+    "--disable-features=TranslateUI",
+    "--disable-background-networking",
+    "--disable-default-apps",
+    "--disable-sync",
+    "--metrics-recording-only",
   ];
 
   constructor() {
