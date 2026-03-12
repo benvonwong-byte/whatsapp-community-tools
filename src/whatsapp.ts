@@ -411,7 +411,38 @@ export class WhatsAppClient {
   async start() {
     console.log("Starting WhatsApp client...");
     this.cleanChromiumLocks();
-    await this.client.initialize();
+
+    const maxAttempts = 5;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        await this.client.initialize();
+        return; // success
+      } catch (err: any) {
+        const isTransient =
+          err?.message?.includes("Execution context was destroyed") ||
+          err?.message?.includes("Protocol error");
+        if (!isTransient || attempt === maxAttempts) {
+          throw err; // non-retryable or exhausted attempts
+        }
+        const delay = Math.min(5000 * Math.pow(2, attempt - 1), 60000);
+        console.warn(
+          `[start] initialize() failed (attempt ${attempt}/${maxAttempts}): ${err.message}. Retrying in ${Math.round(delay / 1000)}s...`
+        );
+        await new Promise((r) => setTimeout(r, delay));
+
+        // Recreate client for fresh browser context
+        try { await this.client.destroy(); } catch {}
+        this.client = new Client({
+          authStrategy: new LocalAuth({ dataPath: config.authDir }),
+          puppeteer: {
+            headless: true,
+            args: WhatsAppClient.PUPPETEER_ARGS,
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+          },
+        });
+        this.setupEventHandlers();
+      }
+    }
   }
 
   /**
