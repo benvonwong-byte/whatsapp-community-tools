@@ -27,9 +27,9 @@ export const config = {
   dbPath: process.env.DB_PATH || path.resolve(process.cwd(), "events.db"),
   authDir: process.env.AUTH_DIR || path.resolve(process.cwd(), ".auth"),
   port: parseInt(process.env.PORT || "3000", 10),
-  // Batch messages every 5 minutes or 20 messages
+  // Batch messages every 5 minutes or 50 messages
   batchIntervalMs: 5 * 60 * 1000,
-  batchMaxMessages: 20,
+  batchMaxMessages: 50,
   // Private chats to monitor for events (comma-separated names, case-insensitive)
   allowedPrivateChats: parseList(process.env.ALLOWED_PRIVATE_CHATS),
   // Airtable sync (optional — leave empty to disable)

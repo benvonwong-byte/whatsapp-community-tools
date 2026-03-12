@@ -44,20 +44,6 @@ export interface FriendsVoiceNote {
   created_at: string;
 }
 
-export interface FriendsTag {
-  id: number;
-  name: string;
-  created_at: string;
-}
-
-export interface FriendsContactTag {
-  contact_id: string;
-  tag_id: number;
-  confidence: number;
-  last_seen: number;
-  mention_count: number;
-}
-
 export interface FriendsMessageInput {
   id: string;
   chat_id: string;
@@ -93,7 +79,6 @@ export interface ContactWithStats {
   received_messages: number;
   messages_30d: number;
   group_names: string | null;
-  tag_names: string | null;
   initiation_ratio: number;
   my_avg_response_sec: number;
   their_avg_response_sec: number;
@@ -220,29 +205,6 @@ export class FriendsStore extends SettingsStore {
       CREATE INDEX IF NOT EXISTS idx_friends_voice_contact ON friends_voice_notes(contact_id);
       CREATE INDEX IF NOT EXISTS idx_friends_voice_timestamp ON friends_voice_notes(timestamp);
 
-      CREATE TABLE IF NOT EXISTS friends_tags (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL UNIQUE,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
-      );
-
-      CREATE TABLE IF NOT EXISTS friends_contact_tags (
-        contact_id TEXT NOT NULL,
-        tag_id INTEGER NOT NULL,
-        confidence REAL DEFAULT 1.0,
-        last_seen INTEGER NOT NULL,
-        mention_count INTEGER DEFAULT 1,
-        PRIMARY KEY (contact_id, tag_id)
-      );
-
-      CREATE TABLE IF NOT EXISTS friends_tag_buffer (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        contact_id TEXT NOT NULL,
-        message_body TEXT NOT NULL,
-        timestamp INTEGER NOT NULL,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
-      );
-
       CREATE TABLE IF NOT EXISTS friends_call_recordings (
         id TEXT PRIMARY KEY,
         contact_id TEXT DEFAULT NULL,
@@ -344,7 +306,6 @@ export class FriendsStore extends SettingsStore {
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_friends_msgs_chat_fromme ON friends_messages(chat_id, is_from_me, timestamp)`);
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_friends_chats_isgroup ON friends_chats(is_group, chat_id)`);
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_friends_msgs_sender_chat ON friends_messages(sender_id, chat_id)`);
-    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_friends_contact_tags_cid ON friends_contact_tags(contact_id)`);
 
     // Backfill phone_normalized from WhatsApp IDs
     this.db.exec(`
@@ -958,9 +919,6 @@ export class FriendsStore extends SettingsStore {
           THEN ROUND(CAST(range_stats.messages_in_range AS REAL) / range_stats.active_days, 1)
           ELSE 0 END as messages_per_active_day,
         COALESCE(vn_stats.voice_notes_in_range, 0) as voice_notes_in_range,
-        (SELECT GROUP_CONCAT(tg.name, ', ')
-         FROM friends_contact_tags ct JOIN friends_tags tg ON tg.id = ct.tag_id
-         WHERE ct.contact_id = c.id) as tag_names,
         (SELECT GROUP_CONCAT(g.name, ', ')
          FROM friends_contact_groups cg JOIN friends_groups g ON g.id = cg.group_id
          WHERE cg.contact_id = c.id) as group_names
@@ -1055,11 +1013,7 @@ export class FriendsStore extends SettingsStore {
         (SELECT GROUP_CONCAT(g.name, ', ')
          FROM friends_contact_groups cg
          JOIN friends_groups g ON g.id = cg.group_id
-         WHERE cg.contact_id = c.id) as group_names,
-        (SELECT GROUP_CONCAT(tg.name, ', ')
-         FROM friends_contact_tags ct
-         JOIN friends_tags tg ON tg.id = ct.tag_id
-         WHERE ct.contact_id = c.id) as tag_names
+         WHERE cg.contact_id = c.id) as group_names
       FROM friends_contacts c
       LEFT JOIN friends_tiers t ON t.id = c.tier_id
       LEFT JOIN (
@@ -1403,142 +1357,6 @@ export class FriendsStore extends SettingsStore {
     return { total_notes: row?.total_notes || 0, total_minutes: Math.round((row?.total_minutes || 0) * 10) / 10 };
   }
 
-  // ── Tag methods ──
-
-  getOrCreateTag(name: string): number {
-    const normalized = name.toLowerCase().trim();
-    const existing = this.db.prepare(`SELECT id FROM friends_tags WHERE name = ?`).get(normalized) as { id: number } | undefined;
-    if (existing) return existing.id;
-    const result = this.db.prepare(`INSERT INTO friends_tags (name) VALUES (?)`).run(normalized);
-    return result.lastInsertRowid as number;
-  }
-
-  addContactTag(contactId: string, tagName: string, timestamp: number, confidence = 1.0) {
-    const tagId = this.getOrCreateTag(tagName);
-    this.db.prepare(`
-      INSERT INTO friends_contact_tags (contact_id, tag_id, confidence, last_seen, mention_count)
-      VALUES (?, ?, ?, ?, 1)
-      ON CONFLICT(contact_id, tag_id) DO UPDATE SET
-        confidence = MAX(friends_contact_tags.confidence, excluded.confidence),
-        last_seen = MAX(friends_contact_tags.last_seen, excluded.last_seen),
-        mention_count = friends_contact_tags.mention_count + 1
-    `).run(contactId, tagId, confidence, timestamp);
-  }
-
-  getContactTags(contactId: string): Array<{ tag_id: number; name: string; confidence: number; mention_count: number; contact_count: number }> {
-    return this.db.prepare(`
-      SELECT ct.tag_id, t.name, ct.confidence, ct.mention_count,
-             (SELECT COUNT(*) FROM friends_contact_tags ct2 WHERE ct2.tag_id = ct.tag_id) as contact_count
-      FROM friends_contact_tags ct
-      JOIN friends_tags t ON t.id = ct.tag_id
-      WHERE ct.contact_id = ?
-      ORDER BY ct.mention_count DESC
-    `).all(contactId) as any[];
-  }
-
-  getAllTags(tierId?: number | null): Array<{ id: number; name: string; contact_count: number }> {
-    const tf = this.tierClause(tierId);
-    if (tierId !== undefined) {
-      return this.db.prepare(`
-        SELECT t.id, t.name, COUNT(ct.contact_id) as contact_count
-        FROM friends_tags t
-        LEFT JOIN friends_contact_tags ct ON ct.tag_id = t.id
-        LEFT JOIN friends_contacts c ON c.id = ct.contact_id
-        WHERE 1=1${tf}
-        GROUP BY t.id
-        HAVING contact_count > 0
-        ORDER BY contact_count DESC
-      `).all() as any[];
-    }
-    return this.db.prepare(`
-      SELECT t.id, t.name, COUNT(ct.contact_id) as contact_count
-      FROM friends_tags t
-      LEFT JOIN friends_contact_tags ct ON ct.tag_id = t.id
-      GROUP BY t.id
-      ORDER BY contact_count DESC
-    `).all() as any[];
-  }
-
-  getContactsWithTags(tagNames: string[], mode: "AND" | "OR" = "OR"): string[] {
-    if (tagNames.length === 0) return [];
-    const placeholders = tagNames.map(() => "?").join(",");
-    if (mode === "OR") {
-      const rows = this.db.prepare(`
-        SELECT DISTINCT ct.contact_id
-        FROM friends_contact_tags ct
-        JOIN friends_tags t ON t.id = ct.tag_id
-        WHERE t.name IN (${placeholders})
-      `).all(...tagNames) as Array<{ contact_id: string }>;
-      return rows.map(r => r.contact_id);
-    } else {
-      const rows = this.db.prepare(`
-        SELECT ct.contact_id
-        FROM friends_contact_tags ct
-        JOIN friends_tags t ON t.id = ct.tag_id
-        WHERE t.name IN (${placeholders})
-        GROUP BY ct.contact_id
-        HAVING COUNT(DISTINCT t.name) = ?
-      `).all(...tagNames, tagNames.length) as Array<{ contact_id: string }>;
-      return rows.map(r => r.contact_id);
-    }
-  }
-
-  removeContactTag(contactId: string, tagId: number): boolean {
-    const result = this.db.prepare(`DELETE FROM friends_contact_tags WHERE contact_id = ? AND tag_id = ?`).run(contactId, tagId);
-    return result.changes > 0;
-  }
-
-  /** Merge multiple source tags into a single canonical tag. Returns number of reassigned contact-tag rows. */
-  mergeTags(sourceTagIds: number[], canonicalTagId: number): number {
-    if (sourceTagIds.length === 0) return 0;
-    let reassigned = 0;
-    const txn = this.db.transaction(() => {
-      for (const srcId of sourceTagIds) {
-        if (srcId === canonicalTagId) continue;
-        // For contacts that already have the canonical tag, merge mention_count
-        this.db.prepare(`
-          UPDATE friends_contact_tags SET
-            mention_count = mention_count + COALESCE((SELECT mention_count FROM friends_contact_tags WHERE contact_id = friends_contact_tags.contact_id AND tag_id = ?), 0),
-            confidence = MAX(confidence, COALESCE((SELECT confidence FROM friends_contact_tags WHERE contact_id = friends_contact_tags.contact_id AND tag_id = ?), 0))
-          WHERE tag_id = ? AND contact_id IN (SELECT contact_id FROM friends_contact_tags WHERE tag_id = ?)
-        `).run(srcId, srcId, canonicalTagId, srcId);
-        // Delete the source tag rows for contacts that already have canonical
-        this.db.prepare(`
-          DELETE FROM friends_contact_tags WHERE tag_id = ? AND contact_id IN (SELECT contact_id FROM friends_contact_tags WHERE tag_id = ?)
-        `).run(srcId, canonicalTagId);
-        // Reassign remaining source tag rows to canonical
-        const result = this.db.prepare(`UPDATE friends_contact_tags SET tag_id = ? WHERE tag_id = ?`).run(canonicalTagId, srcId);
-        reassigned += result.changes;
-        // Delete orphaned source tag
-        this.db.prepare(`DELETE FROM friends_tags WHERE id = ? AND id NOT IN (SELECT DISTINCT tag_id FROM friends_contact_tags)`).run(srcId);
-      }
-    });
-    txn();
-    // Clean up any now-unused tags
-    this.db.prepare(`DELETE FROM friends_tags WHERE id NOT IN (SELECT DISTINCT tag_id FROM friends_contact_tags)`).run();
-    return reassigned;
-  }
-
-  /** Rename a tag */
-  renameTag(tagId: number, newName: string): boolean {
-    const normalized = newName.toLowerCase().trim();
-    // Check if target name already exists
-    const existing = this.db.prepare(`SELECT id FROM friends_tags WHERE name = ? AND id != ?`).get(normalized, tagId) as { id: number } | undefined;
-    if (existing) {
-      // Merge into existing tag
-      this.mergeTags([tagId], existing.id);
-      return true;
-    }
-    this.db.prepare(`UPDATE friends_tags SET name = ? WHERE id = ?`).run(normalized, tagId);
-    return true;
-  }
-
-  // ── Tag buffer methods ──
-
-  addToTagBuffer(contactId: string, body: string, timestamp: number) {
-    this.db.prepare(`INSERT INTO friends_tag_buffer (contact_id, message_body, timestamp) VALUES (?, ?, ?)`).run(contactId, body, timestamp);
-  }
-
   /** Archive messages older than a given number of days. Deletes message bodies but keeps metadata. */
   archiveOldMessages(olderThanDays = 1095): { archived: number; freedChars: number } {
     const cutoff = Math.floor(Date.now() / 1000) - olderThanDays * 86400;
@@ -1555,7 +1373,7 @@ export class FriendsStore extends SettingsStore {
   }
 
   /** Search contacts by exact phrases in message content. Any phrase match counts; results sorted by total matches. */
-  searchMessageContent(phrases: string[], limit = 50): Array<{ contact_id: string; name: string; tier_name: string | null; tier_color: string | null; tag_names: string | null; snippet: string; match_count: number }> {
+  searchMessageContent(phrases: string[], limit = 50): Array<{ contact_id: string; name: string; tier_name: string | null; tier_color: string | null; snippet: string; match_count: number }> {
     if (phrases.length === 0) return [];
     // Each phrase is searched as a complete substring (e.g. "guest room" searches for that exact phrase)
     const conditions = phrases.map(() => `LOWER(m.body) LIKE LOWER(?)`).join(" OR ");
@@ -1564,9 +1382,6 @@ export class FriendsStore extends SettingsStore {
     return this.db.prepare(`
       SELECT c.id as contact_id, COALESCE(c.display_name, c.name) as name,
              t.name as tier_name, t.color as tier_color,
-             (SELECT GROUP_CONCAT(tg.name, ', ')
-              FROM friends_contact_tags ct JOIN friends_tags tg ON tg.id = ct.tag_id
-              WHERE ct.contact_id = c.id) as tag_names,
              (SELECT m2.body FROM friends_messages m2 WHERE m2.chat_id = c.id AND (${snippetConditions}) AND m2.body != '' ORDER BY m2.timestamp DESC LIMIT 1) as snippet,
              COUNT(*) as match_count
       FROM friends_messages m
@@ -1581,16 +1396,13 @@ export class FriendsStore extends SettingsStore {
   }
 
   /** Search contacts by phrases in their notes. Returns contacts whose notes contain any of the phrases. */
-  searchNotes(phrases: string[], limit = 50): Array<{ contact_id: string; name: string; tier_name: string | null; tier_color: string | null; tag_names: string | null; snippet: string; match_count: number }> {
+  searchNotes(phrases: string[], limit = 50): Array<{ contact_id: string; name: string; tier_name: string | null; tier_color: string | null; snippet: string; match_count: number }> {
     if (phrases.length === 0) return [];
     const conditions = phrases.map(() => `LOWER(n.content) LIKE LOWER(?)`).join(" OR ");
     const params = phrases.map(p => `%${p}%`);
     return this.db.prepare(`
       SELECT c.id as contact_id, COALESCE(c.display_name, c.name) as name,
              t.name as tier_name, t.color as tier_color,
-             (SELECT GROUP_CONCAT(tg.name, ', ')
-              FROM friends_contact_tags ct JOIN friends_tags tg ON tg.id = ct.tag_id
-              WHERE ct.contact_id = c.id) as tag_names,
              n.content as snippet,
              COUNT(*) as match_count
       FROM friends_contact_notes n
@@ -1601,27 +1413,6 @@ export class FriendsStore extends SettingsStore {
       ORDER BY match_count DESC
       LIMIT ?
     `).all(...params, limit) as any[];
-  }
-
-  getTagBufferContacts(minMessages = 20): Array<{ contact_id: string; message_count: number }> {
-    return this.db.prepare(`
-      SELECT contact_id, COUNT(*) as message_count
-      FROM friends_tag_buffer
-      GROUP BY contact_id
-      HAVING message_count >= ?
-    `).all(minMessages) as any[];
-  }
-
-  getTagBufferMessages(contactId: string): Array<{ message_body: string; timestamp: number }> {
-    return this.db.prepare(`
-      SELECT message_body, timestamp FROM friends_tag_buffer
-      WHERE contact_id = ?
-      ORDER BY timestamp ASC
-    `).all(contactId) as any[];
-  }
-
-  clearTagBufferForContact(contactId: string) {
-    this.db.prepare(`DELETE FROM friends_tag_buffer WHERE contact_id = ?`).run(contactId);
   }
 
   // ── Calendar ──
@@ -1676,7 +1467,7 @@ export class FriendsStore extends SettingsStore {
   // ── Enhanced Dashboard Analytics ──
 
   /** Top friends by message volume within a time window — DM chats only */
-  getTopFriends(limit = 5, windowDays = 30, offsetDays = 0, tierId?: number | null): Array<{ id: string; name: string; messages: number; messages_prev: number; tier_color: string | null; tag_names: string | null }> {
+  getTopFriends(limit = 5, windowDays = 30, offsetDays = 0, tierId?: number | null): Array<{ id: string; name: string; messages: number; messages_prev: number; tier_color: string | null }> {
     const now = Math.floor(Date.now() / 1000);
     const windowEnd = now - offsetDays * 86400;
     const windowStart = windowEnd - windowDays * 86400;
@@ -1687,10 +1478,7 @@ export class FriendsStore extends SettingsStore {
         c.id, COALESCE(c.display_name, c.name) as name,
         SUM(CASE WHEN m.timestamp >= ? AND m.timestamp < ? THEN 1 ELSE 0 END) as messages,
         SUM(CASE WHEN m.timestamp >= ? AND m.timestamp < ? THEN 1 ELSE 0 END) as messages_prev,
-        t.color as tier_color, t.name as tier_name,
-        (SELECT GROUP_CONCAT(tg.name, ', ')
-         FROM friends_contact_tags ct JOIN friends_tags tg ON tg.id = ct.tag_id
-         WHERE ct.contact_id = c.id) as tag_names
+        t.color as tier_color, t.name as tier_name
       FROM friends_contacts c
       JOIN friends_chats ch ON ch.chat_id = c.id AND ch.is_group = 0
       JOIN friends_messages m ON m.chat_id = c.id
@@ -1704,16 +1492,13 @@ export class FriendsStore extends SettingsStore {
   }
 
   /** Reciprocity stats per contact — sent/received balance (DM only), sorted by healthiest balance */
-  getReciprocityStats(tierId?: number | null): Array<{ id: string; name: string; sent: number; received: number; ratio: number; tag_names: string | null; group_names: string | null }> {
+  getReciprocityStats(tierId?: number | null): Array<{ id: string; name: string; sent: number; received: number; ratio: number; group_names: string | null }> {
     const tf = this.tierClause(tierId);
     return this.db.prepare(`
       SELECT
         c.id, COALESCE(c.display_name, c.name) as name,
         SUM(CASE WHEN m.is_from_me = 1 THEN 1 ELSE 0 END) as sent,
         SUM(CASE WHEN m.is_from_me = 0 THEN 1 ELSE 0 END) as received,
-        (SELECT GROUP_CONCAT(tg.name, ', ')
-         FROM friends_contact_tags ct JOIN friends_tags tg ON tg.id = ct.tag_id
-         WHERE ct.contact_id = c.id) as tag_names,
         (SELECT GROUP_CONCAT(g.name, ', ')
          FROM friends_contact_groups cg JOIN friends_groups g ON g.id = cg.group_id
          WHERE cg.contact_id = c.id) as group_names

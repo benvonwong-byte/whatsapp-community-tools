@@ -88,8 +88,7 @@ async function main() {
     router: createFriendsRouter(
       friendsStore, notAvailableNum, notAvailableNum,
       async () => { throw new Error("Not available in dev mode"); },
-      sendProgress, notAvailableNum, notAvailableNum,
-      async () => ({ merged: 0, deleted: 0, remaining: 0 })
+      sendProgress
     ),
   });
 

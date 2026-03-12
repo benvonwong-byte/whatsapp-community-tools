@@ -1124,12 +1124,6 @@
     .gx-detail-body .gxd-stat { background:var(--surface2); border-radius:6px; padding:8px; text-align:center; }
     .gx-detail-body .gxd-stat-val { font-size:18px; font-weight:700; color:var(--accent); }
     .gx-detail-body .gxd-stat-lbl { font-size:9px; color:var(--text-dim); text-transform:uppercase; }
-    .gx-detail-body .gxd-tags { display:flex; flex-wrap:wrap; gap:4px; }
-    .gx-detail-body .gxd-tag {
-      background:var(--surface2); color:var(--accent); border-radius:10px; padding:2px 8px;
-      font-size:10px; cursor:pointer; transition: background .15s;
-    }
-    .gx-detail-body .gxd-tag:hover { background:var(--accent); color:#000; }
     .gx-detail-body .gxd-group { color:var(--text-dim); font-size:11px; padding:2px 0; }
     .gx-detail-body .gxd-btn {
       display:block; width:100%; padding:8px; margin-top:6px; border-radius:6px;
@@ -1334,141 +1328,6 @@
       font-weight: 600;
     }
 
-    /* Tag filters */
-    .tag-filters {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      margin-top: 8px;
-    }
-    .tag-chip {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 999px;
-      padding: 3px 10px;
-      font-size: 11px;
-      cursor: pointer;
-      transition: all 0.15s;
-      user-select: none;
-    }
-    .tag-chip:hover { border-color: var(--accent); }
-    .tag-chip.active { background: var(--accent); color: #000; border-color: var(--accent); }
-    .tag-chip .tag-count { opacity: 0.6; font-size: 10px; }
-    .tag-mode-toggle {
-      font-size: 11px;
-      color: var(--text-dim);
-      cursor: pointer;
-      padding: 3px 8px;
-      border: 1px dashed var(--border);
-      border-radius: 4px;
-    }
-    .tag-mode-toggle:hover { color: var(--accent); border-color: var(--accent); }
-
-    /* Dashboard tag cloud */
-    .dash-tag-cloud {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      align-items: center;
-    }
-    .dash-tag {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      padding: 5px 12px;
-      border-radius: 999px;
-      font-size: 12px;
-      font-weight: 500;
-      cursor: pointer;
-      border: 1px solid transparent;
-      transition: all 0.15s;
-      user-select: none;
-    }
-    .dash-tag:hover { filter: brightness(1.2); transform: translateY(-1px); }
-    .dash-tag.active { border-color: #fff; box-shadow: 0 0 8px rgba(255,255,255,0.15); }
-    .dash-tag .tag-count {
-      font-size: 10px;
-      opacity: 0.7;
-      font-weight: 400;
-    }
-    .tag-cloud-controls {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 8px;
-      width: 100%;
-    }
-    .tag-sort-select {
-      background: var(--card);
-      color: var(--text);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 4px 8px;
-      font-size: 11px;
-      cursor: pointer;
-    }
-    .tag-expand-btn {
-      background: none;
-      border: 1px solid var(--border);
-      color: var(--dim);
-      border-radius: 6px;
-      padding: 4px 10px;
-      font-size: 11px;
-      cursor: pointer;
-      transition: all 0.15s;
-    }
-    .tag-expand-btn:hover { color: var(--accent); border-color: var(--accent); }
-    .tag-category-group {
-      width: 100%;
-      margin-bottom: 8px;
-    }
-    .tag-category-label {
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--dim);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 4px;
-    }
-    .tag-category-chips {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 5px;
-    }
-    .tag-more-hint {
-      display: inline-flex;
-      align-items: center;
-      padding: 5px 12px;
-      font-size: 11px;
-      color: var(--dim);
-      cursor: default;
-    }
-
-    /* Detail panel tags */
-    .detail-tags { padding: 0 0 8px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
-    .detail-tag {
-      background: var(--surface2);
-      border-radius: 4px;
-      padding: 2px 8px;
-      font-size: 11px;
-      color: var(--accent);
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-    }
-    .detail-tag .tag-remove {
-      cursor: pointer;
-      opacity: 0.5;
-      font-size: 10px;
-      line-height: 1;
-    }
-    .detail-tag .tag-remove:hover { opacity: 1; color: #f44; }
-    .detail-tag { cursor: pointer; transition: opacity 0.15s; }
-    .detail-tag:hover { opacity: 0.8; }
-    .detail-tag .tag-count { opacity: 0.6; font-size: 10px; margin-left: 2px; }
     .detail-tier-select {
       display: flex; align-items: center; gap: 6px; margin: 6px 0 10px;
     }
@@ -1478,42 +1337,6 @@
       border-radius: 4px; padding: 3px 8px; font-size: 12px; outline: none; cursor: pointer;
     }
     .detail-tier-select select:focus { border-color: var(--accent); }
-    .tag-add-form {
-      display: inline-flex;
-      align-items: center;
-      gap: 2px;
-    }
-    .tag-add-form input {
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      padding: 2px 6px;
-      font-size: 11px;
-      color: var(--text);
-      width: 80px;
-      outline: none;
-    }
-    .tag-add-form input:focus { border-color: var(--accent); }
-    .tag-add-form button {
-      background: var(--accent);
-      border: none;
-      border-radius: 4px;
-      padding: 2px 6px;
-      font-size: 10px;
-      color: #fff;
-      cursor: pointer;
-    }
-    .tag-extract-btn {
-      background: none;
-      border: 1px dashed var(--border);
-      border-radius: 4px;
-      padding: 2px 8px;
-      font-size: 10px;
-      color: var(--muted);
-      cursor: pointer;
-    }
-    .tag-extract-btn:hover { border-color: var(--accent); color: var(--accent); }
-
     /* Detail voice stats */
     .detail-voice-stats {
       display: grid;
@@ -1630,13 +1453,7 @@
     .top-friend-rank.gold { color: #ffd700; }
     .top-friend-rank.silver { color: #c0c0c0; }
     .top-friend-rank.bronze { color: #cd7f32; }
-    .top-friend-name { font-size: 14px; font-weight: 600; white-space: nowrap; flex-shrink: 0; }
-    .top-friend-tags { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; min-width: 0; justify-content: flex-end; }
-    .top-friend-tag {
-      font-size: 10px; padding: 1px 6px; border-radius: 8px;
-      cursor: pointer; white-space: nowrap; transition: opacity 0.15s;
-    }
-    .top-friend-tag:hover { opacity: 0.7; }
+    .top-friend-name { font-size: 14px; font-weight: 600; white-space: nowrap; flex-shrink: 0; flex: 1; }
     .top-friend-score { flex-shrink: 0; text-align: right; white-space: nowrap; }
     .top-friend-count {
       font-size: 18px; font-weight: 700; color: var(--accent);
@@ -1729,7 +1546,6 @@
     <h1>Friends Network</h1>
     <button id="scan-btn" class="header-btn">Scan Chats</button>
     <button id="backfill-btn" class="header-btn secondary">Backfill</button>
-    <button id="tag-all-header-btn" class="header-btn secondary">Tag All</button>
   </div>
 
   <!-- Tabs -->
@@ -1788,17 +1604,6 @@
       <div class="section" id="tier-distribution-section">
         <div class="section-title">Tier Overview</div>
         <div id="tier-pills" class="tier-pills"></div>
-      </div>
-
-      <!-- Tag Cloud -->
-      <div class="section" id="tag-cloud-section">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-          <div class="section-title" style="margin-bottom:0;">Tags</div>
-          <button id="tag-all-btn" class="header-btn secondary" style="font-size:11px;padding:5px 14px;">AI Tag All</button>
-        </div>
-        <div id="dash-tag-cloud" class="dash-tag-cloud">
-          <span class="chart-empty">No tags yet. Use "AI Tag All" to auto-tag contacts from conversations.</span>
-        </div>
       </div>
 
       <!-- Top Friends leaderboard -->
@@ -1861,9 +1666,6 @@
           </select>
           <select id="neg-group-filter" style="font-size:10px;padding:2px 4px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;">
             <option value="">All Groups</option>
-          </select>
-          <select id="neg-tag-filter" style="font-size:10px;padding:2px 4px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;">
-            <option value="">All Tags</option>
           </select>
           <select id="neg-recency-filter" style="font-size:10px;padding:2px 4px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;">
             <option value="">No recency filter</option>
@@ -1946,8 +1748,6 @@
         </select>
         <input type="text" id="contact-search" class="filter-search" placeholder="Search contacts...">
       </div>
-      <div id="tag-filters" class="tag-filters"></div>
-
       <!-- Contacts table -->
       <div class="section" style="padding: 0; overflow-x: auto;">
         <table class="contacts-table">
@@ -2059,7 +1859,6 @@
           <div class="gx-toolbar-section" style="margin-left:auto;gap:4px;">
             <button class="gx-icon-btn" id="gx-btn-filter" data-tip="Range filters" title="Filters (/)">&#9776;</button>
             <button class="gx-icon-btn" id="gx-btn-lines" data-tip="Show shared group lines" title="Group connections (G)">G</button>
-            <button class="gx-icon-btn" id="gx-btn-tags" data-tip="Show shared tag lines" title="Tag connections (T)">T</button>
             <button class="gx-icon-btn" id="gx-btn-labels" data-tip="Toggle name labels" title="Labels (L)">L</button>
           </div>
         </div>
@@ -2099,7 +1898,6 @@
             <kbd>S</kbd><span>Cycle size</span>
             <kbd>/</kbd><span>Toggle filter panel</span>
             <kbd>G</kbd><span>Toggle group connections</span>
-            <kbd>T</kbd><span>Toggle tag connections</span>
             <kbd>L</kbd><span>Toggle labels</span>
             <kbd>F</kbd><span>Search</span>
             <kbd>1-5</kbd><span>Filter by tier</span>
@@ -2260,8 +2058,6 @@
       <div id="detail-groups" class="detail-groups">No groups</div>
 
       <div id="detail-tier-select" class="detail-tier-select"></div>
-
-      <div id="detail-tags" class="detail-tags"></div>
 
       <div class="detail-range-pills" id="detail-range-pills">
         <span class="detail-range-pill active" data-range="all">All Time</span>

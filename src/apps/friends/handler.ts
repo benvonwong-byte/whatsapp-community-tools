@@ -106,9 +106,5 @@ export function createFriendsHandler(store: FriendsStore) {
       }
     }
 
-    // 10. Buffer text messages for tag extraction (only from others)
-    if (senderId !== "self" && msg.body && msg.body.trim().length > 3 && messageType === "chat") {
-      store.addToTagBuffer(senderId, msg.body, msg.timestamp);
-    }
   };
 }

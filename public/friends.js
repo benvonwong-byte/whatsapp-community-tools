@@ -39,8 +39,6 @@ let hourlyChart = null;
 let detailChart = null;
 let sendPollTimer = null;
 let searchDebounceTimer = null;
-let activeTagFilters = new Set();
-let tagFilterMode = "OR";
 let calYear = new Date().getFullYear();
 let calMonth = new Date().getMonth() + 1;
 let negWindowDays = 30;
@@ -86,7 +84,6 @@ document.addEventListener("DOMContentLoaded", () => {
   // Button handlers
   setupScanButton();
   setupBackfillButton();
-  setupTagAllHeaderButton();
   setupDetailPanel();
   setupContactFilters();
   setupMessagingHandlers();
@@ -108,7 +105,6 @@ document.addEventListener("DOMContentLoaded", () => {
     cachedFetch("/api/friends/contacts?sort=last_seen&dir=desc");
     cachedFetch("/api/friends/tiers");
     cachedFetch("/api/friends/groups");
-    cachedFetch("/api/friends/tags");
     // Prefetch graph data so it's instant when user clicks the tab
     _prefetchGraphData();
   }, 300);
@@ -155,28 +151,6 @@ function setupBackfillButton() {
     } finally {
       btn.disabled = false;
       btn.textContent = "Backfill";
-    }
-  });
-}
-
-function setupTagAllHeaderButton() {
-  const btn = $("tag-all-header-btn");
-  if (!btn) return;
-  btn.addEventListener("click", async () => {
-    if (btn.disabled) return;
-    btn.disabled = true;
-    btn.textContent = "Tagging...";
-    try {
-      const res = await adminFetch("/api/friends/tags/extract", { method: "POST" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Tag extraction failed");
-      btn.textContent = data.contactsProcessed + " tagged!";
-      loadDashboard();
-    } catch (err) {
-      btn.textContent = "Failed!";
-      alert("Tag extraction failed: " + err.message);
-    } finally {
-      setTimeout(() => { btn.textContent = "Tag All"; btn.disabled = false; }, 3000);
     }
   });
 }
@@ -488,7 +462,7 @@ function setupAISearch() {
           }
           snippetHtml = '<div class="ai-search-result-meta">"...' + s + '..."</div>';
         }
-        const sourceIcon = r.match_source === 'message' ? '💬 ' : r.match_source === 'tag' ? '🏷 ' : '👤 ';
+        const sourceIcon = r.match_source === 'message' ? '💬 ' : '👤 ';
         return '<div class="ai-search-result" data-contact-id="' + esc(r.id) + '">' +
           '<div><span class="ai-search-result-name">' + esc(r.name || r.id) + '</span>' + tierBadge +
           snippetHtml + '</div>' +
@@ -560,13 +534,11 @@ async function loadDashboard() {
   // 2. Setup nav/handlers (idempotent, safe to call multiple times)
   setupTopFriendsNav();
   setupNeglectedNav();
-  setupTagAllButton();
 
   // 3. Kick off ALL secondary sections immediately (don't wait for dashboard fetch)
   loadDashboardStatusBar();
   loadTopFriends();
   loadNeglected();
-  loadDashboardTags();
   loadCalendar();
   loadImessageMonitor();
 
@@ -731,172 +703,6 @@ async function loadDashboardStatusBar() {
   }
 }
 
-// ── Dashboard Tag Cloud ──
-
-let dashTagFilter = null; // currently selected tag name or null
-
-async function loadDashboardTags() {
-  const tagTierParam = dashboardTierFilter !== null ? "?tier=" + encodeURIComponent(dashboardTierFilter) : "";
-  const lsKey = "_dashTags" + tagTierParam;
-
-  // 1. Instant render from localStorage (stale data, shown immediately)
-  var hadCached = false;
-  try {
-    var cached = localStorage.getItem(lsKey);
-    if (cached) {
-      hadCached = true;
-      renderDashboardTagCloud(JSON.parse(cached));
-    }
-  } catch (e) { /* ignore parse errors */ }
-
-  // 2. Fetch fresh data in background, re-render when ready
-  try {
-    const res = await cachedFetch("/api/friends/tags" + tagTierParam);
-    if (!res.ok) return;
-    const tags = await res.json();
-    renderDashboardTagCloud(tags);
-    try { localStorage.setItem(lsKey, JSON.stringify(tags)); } catch (e) { /* quota */ }
-  } catch (err) {
-    if (!hadCached) console.error("Failed to load tags:", err);
-  }
-}
-
-let dashTagsExpanded = false;
-let dashTagSort = "popular"; // "popular" or "alpha"
-
-function renderDashboardTagCloud(tags) {
-  const container = $("dash-tag-cloud");
-  if (!container) return;
-  if (!tags || tags.length === 0) {
-    container.innerHTML = '<span class="chart-empty">No tags yet. Use "AI Tag All" to auto-tag contacts from conversations.</span>';
-    return;
-  }
-
-  // Group tags by category
-  const CATEGORY_NAMES = { topic: "Topics", loc: "Location", ctx: "Context", tone: "Tone", emo: "Emotion" };
-  const groups = {};
-  for (const t of tags) {
-    const p = parseTagCategory(t.name);
-    if (!groups[p.category]) groups[p.category] = [];
-    groups[p.category].push({ ...t, parsed: p });
-  }
-
-  // Sort within each group
-  for (const cat of Object.keys(groups)) {
-    if (dashTagSort === "alpha") {
-      groups[cat].sort((a, b) => a.parsed.label.localeCompare(b.parsed.label));
-    } else {
-      groups[cat].sort((a, b) => b.contact_count - a.contact_count);
-    }
-  }
-
-  const PREVIEW_COUNT = 20; // tags shown when collapsed
-  const allTagsSorted = dashTagSort === "alpha"
-    ? tags.slice().sort((a, b) => parseTagCategory(a.name).label.localeCompare(parseTagCategory(b.name).label))
-    : tags.slice().sort((a, b) => b.contact_count - a.contact_count);
-
-  let html = '';
-
-  // Sort toggle + expand button
-  html += '<div class="tag-cloud-controls">';
-  html += '<select id="dash-tag-sort" class="tag-sort-select"><option value="popular"' + (dashTagSort === "popular" ? " selected" : "") + '>Most Popular</option><option value="alpha"' + (dashTagSort === "alpha" ? " selected" : "") + '>A-Z</option></select>';
-  html += '<button id="dash-tag-expand" class="tag-expand-btn">' + (dashTagsExpanded ? 'Show Less' : 'Show All ' + tags.length) + '</button>';
-  html += '</div>';
-
-  if (dashTagsExpanded) {
-    // Expanded: show all tags grouped by category
-    const catOrder = ["topic", "emo", "tone", "ctx", "loc"];
-    for (const cat of catOrder) {
-      if (!groups[cat] || groups[cat].length === 0) continue;
-      html += '<div class="tag-category-group">';
-      html += '<div class="tag-category-label">' + (CATEGORY_NAMES[cat] || cat) + ' <span class="tag-count">' + groups[cat].length + '</span></div>';
-      html += '<div class="tag-category-chips">';
-      html += groups[cat].map(t => {
-        const active = dashTagFilter === t.name ? ' active' : '';
-        return '<span class="dash-tag' + active + '" data-tag="' + esc(t.name) + '" ' +
-          'style="background:' + t.parsed.color + '18;color:' + t.parsed.color + ';border-color:' + (dashTagFilter === t.name ? t.parsed.color : 'transparent') + ';">' +
-          esc(t.parsed.label) +
-          ' <span class="tag-count">' + t.contact_count + '</span>' +
-        '</span>';
-      }).join("");
-      html += '</div></div>';
-    }
-  } else {
-    // Collapsed: show top N tags flat
-    html += '<div class="tag-category-chips">';
-    html += allTagsSorted.slice(0, PREVIEW_COUNT).map(t => {
-      const p = parseTagCategory(t.name);
-      const active = dashTagFilter === t.name ? ' active' : '';
-      return '<span class="dash-tag' + active + '" data-tag="' + esc(t.name) + '" ' +
-        'style="background:' + p.color + '18;color:' + p.color + ';border-color:' + (dashTagFilter === t.name ? p.color : 'transparent') + ';">' +
-        esc(p.label) +
-        ' <span class="tag-count">' + t.contact_count + '</span>' +
-      '</span>';
-    }).join("");
-    if (tags.length > PREVIEW_COUNT) {
-      html += '<span class="tag-more-hint">+' + (tags.length - PREVIEW_COUNT) + ' more</span>';
-    }
-    html += '</div>';
-  }
-
-  container.innerHTML = html;
-
-  // Sort dropdown handler
-  const sortSel = container.querySelector("#dash-tag-sort");
-  if (sortSel) sortSel.addEventListener("change", () => { dashTagSort = sortSel.value; renderDashboardTagCloud(tags); });
-
-  // Expand/collapse handler
-  const expandBtn = container.querySelector("#dash-tag-expand");
-  if (expandBtn) expandBtn.addEventListener("click", () => { dashTagsExpanded = !dashTagsExpanded; renderDashboardTagCloud(tags); });
-
-  // Tag click handlers
-  container.querySelectorAll(".dash-tag").forEach(chip => {
-    chip.addEventListener("click", () => {
-      const tag = chip.dataset.tag;
-      if (dashTagFilter === tag) {
-        dashTagFilter = null;
-      } else {
-        dashTagFilter = tag;
-      }
-      renderDashboardTagCloud(tags);
-      if (dashTagFilter) {
-        activeTagFilters.clear();
-        activeTagFilters.add(dashTagFilter);
-        document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
-        document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
-        const contactsTab = document.querySelector('[data-tab="contacts"]');
-        if (contactsTab) contactsTab.classList.add("active");
-        const contactsContent = $("tab-contacts");
-        if (contactsContent) contactsContent.classList.add("active");
-        loadContacts();
-      }
-    });
-  });
-}
-
-function setupTagAllButton() {
-  const btn = $("tag-all-btn");
-  if (!btn || btn._bound) return;
-  btn._bound = true;
-  btn.addEventListener("click", async () => {
-    if (btn.disabled) return;
-    btn.disabled = true;
-    btn.textContent = "Extracting tags...";
-    try {
-      const res = await adminFetch("/api/friends/tags/extract", { method: "POST" });
-      if (!res.ok) throw new Error("Extraction failed");
-      const data = await res.json();
-      btn.textContent = "Tagged " + (data.contactsProcessed || 0) + " contacts!";
-      loadDashboardTags(); // refresh tag cloud
-      setTimeout(() => { btn.textContent = "AI Tag All"; btn.disabled = false; }, 3000);
-    } catch (err) {
-      console.error("Tag extraction failed:", err);
-      btn.textContent = "Failed";
-      setTimeout(() => { btn.textContent = "AI Tag All"; btn.disabled = false; }, 3000);
-    }
-  });
-}
-
 function renderTierPills(distribution) {
   const container = $("tier-pills");
   if (!container || !distribution) return;
@@ -1039,11 +845,9 @@ function setupNeglectedNav() {
   // Bind filter dropdowns
   var sortSel = $("neg-sort");
   var groupSel = $("neg-group-filter");
-  var tagSel = $("neg-tag-filter");
   var recencySel = $("neg-recency-filter");
   if (sortSel) sortSel.addEventListener("change", () => renderNeglectedList());
   if (groupSel) groupSel.addEventListener("change", () => renderNeglectedList());
-  if (tagSel) tagSel.addEventListener("change", () => renderNeglectedList());
   if (recencySel) recencySel.addEventListener("change", () => renderNeglectedList());
 }
 
@@ -1071,18 +875,11 @@ async function loadNeglected() {
 
     // Populate filter dropdowns
     var groupSel = $("neg-group-filter");
-    var tagSel = $("neg-tag-filter");
     if (groupSel) {
       var groups = new Set();
       neglectedData.forEach(function(c) { (c.group_names || "").split(", ").filter(Boolean).forEach(function(g) { groups.add(g); }); });
       groupSel.innerHTML = '<option value="">All Groups</option>' +
         [...groups].sort().map(function(g) { return '<option value="' + esc(g) + '">' + esc(g) + '</option>'; }).join("");
-    }
-    if (tagSel) {
-      var tags = new Set();
-      neglectedData.forEach(function(c) { (c.tag_names || "").split(", ").filter(Boolean).forEach(function(t) { tags.add(t); }); });
-      tagSel.innerHTML = '<option value="">All Tags</option>' +
-        [...tags].sort().map(function(t) { var p = parseTagCategory(t); return '<option value="' + esc(t) + '">' + esc(p.label) + '</option>'; }).join("");
     }
 
     renderNeglectedList();
@@ -1097,12 +894,10 @@ function renderNeglectedList() {
 
   var filtered = [].concat(neglectedData);
   var groupFilter = $("neg-group-filter")?.value;
-  var tagFilter = $("neg-tag-filter")?.value;
   var recencyFilter = $("neg-recency-filter")?.value;
   var sortMode = $("neg-sort")?.value || "msgs-per-day";
 
   if (groupFilter) filtered = filtered.filter(function(c) { return (c.group_names || "").split(", ").includes(groupFilter); });
-  if (tagFilter) filtered = filtered.filter(function(c) { return (c.tag_names || "").split(", ").includes(tagFilter); });
   if (recencyFilter) {
     var recencyDays = parseInt(recencyFilter);
     var recencyCutoff = Math.floor(Date.now() / 1000) - recencyDays * 86400;
@@ -1298,22 +1093,12 @@ function renderTopFriends(data) {
     const trendClass = diff > 0 ? "up" : diff < 0 ? "down" : "flat";
     const trendIcon = diff > 0 ? "\u25B2" : diff < 0 ? "\u25BC" : "\u2022";
     const trendLabel = diff !== 0 ? " " + Math.abs(diff) : "";
-    // Build tag chips HTML
-    let tagsHtml = '';
-    if (f.tag_names) {
-      const tags = f.tag_names.split(', ').slice(0, 3);
-      tagsHtml = '<div class="top-friend-tags">' + tags.map(t => {
-        const p = parseTagCategory(t);
-        return '<span class="top-friend-tag" data-tag="' + esc(t) + '" style="background:' + p.color + '18;color:' + p.color + ';">' + esc(p.label) + '</span>';
-      }).join('') + '</div>';
-    }
     const tierBadge = f.tier_color && f.tier_name
       ? '<span class="top-friend-tier" style="background:' + esc(f.tier_color) + '22;color:' + esc(f.tier_color) + ';border:1px solid ' + esc(f.tier_color) + '44;font-size:9px;padding:1px 6px;border-radius:3px;margin-left:6px;">' + esc(f.tier_name) + '</span>'
       : '';
     return '<div class="top-friend-row" data-contact-id="' + esc(String(f.id)) + '" style="cursor:pointer;">' +
       '<div class="top-friend-rank ' + rankClass + '">' + (i + 1) + '</div>' +
       '<div class="top-friend-name">' + esc(contactDisplayName(f)) + tierBadge + '</div>' +
-      tagsHtml +
       '<div class="top-friend-score">' +
         '<span class="top-friend-count">' + (f.messages || 0) + '</span>' +
         '<span class="top-friend-trend ' + trendClass + '">' + trendIcon + trendLabel + '</span>' +
@@ -1322,29 +1107,9 @@ function renderTopFriends(data) {
   }).join("");
 
   container.querySelectorAll(".top-friend-row").forEach(row => {
-    row.addEventListener("click", (e) => {
-      // Don't open contact detail if clicking a tag chip
-      if (e.target.closest(".top-friend-tag")) return;
+    row.addEventListener("click", () => {
       const id = row.dataset.contactId;
       if (id) openContactDetail(id);
-    });
-  });
-
-  // Tag chip clicks: filter contacts by that tag
-  container.querySelectorAll(".top-friend-tag").forEach(chip => {
-    chip.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const tag = chip.dataset.tag;
-      if (!tag) return;
-      activeTagFilters.clear();
-      activeTagFilters.add(tag);
-      document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
-      document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
-      const contactsTab = document.querySelector('[data-tab="contacts"]');
-      if (contactsTab) contactsTab.classList.add("active");
-      const contactsContent = $("tab-contacts");
-      if (contactsContent) contactsContent.classList.add("active");
-      loadContacts();
     });
   });
 }
@@ -1428,11 +1193,10 @@ function renderHourlyChart(data) {
 
 async function loadContacts() {
   try {
-    // Load groups, tiers, and tags for filter dropdowns (cached)
-    const [groupsRes, tiersRes, tagsRes] = await Promise.all([
+    // Load groups and tiers for filter dropdowns (cached)
+    const [groupsRes, tiersRes] = await Promise.all([
       cachedFetch("/api/friends/groups"),
       cachedFetch("/api/friends/tiers"),
-      cachedFetch("/api/friends/tags"),
     ]);
     if (groupsRes.ok) {
       groups = await groupsRes.json();
@@ -1441,10 +1205,6 @@ async function loadContacts() {
     if (tiersRes.ok) {
       const tiers = await tiersRes.json();
       populateTierFilter(tiers);
-    }
-    if (tagsRes.ok) {
-      const tags = await tagsRes.json();
-      renderTagFilters(tags);
     }
 
     const params = new URLSearchParams();
@@ -1462,12 +1222,6 @@ async function loadContacts() {
 
     const searchInput = $("contact-search");
     if (searchInput && searchInput.value.trim()) params.set("search", searchInput.value.trim());
-
-    // Tag filters
-    if (activeTagFilters.size > 0) {
-      params.set("tags", [...activeTagFilters].join(","));
-      params.set("tagMode", tagFilterMode);
-    }
 
     const res = await adminFetch("/api/friends/contacts?" + params.toString());
     if (!res.ok) throw new Error("Server returned " + res.status);
@@ -1501,44 +1255,6 @@ function populateTierFilter(tiers) {
   select.value = currentVal;
 }
 
-function renderTagFilters(tags) {
-  const container = $("tag-filters");
-  if (!container || !tags || tags.length === 0) {
-    if (container) container.innerHTML = '';
-    return;
-  }
-  let html = tags.slice(0, 30).map(t => {
-    const active = activeTagFilters.has(t.name) ? ' active' : '';
-    const p = parseTagCategory(t.name);
-    return '<span class="tag-chip' + active + '" data-tag="' + esc(t.name) + '" style="' + (active ? '' : 'border-color:' + p.color + '40;color:' + p.color + ';') + '">' +
-      esc(p.label) + ' <span class="tag-count">' + t.contact_count + '</span>' +
-    '</span>';
-  }).join("");
-
-  if (activeTagFilters.size >= 2) {
-    html += '<span class="tag-mode-toggle" title="Toggle AND/OR">' + tagFilterMode + '</span>';
-  }
-
-  container.innerHTML = html;
-
-  container.querySelectorAll(".tag-chip").forEach(chip => {
-    chip.addEventListener("click", () => {
-      const tag = chip.dataset.tag;
-      if (activeTagFilters.has(tag)) activeTagFilters.delete(tag);
-      else activeTagFilters.add(tag);
-      loadContacts();
-    });
-  });
-
-  const modeToggle = container.querySelector(".tag-mode-toggle");
-  if (modeToggle) {
-    modeToggle.addEventListener("click", () => {
-      tagFilterMode = tagFilterMode === "OR" ? "AND" : "OR";
-      loadContacts();
-    });
-  }
-}
-
 function renderContactsTable(data) {
   const tbody = $("contacts-tbody");
   if (!tbody) return;
@@ -1558,12 +1274,9 @@ function renderContactsTable(data) {
     const tierDot = c.tier_color
       ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + esc(c.tier_color) + ';margin-right:4px;"></span>'
       : '';
-    const tagChips = c.tag_names
-      ? c.tag_names.split(', ').slice(0, 3).map(t => { const p = parseTagCategory(t); return '<span class="detail-tag" style="font-size:9px;padding:1px 5px;background:' + p.color + '20;color:' + p.color + ';border:1px solid ' + p.color + '40;">' + esc(p.label) + '</span>'; }).join('')
-      : '';
     const displayName = contactDisplayName(c);
     return '<tr class="contact-row" data-id="' + esc(String(c.id)) + '">' +
-      '<td class="contact-name-cell"><strong>' + esc(displayName) + '</strong>' + (tagChips ? '<div style="margin-top:2px;">' + tagChips + '</div>' : '') + '</td>' +
+      '<td class="contact-name-cell"><strong>' + esc(displayName) + '</strong></td>' +
       '<td>' + tierDot + esc(c.tier_name || "") + '</td>' +
       '<td>' + (c.last_seen ? timeAgo(c.last_seen) : "--") + '</td>' +
       '<td>' + (c.messages_30d ?? 0) + '</td>' +
@@ -1832,9 +1545,6 @@ async function openContactDetail(contactId) {
 
     // Tier selector
     renderDetailTierSelect(contactId, contact.tier_id);
-
-    // Tags (editable)
-    renderDetailTags(contactId, detailData.tags || []);
 
     // Timestamped Notes
     renderContactNotes(contactId, detailData.notes || []);
@@ -2288,25 +1998,6 @@ function renderDetailChart(data, granularity) {
   });
 }
 
-// ── Detail Tags (editable) ──
-
-const TAG_COLORS = {
-  "loc:": "#4fc3f7",    // location - blue
-  "ctx:": "#81c784",    // context - green
-  "tone:": "#ffb74d",   // tone - orange
-  "emo:": "#f06292",    // emotion - pink
-  "": "#b39ddb",        // topics (no prefix) - purple
-};
-
-function parseTagCategory(name) {
-  for (const [prefix, color] of Object.entries(TAG_COLORS)) {
-    if (prefix && name.startsWith(prefix)) {
-      return { label: name.slice(prefix.length), color, category: prefix.slice(0, -1) };
-    }
-  }
-  return { label: name, color: TAG_COLORS[""], category: "topic" };
-}
-
 async function renderDetailTierSelect(contactId, currentTierId) {
   const container = $("detail-tier-select");
   if (!container) return;
@@ -2343,111 +2034,6 @@ async function renderDetailTierSelect(contactId, currentTierId) {
   }
 }
 
-function renderDetailTags(contactId, tags) {
-  const container = $("detail-tags");
-  if (!container) return;
-
-  let html = tags.map((t) => {
-    const { label, color } = parseTagCategory(t.name);
-    return '<span class="detail-tag" data-tag-name="' + esc(t.name) + '" data-tag-id="' + t.tag_id + '" style="background:' + color + '20;color:' + color + ';border:1px solid ' + color + '40;" title="Click to find contacts with this tag">' +
-      esc(label) +
-      (t.contact_count > 1 ? ' <span class="tag-count">' + t.contact_count + '</span>' : '') +
-      ' <span class="tag-remove" data-contact="' + esc(contactId) + '" data-tag-id="' + t.tag_id + '">&times;</span>' +
-    '</span>';
-  }).join("");
-
-  html += '<span class="tag-add-form">' +
-    '<input type="text" id="tag-add-input" placeholder="+ add tag" maxlength="40">' +
-    '<button id="tag-add-btn" type="button">+</button>' +
-    '</span>';
-
-  html += ' <button class="tag-extract-btn" id="tag-extract-btn" title="AI-generate tags from conversation">AI Tags</button>';
-
-  container.innerHTML = html;
-
-  // Remove tag handlers
-  container.querySelectorAll(".tag-remove").forEach(btn => {
-    btn.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      const cId = btn.dataset.contact;
-      const tId = btn.dataset.tagId;
-      try {
-        const res = await adminFetch("/api/friends/contacts/" + encodeURIComponent(cId) + "/tags/" + tId, { method: "DELETE" });
-        if (!res.ok) throw new Error("Failed");
-        const updated = await res.json();
-        renderDetailTags(cId, updated);
-      } catch (err) {
-        console.error("Failed to remove tag:", err);
-      }
-    });
-  });
-
-  // Clickable tags — navigate to contacts list filtered by tag
-  container.querySelectorAll(".detail-tag[data-tag-name]").forEach(chip => {
-    chip.addEventListener("click", (e) => {
-      if (e.target.closest(".tag-remove")) return; // don't trigger on X button
-      const tagName = chip.dataset.tagName;
-      if (!tagName) return;
-      // Close detail panel and switch to contacts tab filtered by this tag
-      $("detail-panel")?.classList.remove("open");
-      $("detail-overlay")?.classList.remove("open");
-      activeTagFilters.clear();
-      activeTagFilters.add(tagName);
-      switchTab("contacts");
-      loadContacts();
-    });
-  });
-
-  // Add tag handler
-  const addBtn = $("tag-add-btn");
-  const addInput = $("tag-add-input");
-  if (addBtn && addInput) {
-    const doAdd = async () => {
-      const name = addInput.value.trim();
-      if (!name) return;
-      addInput.value = "";
-      try {
-        const res = await adminFetch("/api/friends/contacts/" + encodeURIComponent(contactId) + "/tags", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name }),
-        });
-        if (!res.ok) throw new Error("Failed");
-        const updated = await res.json();
-        renderDetailTags(contactId, updated);
-      } catch (err) {
-        console.error("Failed to add tag:", err);
-      }
-    };
-    addBtn.addEventListener("click", doAdd);
-    addInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") { e.preventDefault(); doAdd(); }
-    });
-  }
-
-  // AI extract handler
-  const extractBtn = $("tag-extract-btn");
-  if (extractBtn) {
-    extractBtn.addEventListener("click", async () => {
-      extractBtn.disabled = true;
-      extractBtn.textContent = "Extracting...";
-      try {
-        const res = await adminFetch("/api/friends/tags/extract", { method: "POST" });
-        if (!res.ok) throw new Error("Extraction failed");
-        // Refresh tags for this contact
-        const tagRes = await adminFetch("/api/friends/contacts/" + encodeURIComponent(contactId) + "/tags");
-        if (tagRes.ok) {
-          const updated = await tagRes.json();
-          renderDetailTags(contactId, updated);
-        }
-      } catch (err) {
-        console.error("Tag extraction failed:", err);
-        extractBtn.textContent = "Failed";
-        setTimeout(() => { extractBtn.textContent = "AI Tags"; extractBtn.disabled = false; }, 2000);
-      }
-    });
-  }
-}
 
 // ── Groups Tab ──
 
@@ -3674,11 +3260,11 @@ async function _loadCallsTabList(more = false) {
 // ── Contact Explorer (D3 Scatter Plot) ──
 
 const GX = {
-  data: null, nodes: [], edges: [], tagEdges: [],
+  data: null, nodes: [], edges: [],
   svg: null, g: null, zoom: null,
   xScale: null, yScale: null,
   selected: null,
-  showLabels: true, showGroupLines: false, showTagLines: false,
+  showLabels: true, showGroupLines: false,
   tierFilter: "all",
   searchQ: "",
   xAxis: "lastContactDate", // locked to time axis
@@ -3986,7 +3572,6 @@ function gxRender(fast) {
   GX.nodes = nodes;
   const nodeIds = new Set(nodes.map(n => n.id));
   GX.edges = (GX.data.edges || []).filter(e => nodeIds.has(e.source) && nodeIds.has(e.target));
-  GX.tagEdges = (GX.data.tagEdges || []).filter(e => nodeIds.has(e.source) && nodeIds.has(e.target));
 
   const W = wrap.clientWidth;
   const H = wrap.clientHeight;
@@ -4013,7 +3598,6 @@ function gxRender(fast) {
     GX.g.append("rect").attr("class", "gx-bg").attr("width", W * 3).attr("height", H * 3)
       .attr("x", -W).attr("y", -H).attr("fill", "transparent");
     GX.g.append("g").attr("class", "gx-edges-layer");
-    GX.g.append("g").attr("class", "gx-tag-edges-layer");
     GX.g.append("g").attr("class", "gx-dots-layer");
     GX.g.append("g").attr("class", "gx-labels-layer");
     svg.append("g").attr("class", "gx-axis gx-x-axis");
@@ -4093,16 +3677,6 @@ function gxRender(fast) {
     .attr("x2", d => xs(xv(nodeMap[d.target] || {}))).attr("y2", d => ys(yv(nodeMap[d.target] || {})))
     .attr("stroke-width", d => Math.min(2, d.weight * 0.6)).attr("stroke-opacity", 0.15);
 
-  // Tag edges
-  const tagEdgeData = GX.showTagLines ? GX.tagEdges : [];
-  const tagSel = GX.g.select(".gx-tag-edges-layer").selectAll("line.gx-tag-edge").data(tagEdgeData, d => d.source + "|" + d.target);
-  tagSel.exit().transition(t).attr("stroke-opacity", 0).remove();
-  const tagEnter = tagSel.enter().append("line").attr("class", "gx-tag-edge")
-    .attr("stroke", "rgba(253,203,110,0.15)").attr("stroke-opacity", 0).attr("stroke-dasharray", "3,3");
-  tagSel.merge(tagEnter).transition(t)
-    .attr("x1", d => xs(xv(nodeMap[d.source] || {}))).attr("y1", d => ys(yv(nodeMap[d.source] || {})))
-    .attr("x2", d => xs(xv(nodeMap[d.target] || {}))).attr("y2", d => ys(yv(nodeMap[d.target] || {})))
-    .attr("stroke-opacity", 0.2);
 
   // Dots
   const dotSel = GX.g.select(".gx-dots-layer").selectAll("circle.gx-dot").data(nodes, d => d.id);
@@ -4290,9 +3864,6 @@ function gxDynamicRescale(transform) {
   GX.g.select(".gx-edges-layer").selectAll("line.gx-edge")
     .attr("x1", d => xs(xv(nodeMap[d.source] || {}))).attr("y1", d => ys(yv(nodeMap[d.source] || {})))
     .attr("x2", d => xs(xv(nodeMap[d.target] || {}))).attr("y2", d => ys(yv(nodeMap[d.target] || {})));
-  GX.g.select(".gx-tag-edges-layer").selectAll("line.gx-tag-edge")
-    .attr("x1", d => xs(xv(nodeMap[d.source] || {}))).attr("y1", d => ys(yv(nodeMap[d.source] || {})))
-    .attr("x2", d => xs(xv(nodeMap[d.target] || {}))).attr("y2", d => ys(yv(nodeMap[d.target] || {})));
 }
 
 function gxBuildFilters() {
@@ -4425,8 +3996,6 @@ function setupGraphHandlers() {
 
   const btnG = $("gx-btn-lines");
   if (btnG) btnG.addEventListener("click", () => { GX.showGroupLines = !GX.showGroupLines; btnG.classList.toggle("active"); gxRender(); });
-  const btnT = $("gx-btn-tags");
-  if (btnT) btnT.addEventListener("click", () => { GX.showTagLines = !GX.showTagLines; btnT.classList.toggle("active"); gxRender(); });
   const btnL = $("gx-btn-labels");
   if (btnL) btnL.addEventListener("click", () => { GX.showLabels = !GX.showLabels; btnL.classList.toggle("active"); gxRender(); });
   const btnH = $("gx-btn-help");
@@ -4496,7 +4065,6 @@ function setupGraphHandlers() {
       case "c": case "C": GX.colorMode = gxCyclePill(GX.colorMode, GX.colors); gxBuildToolbar(); gxRender(); break;
       case "s": case "S": GX.sizeMode = gxCyclePill(GX.sizeMode, GX.sizes); gxBuildToolbar(); gxRender(); break;
       case "g": GX.showGroupLines = !GX.showGroupLines; $("gx-btn-lines")?.classList.toggle("active"); gxRender(); break;
-      case "t": GX.showTagLines = !GX.showTagLines; $("gx-btn-tags")?.classList.toggle("active"); gxRender(); break;
       case "l": case "L": GX.showLabels = !GX.showLabels; $("gx-btn-labels")?.classList.toggle("active"); gxRender(); break;
       case "f": case "F": e.preventDefault(); $("gx-search")?.focus(); break;
       case "w": case "W": gxToggleLogScale(); break;

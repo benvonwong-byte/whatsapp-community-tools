@@ -21,9 +21,7 @@ export function createFriendsRouter(
     media: { base64: string; mimetype: string; filename: string } | null
   ) => Promise<void>,
   sendProgress: SendProgress,
-  tagExtractTrigger?: () => Promise<number>,
-  fetchHistoryTrigger?: (contactId: string) => Promise<number>,
-  tagConsolidateTrigger?: () => Promise<{ merged: number; deleted: number; remaining: number }>
+  fetchHistoryTrigger?: (contactId: string) => Promise<number>
 ): Router {
   const router = Router();
 
@@ -184,17 +182,6 @@ export function createFriendsRouter(
       }
     }
 
-    // Filter by tags
-    const tagsParam = req.query.tags as string;
-    if (tagsParam) {
-      const tagNames = tagsParam.split(",").map(t => t.trim().toLowerCase()).filter(Boolean);
-      const tagMode = (req.query.tagMode as string || "OR").toUpperCase() as "AND" | "OR";
-      if (tagNames.length > 0) {
-        const matchingIds = new Set(store.getContactsWithTags(tagNames, tagMode));
-        contacts = contacts.filter(c => matchingIds.has(c.id));
-      }
-    }
-
     // Filter by minimum quality score
     const minScore = parseInt(req.query.minScore as string);
     if (!isNaN(minScore)) {
@@ -243,7 +230,7 @@ export function createFriendsRouter(
     _dashCache = null;
     _graphCache = null;
     _topFriendsCache = null;
-    _tagsCache = null;
+
     res.json({ ok: true, hidden });
   });
 
@@ -254,10 +241,9 @@ export function createFriendsRouter(
     const { startTs, endTs } = parseRange(req.query.range as string);
     const stats = store.getContactStats(contact.id, startTs, endTs);
     const groups = store.getContactGroups(contact.id);
-    const tags = store.getContactTags(contact.id);
     const voiceStats = store.getVoiceStatsByContact(contact.id, startTs, endTs);
     const notes = store.getContactNotes(contact.id);
-    res.json({ contact, stats, groups, tags, voiceStats, notes, range: req.query.range || "all" });
+    res.json({ contact, stats, groups, voiceStats, notes, range: req.query.range || "all" });
   });
 
   router.get("/contacts/:id/activity", (req: Request, res: Response) => {
@@ -353,7 +339,7 @@ export function createFriendsRouter(
     _dashCache = null;
     _graphCache = null;
     _topFriendsCache = null;
-    _tagsCache = null;
+
     res.json({ ok: true });
   });
 
@@ -362,7 +348,7 @@ export function createFriendsRouter(
     _dashCache = null;
     _graphCache = null;
     _topFriendsCache = null;
-    _tagsCache = null;
+
     res.json({ ok: true });
   });
 
@@ -371,35 +357,6 @@ export function createFriendsRouter(
     const notes = store.getVoiceNotesByContact(contactId);
     const stats = store.getVoiceStatsByContact(contactId);
     res.json({ notes, stats });
-  });
-
-  router.get("/contacts/:id/tags", (req: Request, res: Response) => {
-    const tags = store.getContactTags(decodeURIComponent(req.params.id as string));
-    res.json(tags);
-  });
-
-  router.post("/contacts/:id/tags", (req: Request, res: Response) => {
-    const contactId = decodeURIComponent(req.params.id as string);
-    const { name } = req.body;
-    if (!name || typeof name !== "string" || !name.trim()) {
-      res.status(400).json({ error: "Tag name required" });
-      return;
-    }
-    const timestamp = Math.floor(Date.now() / 1000);
-    store.addContactTag(contactId, name.trim(), timestamp, 1.0);
-    _tagsCache = null;
-    const tags = store.getContactTags(contactId);
-    res.json(tags);
-  });
-
-  router.delete("/contacts/:id/tags/:tagId", (req: Request, res: Response) => {
-    const contactId = decodeURIComponent(req.params.id as string);
-    const tagId = parseInt(req.params.tagId as string);
-    if (isNaN(tagId)) { res.status(400).json({ error: "Invalid tag ID" }); return; }
-    store.removeContactTag(contactId, tagId);
-    _tagsCache = null;
-    const tags = store.getContactTags(contactId);
-    res.json(tags);
   });
 
   // ── Chats ──
@@ -680,105 +637,6 @@ export function createFriendsRouter(
     res.json(store.getVoiceStatsAll());
   });
 
-  // ── Tags (with server-side cache) ──
-
-  let _tagsCache: { data: any; time: number; key: string } | null = null;
-  const TAGS_CACHE_TTL = 60000; // 60 seconds
-
-  router.get("/tags", (req: Request, res: Response) => {
-    const tierParam = req.query.tier as string | undefined;
-    let tierId: number | null | undefined = undefined;
-    if (tierParam === "none") tierId = null;
-    else if (tierParam && !isNaN(parseInt(tierParam))) tierId = parseInt(tierParam);
-
-    const cacheKey = String(tierId ?? "all");
-    if (_tagsCache && _tagsCache.key === cacheKey && (Date.now() - _tagsCache.time) < TAGS_CACHE_TTL) {
-      res.json(_tagsCache.data);
-      return;
-    }
-
-    const data = store.getAllTags(tierId);
-    _tagsCache = { data, time: Date.now(), key: cacheKey };
-    res.json(data);
-  });
-
-  router.post("/tags/extract", async (_req: Request, res: Response) => {
-    if (!tagExtractTrigger) {
-      res.status(503).json({ error: "Tag extraction not configured" });
-      return;
-    }
-    try {
-      const count = await tagExtractTrigger();
-      _tagsCache = null;
-      res.json({ ok: true, contactsProcessed: count });
-    } catch (err: any) {
-      res.status(500).json({ error: err?.message || "Tag extraction failed" });
-    }
-  });
-
-  // Merge tags: merge source tag IDs into a canonical tag ID
-  router.post("/tags/merge", (req: Request, res: Response) => {
-    const { merges } = req.body;
-    if (!Array.isArray(merges)) {
-      res.status(400).json({ error: "Expected { merges: [{ sourceIds: number[], canonicalId: number }] }" });
-      return;
-    }
-    let totalReassigned = 0;
-    for (const m of merges) {
-      if (!Array.isArray(m.sourceIds) || typeof m.canonicalId !== "number") continue;
-      totalReassigned += store.mergeTags(m.sourceIds, m.canonicalId);
-    }
-    const remaining = store.getAllTags();
-    _tagsCache = null;
-    res.json({ ok: true, reassigned: totalReassigned, remainingTags: remaining.length });
-  });
-
-  // Rename a tag
-  router.put("/tags/:id", (req: Request, res: Response) => {
-    const tagId = parseInt(req.params.id as string);
-    const { name } = req.body;
-    if (isNaN(tagId) || !name) { res.status(400).json({ error: "Tag ID and name required" }); return; }
-    store.renameTag(tagId, name);
-    _tagsCache = null;
-    res.json({ ok: true });
-  });
-
-  // Delete singleton tags (used by 0-1 contacts)
-  router.post("/tags/cleanup", (req: Request, res: Response) => {
-    const maxCount = parseInt(req.body.maxContactCount as string) || 1;
-    const allTags = store.getAllTags();
-    const toDelete = allTags.filter(t => t.contact_count <= maxCount);
-    let deleted = 0;
-    for (const t of toDelete) {
-      store.mergeTags([t.id], t.id); // this will just clean up orphans
-    }
-    // Actually delete contact_tags for low-count tags, then clean tags table
-    const db = (store as any).db;
-    for (const t of toDelete) {
-      db.prepare(`DELETE FROM friends_contact_tags WHERE tag_id = ?`).run(t.id);
-      db.prepare(`DELETE FROM friends_tags WHERE id = ?`).run(t.id);
-      deleted++;
-    }
-    const remaining = store.getAllTags();
-    _tagsCache = null;
-    res.json({ ok: true, deleted, remainingTags: remaining.length });
-  });
-
-  // AI-powered tag consolidation
-  router.post("/tags/consolidate", async (_req: Request, res: Response) => {
-    if (!tagConsolidateTrigger) {
-      res.status(503).json({ error: "Tag consolidation not configured" });
-      return;
-    }
-    try {
-      const result = await tagConsolidateTrigger();
-      _tagsCache = null;
-      res.json({ ok: true, ...result });
-    } catch (err: any) {
-      res.status(500).json({ error: err?.message || "Consolidation failed" });
-    }
-  });
-
   // ── Graph data (with server-side cache) ──
 
   let _graphCache: { data: any; time: number; minMessages: number } | null = null;
@@ -807,7 +665,6 @@ export function createFriendsRouter(
 
     const nodes = allContacts.map(c => {
       const groupArr = c.group_names ? c.group_names.split(", ") : [];
-      const tagArr = c.tag_names ? c.tag_names.split(", ") : [];
       const daysSince = Math.max(0, Math.round((now - (c.last_seen || now)) / 86400));
       const daysKnown = Math.max(1, Math.round(((c.last_seen || now) - (c.first_seen || c.last_seen || now)) / 86400));
       const ratio = c.received_messages > 0 ? Math.round((c.sent_messages / c.received_messages) * 100) / 100 : 0;
@@ -834,10 +691,10 @@ export function createFriendsRouter(
         // Computed metrics for axes
         daysSince, daysKnown, ratio, quality: c.quality_score || 0,
         msgsPerDay, recentPerDay, wordsPerActiveDay, voiceNotes: gm.voiceNotes,
-        groupCount: groupArr.length, tagCount: tagArr.length,
+        groupCount: groupArr.length,
         // Metadata
         tierId: c.tier_id, tierName: c.tier_name, tierColor: c.tier_color,
-        tags: tagArr, groups: groupArr
+        groups: groupArr
       };
     });
 
@@ -869,26 +726,7 @@ export function createFriendsRouter(
       edges.push({ source, target, weight: val.weight, groups: val.groups });
     }
 
-    // Shared tag edges (contacts sharing 3+ tags = likely connected)
-    const tagEdges: Array<{ source: string; target: string; sharedTags: string[] }> = [];
-    const contactTagMap: Record<string, Set<string>> = {};
-    for (const n of nodes) {
-      if (n.tags.length > 0) contactTagMap[n.id] = new Set(n.tags);
-    }
-    const contactIds = Object.keys(contactTagMap);
-    for (let i = 0; i < contactIds.length; i++) {
-      for (let j = i + 1; j < contactIds.length; j++) {
-        const shared: string[] = [];
-        for (const t of contactTagMap[contactIds[i]]) {
-          if (contactTagMap[contactIds[j]].has(t)) shared.push(t);
-        }
-        if (shared.length >= 3) {
-          tagEdges.push({ source: contactIds[i], target: contactIds[j], sharedTags: shared });
-        }
-      }
-    }
-
-    const responseData = { nodes, edges, tagEdges, tiers };
+    const responseData = { nodes, edges, tiers };
     _graphCache = { data: responseData, time: Date.now(), minMessages };
     res.json(responseData);
   });
@@ -965,37 +803,11 @@ User query: "${query.replace(/"/g, '\\"')}"`);
             seenIds.add(r.contact_id);
             results.push({
               id: r.contact_id, name: r.name, tier_name: r.tier_name, tier_color: r.tier_color,
-              tag_names: r.tag_names, match_source: "message",
+              match_source: "message",
               match_reason: `${r.match_count} message matches`,
               snippet: r.snippet?.substring(0, 200),
               score: r.match_count * 10
             });
-          }
-        }
-      }
-
-      // Search by tags — only literal substring matches, not conceptual
-      if (phrases.length > 0) {
-        const allTags = store.getAllTags().slice(0, 500);
-        const matchingTags = allTags.filter(t =>
-          phrases.some(p => t.name.includes(p.toLowerCase()) || p.toLowerCase().includes(t.name))
-        ).map(t => t.name);
-
-        if (matchingTags.length > 0) {
-          const tagContacts = store.getContactsWithTags(matchingTags, "OR");
-          const allContacts = store.getContactsWithStats();
-          for (const c of allContacts) {
-            if (tagContacts.includes(c.id) && !seenIds.has(c.id)) {
-              seenIds.add(c.id);
-              const matchedTags = matchingTags.filter((t: string) =>
-                (c as any).tag_names && (c as any).tag_names.includes(t)
-              );
-              results.push({
-                ...c, match_source: "tag",
-                match_reason: "Tagged: " + matchedTags.join(", "),
-                score: matchedTags.length * 5
-              });
-            }
           }
         }
       }
@@ -1008,7 +820,7 @@ User query: "${query.replace(/"/g, '\\"')}"`);
             seenIds.add(r.contact_id);
             results.push({
               id: r.contact_id, name: r.name, tier_name: r.tier_name, tier_color: r.tier_color,
-              tag_names: r.tag_names, match_source: "note",
+              match_source: "note",
               match_reason: `Found in notes`,
               snippet: r.snippet?.substring(0, 200),
               score: r.match_count * 7

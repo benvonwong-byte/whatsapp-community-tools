@@ -44,7 +44,7 @@ export class WhatsAppClient {
     "--disable-gpu",
     "--no-first-run",
     "--disable-extensions",
-    "--js-flags=--max-old-space-size=256",
+    "--js-flags=--max-old-space-size=512",
     "--disable-features=TranslateUI",
     "--disable-background-networking",
     "--disable-default-apps",

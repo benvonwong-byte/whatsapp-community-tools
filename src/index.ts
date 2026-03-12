@@ -22,7 +22,6 @@ import { createMetacrisisRouter } from "./apps/metacrisis/routes";
 import { FriendsStore } from "./apps/friends/store";
 import { createFriendsHandler } from "./apps/friends/handler";
 import { createFriendsRouter, SendProgress } from "./apps/friends/routes";
-import { runTagExtraction, runDirectTagExtraction, runTagConsolidation } from "./apps/friends/tagger";
 import { createRecordingRouter } from "./apps/recording/routes";
 import { createCallsRouter } from "./apps/calls/routes";
 
@@ -552,32 +551,13 @@ async function main() {
 
         const messages = await chat.fetchMessages({ limit: 500 });
         let saved = 0;
-        // Track which contacts in this chat already have tags (skip buffer for them)
-        const contactsWithTags = new Set<string>();
         for (const msg of messages) {
-          const isDupe = friendsStore.isDuplicate(msg.id._serialized);
           if (!msg.body && !msg.hasMedia) continue;
 
           const senderId = msg.fromMe ? "self" : ((msg as any).author || chat.id._serialized);
           const msgType = (msg as any).type || "text";
 
-          // Always buffer for tag extraction if contact has no tags yet
-          if (!isDupe || !contactsWithTags.has(senderId)) {
-            if (senderId !== "self" && msg.body && msg.body.trim().length > 3 && msgType === "chat") {
-              // Check once per contact if they already have tags
-              if (!contactsWithTags.has(senderId)) {
-                const existingTags = friendsStore.getContactTags(senderId);
-                if (existingTags.length > 0) {
-                  contactsWithTags.add(senderId);
-                }
-              }
-              if (!contactsWithTags.has(senderId)) {
-                friendsStore.addToTagBuffer(senderId, msg.body, msg.timestamp);
-              }
-            }
-          }
-
-          if (isDupe) continue;
+          if (friendsStore.isDuplicate(msg.id._serialized)) continue;
 
           let senderName = "";
           if (!msg.fromMe) {
@@ -674,27 +654,6 @@ async function main() {
     }
   };
 
-  const friendsTagExtract = async () => {
-    // First try buffer-based extraction (for new real-time messages)
-    let count = await runTagExtraction(friendsStore);
-    // Then directly tag any remaining untagged contacts via WhatsApp
-    const getChats = () => whatsapp.getClient().getChats();
-    count += await runDirectTagExtraction(friendsStore, getChats);
-    return count;
-  };
-
-  const friendsTagConsolidate = () => runTagConsolidation(friendsStore);
-
-  // Auto-run tag extraction every 30 minutes
-  setInterval(async () => {
-    try {
-      const count = await runTagExtraction(friendsStore);
-      if (count > 0) console.log(`[auto-tagger] Extracted tags for ${count} contact(s).`);
-    } catch (err: any) {
-      console.error("[auto-tagger] Failed:", err?.message || err);
-    }
-  }, 30 * 60 * 1000);
-
   const friendsFetchHistory = async (contactId: string): Promise<number> => {
     const allChats = await whatsapp.getClient().getChats();
     const chat = allChats.find((c: any) => c.id._serialized === contactId);
@@ -739,7 +698,7 @@ async function main() {
 
   appRouters.push({
     path: "/api/friends",
-    router: createFriendsRouter(friendsStore, friendsScan, friendsBackfill, friendsSendMessage, friendsSendProgress, friendsTagExtract, friendsFetchHistory, friendsTagConsolidate),
+    router: createFriendsRouter(friendsStore, friendsScan, friendsBackfill, friendsSendMessage, friendsSendProgress, friendsFetchHistory),
   });
 
   appRouters.push({
@@ -859,20 +818,10 @@ async function main() {
     console.log(`[cleanup] Cleared ${cleared} cache directories.`);
   });
 
-  // ── Hourly tag extraction for friends ──
-  setInterval(async () => {
-    try {
-      const count = await friendsTagExtract();
-      if (count > 0) console.log(`[tagger] Extracted tags for ${count} contacts.`);
-    } catch (err: any) {
-      console.error("[tagger] Hourly extraction failed:", err?.message || err);
-    }
-  }, 60 * 60 * 1000); // every hour
-
-  // ── Real-time relationship auto-analysis ──
-  // Every 30 minutes, reset today's analyzed flags and re-analyze
-  // so the dashboard reflects the latest messages throughout the day.
-  const AUTO_ANALYZE_INTERVAL = 30 * 60 * 1000; // 30 minutes
+  // ── Periodic relationship auto-analysis ──
+  // Every 12 hours, reset today's analyzed flags and re-analyze
+  // so the dashboard reflects the latest messages.
+  const AUTO_ANALYZE_INTERVAL = 12 * 60 * 60 * 1000; // 12 hours
   setInterval(async () => {
     if (relationshipAnalyzeProgress.active) {
       console.log("[auto-analyze] Analysis already in progress, skipping.");
