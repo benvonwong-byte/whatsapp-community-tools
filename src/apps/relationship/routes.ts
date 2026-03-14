@@ -551,6 +551,18 @@ export function createRelationshipRouter(
     res.json({ ok: true, ...result });
   });
 
+  // POST /api/relationship/purge-non-partner — remove messages from wrong chats
+  // Body: { chatId: "145458227847210@lid" }
+  router.post("/purge-non-partner", requireAdminRole, (req: Request, res: Response) => {
+    const { chatId } = req.body;
+    if (!chatId || typeof chatId !== "string") {
+      res.status(400).json({ error: "Missing 'chatId' — the partner chat ID to keep" });
+      return;
+    }
+    const result = store.purgeNonPartnerMessages(chatId);
+    res.json({ ok: true, ...result });
+  });
+
   // POST /api/relationship/chat — AI chat with tiered context + tool use
   // Accessible to both admin and guest (no requireAdminRole)
   router.post("/chat", async (req: Request, res: Response) => {

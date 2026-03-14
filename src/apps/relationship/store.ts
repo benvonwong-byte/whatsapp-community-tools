@@ -359,10 +359,23 @@ export class RelationshipStore extends SettingsStore {
     return { messagesDeleted: msgs.changes, analysisDeleted: analysis.changes };
   }
 
-  /** Delete messages whose WhatsApp IDs indicate group chats (@g.us) */
+  /** Delete messages whose WhatsApp IDs indicate group chats (@g.us) or broadcasts */
   purgeGroupMessages(): { deleted: number } {
-    const result = this.db.prepare(`DELETE FROM relationship_messages WHERE id LIKE '%@g.us%'`).run();
+    const result = this.db.prepare(`DELETE FROM relationship_messages WHERE id LIKE '%@g.us%' OR id LIKE '%@broadcast%'`).run();
     return { deleted: result.changes };
+  }
+
+  /** Delete messages that don't belong to the specified partner chat ID */
+  purgeNonPartnerMessages(partnerChatId: string): { deleted: number; kept: number } {
+    // Message IDs have format: {true|false}_{chatId}_{messageId}
+    // Keep only messages whose ID contains the partner chat ID, plus imported/in-person messages
+    const kept = this.db.prepare(
+      `SELECT COUNT(*) as count FROM relationship_messages WHERE id LIKE ? OR id LIKE 'import_%' OR id LIKE 'in-person_%'`
+    ).get(`%${partnerChatId}%`) as { count: number };
+    const result = this.db.prepare(
+      `DELETE FROM relationship_messages WHERE id NOT LIKE ? AND id NOT LIKE 'import_%' AND id NOT LIKE 'in-person_%'`
+    ).run(`%${partnerChatId}%`);
+    return { deleted: result.changes, kept: kept.count };
   }
 
   getInPersonStats() {

@@ -10,14 +10,27 @@ export { transcribeVoiceNote };
  */
 export function createRelationshipHandler(store: RelationshipStore) {
   const chatNameLower = config.relationshipChatName.toLowerCase();
+  // Cache the partner chat ID once we find it — this is the most reliable filter
+  // because chat.name and chat.isGroup can be unreliable during post-crash sync
+  let knownChatId: string | null = null;
 
   return async (msg: Message, chat: any) => {
-    // Only process the specific private chat
-    // Use chat ID format as primary check: @c.us = private, @g.us = group
     const chatId = chat.id?._serialized || chat.id?.toString() || "";
-    if (!chatId.endsWith("@c.us")) return;
+
+    // Block group chats and status broadcasts
+    if (chatId.endsWith("@g.us")) return;
+    if (chatId.includes("@broadcast")) return;
     if (chat.isGroup) return;
-    if (!chat.name?.toLowerCase().includes(chatNameLower)) return;
+
+    // If we already know the partner chat ID, use it as the primary filter
+    if (knownChatId) {
+      if (chatId !== knownChatId) return;
+    } else {
+      // First time: match by name, then lock onto this chat ID
+      if (!chat.name || !chat.name.toLowerCase().includes(chatNameLower)) return;
+      knownChatId = chatId;
+      console.log(`[relationship] Locked onto chat ID: ${chatId} (name: "${chat.name}")`);
+    }
 
     // Skip duplicates
     if (store.isDuplicate(msg.id._serialized)) return;
