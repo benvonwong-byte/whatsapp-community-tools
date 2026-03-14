@@ -294,7 +294,13 @@ export class WhatsAppClient {
     if (!this.ready) return null;
     const chats = await this.client.getChats();
     const lower = name.toLowerCase();
-    return chats.find(c => c.name?.toLowerCase().includes(lower)) || null;
+    // Only match private chats (not groups) to avoid pulling wrong chat
+    return chats.find(c =>
+      !c.isGroup &&
+      !c.id?._serialized?.endsWith("@g.us") &&
+      !c.id?._serialized?.includes("@broadcast") &&
+      c.name?.toLowerCase().includes(lower)
+    ) || null;
   }
 
   async fetchRecentMessages(hours: number = 168, onGroupProgress?: (scanned: number, total: number) => void): Promise<BufferedMessage[]> {
