@@ -9,27 +9,20 @@ export { transcribeVoiceNote };
  * Captures text messages and voice notes from the configured private chat.
  */
 export function createRelationshipHandler(store: RelationshipStore) {
+  const targetChatId = config.relationshipChatId;
   const chatNameLower = config.relationshipChatName.toLowerCase();
-  // Cache the partner chat ID once we find it — this is the most reliable filter
-  // because chat.name and chat.isGroup can be unreliable during post-crash sync
-  let knownChatId: string | null = null;
 
   return async (msg: Message, chat: any) => {
     const chatId = chat.id?._serialized || chat.id?.toString() || "";
 
-    // Block group chats and status broadcasts
-    if (chatId.endsWith("@g.us")) return;
-    if (chatId.includes("@broadcast")) return;
-    if (chat.isGroup) return;
-
-    // If we already know the partner chat ID, use it as the primary filter
-    if (knownChatId) {
-      if (chatId !== knownChatId) return;
+    // Primary filter: exact chat ID match (most reliable)
+    if (targetChatId) {
+      if (chatId !== targetChatId) return;
     } else {
-      // First time: match by name, then lock onto this chat ID
+      // Fallback: name-based matching (less reliable)
+      if (chatId.endsWith("@g.us") || chatId.includes("@broadcast")) return;
+      if (chat.isGroup) return;
       if (!chat.name || !chat.name.toLowerCase().includes(chatNameLower)) return;
-      knownChatId = chatId;
-      console.log(`[relationship] Locked onto chat ID: ${chatId} (name: "${chat.name}")`);
     }
 
     // Skip duplicates

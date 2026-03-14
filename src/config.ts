@@ -40,6 +40,7 @@ export const config = {
   groqApiKey: process.env.GROQ_API_KEY || "",
   assemblyAiApiKey: process.env.ASSEMBLYAI_API_KEY || "",
   relationshipChatName: process.env.RELATIONSHIP_CHAT_NAME || "",
+  relationshipChatId: process.env.RELATIONSHIP_CHAT_ID || "", // WhatsApp chat ID (e.g. "145458227847210@lid")
   relationshipPartnerName: process.env.RELATIONSHIP_PARTNER_NAME || "Partner",
   relationshipSelfName: process.env.RELATIONSHIP_SELF_NAME || "Me",
   // Metacrisis app (optional — leave empty to disable)

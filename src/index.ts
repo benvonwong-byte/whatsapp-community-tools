@@ -259,20 +259,22 @@ async function main() {
   const relationshipAnalyze = () => runDailyAnalysis(relationshipStore, relationshipAnalyzeProgress);
   whatsapp.addRawMessageListener(createRelationshipHandler(relationshipStore));
 
-  const relationshipBackfill = async (): Promise<number> => {
-    const chat = await whatsapp.getChatByName(config.relationshipChatName);
-    if (!chat) {
-      // List available private chats to help debug name mismatch
+  // Shared helper to find the relationship chat by ID (preferred) or name (fallback)
+  const getRelationshipChat = async (): Promise<any> => {
+    if (config.relationshipChatId) {
       const allChats = await whatsapp.getClient().getChats();
-      const privateChatNames = allChats
-        .filter((c: any) => !c.isGroup)
-        .slice(0, 30)
-        .map((c: any) => c.name || c.id?.user || "unnamed");
-      console.log(`[relationship-backfill] Available private chats: ${privateChatNames.join(", ")}`);
-      throw new Error(`Chat "${config.relationshipChatName}" not found. Available: ${privateChatNames.join(", ")}`);
+      const chat = allChats.find((c: any) => c.id?._serialized === config.relationshipChatId);
+      if (!chat) throw new Error(`Chat ID "${config.relationshipChatId}" not found in WhatsApp.`);
+      return chat;
     }
+    const chat = await whatsapp.getChatByName(config.relationshipChatName);
+    if (!chat) throw new Error(`Chat "${config.relationshipChatName}" not found.`);
+    return chat;
+  };
 
-    console.log(`[relationship-backfill] Fetching messages from "${chat.name}"...`);
+  const relationshipBackfill = async (): Promise<number> => {
+    const chat = await getRelationshipChat();
+    console.log(`[relationship-backfill] Fetching messages from "${chat.name}" (${chat.id?._serialized})...`);
     const messages = await chat.fetchMessages({ limit: 10000 });
 
     let saved = 0;
@@ -331,8 +333,7 @@ async function main() {
 
     console.log(`[relationship-transcribe] Found ${untranscribed.length} untranscribed voice messages. Fetching from WhatsApp...`);
 
-    const chat = await whatsapp.getChatByName(config.relationshipChatName);
-    if (!chat) throw new Error(`Chat "${config.relationshipChatName}" not found`);
+    const chat = await getRelationshipChat();
 
     // Fetch messages from WhatsApp to get access to downloadMedia
     const waMessages = await chat.fetchMessages({ limit: 10000 });
@@ -378,10 +379,9 @@ async function main() {
 
   // Send a WhatsApp message to the relationship chat
   const relationshipSendUpdate = async (message: string): Promise<void> => {
-    const chat = await whatsapp.getChatByName(config.relationshipChatName);
-    if (!chat) throw new Error(`Chat "${config.relationshipChatName}" not found`);
+    const chat = await getRelationshipChat();
     await chat.sendMessage(message);
-    console.log(`[relationship-update] Sent update to "${config.relationshipChatName}"`);
+    console.log(`[relationship-update] Sent update to "${chat.name}" (${chat.id?._serialized})`);
   };
 
   appRouters.push({
