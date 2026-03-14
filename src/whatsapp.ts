@@ -58,6 +58,7 @@ export class WhatsAppClient {
       puppeteer: {
         headless: true,
         args: WhatsAppClient.PUPPETEER_ARGS,
+        protocolTimeout: 120000, // 2min timeout to prevent protocol timeouts during heavy load
       },
     });
 
@@ -175,6 +176,7 @@ export class WhatsAppClient {
         puppeteer: {
           headless: true,
           args: WhatsAppClient.PUPPETEER_ARGS,
+          protocolTimeout: 120000,
         },
       });
       this.setupEventHandlers();

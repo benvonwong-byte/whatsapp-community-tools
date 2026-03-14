@@ -1077,10 +1077,14 @@ function renderCalendar() {
   document.getElementById("cal-month-label").textContent =
     calendarDate.toLocaleDateString("en-US", { month: "long", year: "numeric" });
 
-  // Apply calendar category filter
-  const filteredEvents = calCategoryFilter
-    ? allEvents.filter((ev) => ev.category === calCategoryFilter)
-    : allEvents;
+  // Apply calendar category filter and exclude multi-day events
+  const filteredEvents = allEvents.filter((ev) => {
+    // Exclude multi-day events (events with an endDate different from their start date)
+    if (ev.endDate && ev.endDate !== ev.date) return false;
+    // Apply category filter if set
+    if (calCategoryFilter && ev.category !== calCategoryFilter) return false;
+    return true;
+  });
 
   // Build event map: dateStr -> events[]
   const eventMap = {};
@@ -1088,18 +1092,6 @@ function renderCalendar() {
     const key = ev.date;
     if (!eventMap[key]) eventMap[key] = [];
     eventMap[key].push(ev);
-    // Multi-day: add dots for each day
-    if (ev.endDate && ev.endDate !== ev.date) {
-      const start = new Date(ev.date + "T00:00:00");
-      const end = new Date(ev.endDate + "T00:00:00");
-      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-        const k = dateStr(d);
-        if (k !== key) {
-          if (!eventMap[k]) eventMap[k] = [];
-          eventMap[k].push(ev);
-        }
-      }
-    }
   });
 
   // First day of month and padding

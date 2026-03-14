@@ -1,12 +1,22 @@
 // Lock all server-side time operations to Eastern Time
 process.env.TZ = "America/New_York";
 
+// Prevent process crash from stale Puppeteer/WhatsApp protocol callbacks
+process.on("unhandledRejection", (reason: any) => {
+  const msg = reason?.message || String(reason);
+  if (msg.includes("Target closed") || msg.includes("timed out") || msg.includes("Protocol error")) {
+    console.warn("[unhandledRejection] Suppressed Puppeteer protocol error:", msg);
+    return;
+  }
+  console.error("[unhandledRejection]", reason);
+});
+
 import fs from "fs";
 import path from "path";
 import { config } from "./config";
 import { WhatsAppClient, BufferedMessage } from "./whatsapp";
 import { extractEvents } from "./extractor";
-import { verifyEventDates, fetchPageText } from "./verifier";
+import { verifyEventDates, fetchPageText, deduplicateEvents, DedupProgress } from "./verifier";
 import { startServer, BackfillProgress } from "./server";
 import { EventStore } from "./store";
 import { RelationshipStore } from "./apps/relationship/store";
@@ -842,6 +852,34 @@ async function main() {
       console.error("[auto-analyze] Failed:", err?.message || err);
     }
   }, AUTO_ANALYZE_INTERVAL);
+
+  // ── Periodic deduplication every 48 hours ──
+  const DEDUP_INTERVAL = 48 * 60 * 60 * 1000; // 48 hours
+  const autoDedupProgress: DedupProgress = {
+    active: false,
+    phase: "idle",
+    total: 0,
+    checked: 0,
+    deleted: 0,
+  };
+  setInterval(async () => {
+    if (autoDedupProgress.active) {
+      console.log("[auto-dedup] Dedup already in progress, skipping.");
+      return;
+    }
+    console.log("[auto-dedup] Starting scheduled deduplication...");
+    autoDedupProgress.active = true;
+    autoDedupProgress.phase = "running";
+    try {
+      const deleted = await deduplicateEvents(store, autoDedupProgress);
+      console.log(`[auto-dedup] Complete. ${deleted} duplicate(s) removed.`);
+    } catch (err: any) {
+      console.error("[auto-dedup] Failed:", err?.message || err);
+    } finally {
+      autoDedupProgress.active = false;
+      autoDedupProgress.phase = "idle";
+    }
+  }, DEDUP_INTERVAL);
 
   // On ready (initial connect or reconnect), backfill since last event found.
   // Uses the last event's created_at rather than the last processed message,
