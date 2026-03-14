@@ -8,10 +8,11 @@ export function createFriendsHandler(store: FriendsStore) {
 
   return async (msg: Message, chat: any) => {
     // 1. Filter: private (1:1) chats ONLY — no groups, no announcements, no broadcasts
-    const isPrivate = !chat.isGroup;
-    if (!isPrivate) return;
-    const chatId = chat.id._serialized;
+    const chatId = chat.id?._serialized || "";
+    if (!chatId.endsWith("@c.us")) return; // @c.us = private, @g.us = group
+    if (chat.isGroup) return;
     if (chatId === "status@broadcast" || chatId.endsWith("@broadcast")) return;
+    const isPrivate = true; // guaranteed by @c.us check above
     const participantCount = 1;
 
     // 2. Skip the relationship chat

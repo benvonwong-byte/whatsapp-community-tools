@@ -13,8 +13,11 @@ export function createRelationshipHandler(store: RelationshipStore) {
 
   return async (msg: Message, chat: any) => {
     // Only process the specific private chat
+    // Use chat ID format as primary check: @c.us = private, @g.us = group
+    const chatId = chat.id?._serialized || chat.id?.toString() || "";
+    if (!chatId.endsWith("@c.us")) return;
     if (chat.isGroup) return;
-    if (!chat.name.toLowerCase().includes(chatNameLower)) return;
+    if (!chat.name?.toLowerCase().includes(chatNameLower)) return;
 
     // Skip duplicates
     if (store.isDuplicate(msg.id._serialized)) return;

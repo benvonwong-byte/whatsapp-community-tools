@@ -352,6 +352,19 @@ export class RelationshipStore extends SettingsStore {
     return result.changes > 0;
   }
 
+  /** Delete all messages for a specific date and its analysis */
+  purgeDate(date: string): { messagesDeleted: number; analysisDeleted: number } {
+    const msgs = this.db.prepare(`DELETE FROM relationship_messages WHERE date(datetime(timestamp, 'unixepoch')) = ?`).run(date);
+    const analysis = this.db.prepare(`DELETE FROM relationship_analyses WHERE date = ?`).run(date);
+    return { messagesDeleted: msgs.changes, analysisDeleted: analysis.changes };
+  }
+
+  /** Delete messages whose WhatsApp IDs indicate group chats (@g.us) */
+  purgeGroupMessages(): { deleted: number } {
+    const result = this.db.prepare(`DELETE FROM relationship_messages WHERE id LIKE '%@g.us%'`).run();
+    return { deleted: result.changes };
+  }
+
   getInPersonStats() {
     const total = this.db.prepare(
       `SELECT COUNT(*) as count FROM relationship_messages WHERE source = 'in-person'`

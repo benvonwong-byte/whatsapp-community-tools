@@ -533,6 +533,24 @@ export function createRelationshipRouter(
     }
   });
 
+  // POST /api/relationship/purge-date — delete all messages + analysis for a date, then re-backfill
+  // Body: { date: "YYYY-MM-DD" }
+  router.post("/purge-date", requireAdminRole, async (req: Request, res: Response) => {
+    const { date } = req.body;
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      res.status(400).json({ error: "Missing or invalid 'date' (YYYY-MM-DD)" });
+      return;
+    }
+    const result = store.purgeDate(date);
+    res.json({ ok: true, ...result });
+  });
+
+  // POST /api/relationship/purge-group-messages — remove any group chat messages that leaked in
+  router.post("/purge-group-messages", requireAdminRole, (_req: Request, res: Response) => {
+    const result = store.purgeGroupMessages();
+    res.json({ ok: true, ...result });
+  });
+
   // POST /api/relationship/chat — AI chat with tiered context + tool use
   // Accessible to both admin and guest (no requireAdminRole)
   router.post("/chat", async (req: Request, res: Response) => {
