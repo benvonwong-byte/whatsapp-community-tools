@@ -566,15 +566,27 @@ export function createFriendsRouter(
     });
   });
 
-  // ── Backfill ──
+  // ── Backfill (async with progress polling) ──
 
-  router.post("/backfill", async (_req: Request, res: Response) => {
-    try {
-      const count = await backfillTrigger();
-      res.json({ ok: true, messagesImported: count });
-    } catch (err: any) {
-      res.status(500).json({ error: err?.message || "Backfill failed" });
+  let backfillState = { active: false, messagesImported: 0, error: "" };
+
+  router.post("/backfill", (_req: Request, res: Response) => {
+    if (backfillState.active) {
+      res.json({ ok: true, status: "already_running" });
+      return;
     }
+    backfillState = { active: true, messagesImported: 0, error: "" };
+    res.json({ ok: true, status: "started" });
+
+    // Run in background
+    backfillTrigger()
+      .then((count) => { backfillState.messagesImported = count; })
+      .catch((err: any) => { backfillState.error = err?.message || "Backfill failed"; })
+      .finally(() => { backfillState.active = false; });
+  });
+
+  router.get("/backfill-status", (_req: Request, res: Response) => {
+    res.json(backfillState);
   });
 
   // ── Settings ──

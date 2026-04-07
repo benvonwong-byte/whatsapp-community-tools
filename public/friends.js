@@ -141,16 +141,79 @@ function setupBackfillButton() {
     if (!confirm("Fetch all available message history from monitored WhatsApp chats?")) return;
     btn.disabled = true;
     btn.textContent = "Backfilling...";
-    try {
-      const res = await adminFetch("/api/friends/backfill", { method: "POST" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Backfill failed");
-      alert("Backfill complete! Imported " + data.messagesImported + " messages.");
-    } catch (err) {
-      alert("Backfill failed: " + err.message);
-    } finally {
-      btn.disabled = false;
-      btn.textContent = "Backfill";
+
+    // Fire the request — don't await it (avoids Cloudflare 100s timeout)
+    adminFetch("/api/friends/backfill", { method: "POST" })
+      .then(res => res.text())
+      .then(text => {
+        let data;
+        try { data = JSON.parse(text); } catch { return; }
+        // If async server, poll for status
+        if (data.status === "started" || data.status === "already_running") return;
+        // Legacy sync server returned result
+        btn.disabled = false;
+        btn.textContent = "Backfill";
+        if (data.ok) {
+          alert("Backfill complete! Imported " + (data.messagesImported || 0) + " messages.");
+          loadDashboard();
+        }
+      })
+      .catch(() => {}); // timeout or network error — backfill continues server-side
+
+    // Poll for completion using contacts count as a proxy
+    let prevCount = null;
+    let stableChecks = 0;
+    const poll = setInterval(async () => {
+      try {
+        // Try the dedicated status endpoint first (new server)
+        const statusRes = await adminFetch("/api/friends/backfill-status");
+        const statusText = await statusRes.text();
+        let status;
+        try { status = JSON.parse(statusText); } catch {
+          // Endpoint doesn't exist (old server) — fall back to contacts polling
+          checkContactsCount();
+          return;
+        }
+        if (status.active) {
+          btn.textContent = "Backfilling...";
+          return;
+        }
+        clearInterval(poll);
+        btn.disabled = false;
+        btn.textContent = "Backfill";
+        if (status.error) {
+          alert("Backfill failed: " + status.error);
+        } else if (status.messagesImported > 0) {
+          alert("Backfill complete! Imported " + status.messagesImported + " messages.");
+          loadDashboard();
+        } else {
+          alert("Backfill complete! No new messages found.");
+          loadDashboard();
+        }
+      } catch {
+        checkContactsCount();
+      }
+    }, 5000);
+
+    // Fallback: poll contacts endpoint to detect when backfill finishes
+    async function checkContactsCount() {
+      try {
+        const r = await adminFetch("/api/friends/health");
+        const h = await r.json();
+        const count = h.totalMessages || 0;
+        if (prevCount === null) { prevCount = count; return; }
+        if (count !== prevCount) { prevCount = count; stableChecks = 0; return; }
+        stableChecks++;
+        if (stableChecks >= 3) {
+          // Count stable for 15s — backfill likely done
+          clearInterval(poll);
+          btn.disabled = false;
+          btn.textContent = "Backfill";
+          const imported = count - (prevCount || 0);
+          alert("Backfill appears complete. Refresh to see updated data.");
+          loadDashboard();
+        }
+      } catch {}
     }
   });
 }
