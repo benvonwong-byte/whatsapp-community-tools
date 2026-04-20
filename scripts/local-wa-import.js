@@ -20,10 +20,12 @@ const fs = require("fs");
 
 // ── Config ──
 
-const WA_DB = path.join(
+const WA_DB_DEFAULT = path.join(
   os.homedir(),
   "Library/Group Containers/group.net.whatsapp.WhatsApp.shared/ChatStorage.sqlite"
 );
+const WA_DB_DROPBOX = path.join(__dirname, "../data/ChatStorage.sqlite");
+const WA_DB = fs.existsSync(WA_DB_DEFAULT) ? WA_DB_DEFAULT : WA_DB_DROPBOX;
 
 const args = process.argv.slice(2);
 const DRY_RUN = args.includes("--dry-run");

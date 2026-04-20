@@ -20,8 +20,13 @@ const fs = require("fs");
 
 // ── Config ──
 
-const CHAT_DB = path.join(os.homedir(), "Library/Messages/chat.db");
-const AB_DIR = path.join(os.homedir(), "Library/Application Support/AddressBook/Sources");
+const CHAT_DB_DEFAULT = path.join(os.homedir(), "Library/Messages/chat.db");
+const CHAT_DB_DROPBOX = path.join(__dirname, "../data/chat.db");
+const CHAT_DB = fs.existsSync(CHAT_DB_DEFAULT) ? CHAT_DB_DEFAULT : CHAT_DB_DROPBOX;
+
+const AB_DIR_DEFAULT = path.join(os.homedir(), "Library/Application Support/AddressBook/Sources");
+const AB_DIR_DROPBOX = path.join(__dirname, "../data/AddressBook/Sources");
+const AB_DIR = fs.existsSync(AB_DIR_DEFAULT) ? AB_DIR_DEFAULT : AB_DIR_DROPBOX;
 const APPLE_EPOCH_OFFSET = 978307200;
 const BATCH_SIZE = 200;
 
