@@ -566,6 +566,22 @@ export function createFriendsRouter(
     });
   });
 
+  // ── Local WA SQLite Import ──
+
+  router.post("/local-import", (req: Request, res: Response) => {
+    const { messages } = req.body as { messages: Array<any> };
+    if (!Array.isArray(messages) || messages.length === 0) {
+      res.status(400).json({ error: "messages array required" });
+      return;
+    }
+    try {
+      const result = store.bulkImportLocalMessages(messages);
+      res.json({ ok: true, ...result });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || "Import failed" });
+    }
+  });
+
   // ── Backfill (async with progress polling) ──
 
   let backfillState = { active: false, messagesImported: 0, error: "" };
@@ -882,18 +898,41 @@ User query: "${query.replace(/"/g, '\\"')}"`);
     res.json({ year, month, days: data });
   });
 
-  // ── iMessage Sync ──
+  // ── iMessage Sync Status (sync endpoint moved to public router) ──
 
-  // In-memory sync log (last 50 events)
-  const imessageSyncLog: Array<{ time: string; imported: number; skipped: number; voiceImported: number; error?: string }> = [];
-  const MAX_SYNC_LOG = 50;
+  // iMessage sync status
+  router.get("/imessage/status", (_req: Request, res: Response) => {
+    const stats = store.getImessageStats();
+    res.json({
+      ...stats,
+      syncMode: "integrated", // sync is now built into the main server
+    });
+  });
 
-  router.post("/imessage/sync", (req: Request, res: Response) => {
+  // ── Health ──
+
+  router.get("/health", (_req: Request, res: Response) => {
+    res.json(store.getHealth());
+  });
+
+  return router;
+}
+
+/**
+ * Public iMessage sync router — self-authenticated via X-Sync-Key header.
+ * Mount this WITHOUT admin middleware so the bridge can POST without an admin token.
+ */
+export function createImessageSyncRouter(store: FriendsStore): Router {
+  const router = Router();
+  const syncLog: Array<{ time: string; imported: number; skipped: number; voiceImported: number; error?: string }> = [];
+  const MAX_LOG = 50;
+
+  router.post("/sync", (req: Request, res: Response) => {
     const syncKey = req.headers["x-sync-key"] as string;
     const expectedKey = process.env.IMESSAGE_SYNC_KEY;
     if (!expectedKey || syncKey !== expectedKey) {
-      imessageSyncLog.push({ time: new Date().toISOString(), imported: 0, skipped: 0, voiceImported: 0, error: "Auth failed (invalid sync key)" });
-      if (imessageSyncLog.length > MAX_SYNC_LOG) imessageSyncLog.shift();
+      syncLog.push({ time: new Date().toISOString(), imported: 0, skipped: 0, voiceImported: 0, error: "Auth failed" });
+      if (syncLog.length > MAX_LOG) syncLog.shift();
       return res.status(401).json({ error: "Invalid sync key" });
     }
 
@@ -914,39 +953,21 @@ User query: "${query.replace(/"/g, '\\"')}"`);
         console.log(`[imessage-sync] Voice notes: imported ${vnResult.imported}`);
       }
 
-      imessageSyncLog.push({
+      syncLog.push({
         time: new Date().toISOString(),
         imported: result.imported,
         skipped: result.updated,
         voiceImported: result.voiceImported,
       });
-      if (imessageSyncLog.length > MAX_SYNC_LOG) imessageSyncLog.shift();
+      if (syncLog.length > MAX_LOG) syncLog.shift();
 
       res.json(result);
     } catch (err: any) {
       console.error("[imessage-sync] Error:", err?.message || err);
-      imessageSyncLog.push({ time: new Date().toISOString(), imported: 0, skipped: 0, voiceImported: 0, error: err?.message || "Sync failed" });
-      if (imessageSyncLog.length > MAX_SYNC_LOG) imessageSyncLog.shift();
+      syncLog.push({ time: new Date().toISOString(), imported: 0, skipped: 0, voiceImported: 0, error: err?.message || "Sync failed" });
+      if (syncLog.length > MAX_LOG) syncLog.shift();
       res.status(500).json({ error: "Sync failed" });
     }
-  });
-
-  // iMessage sync status & log
-  router.get("/imessage/status", (_req: Request, res: Response) => {
-    const stats = store.getImessageStats();
-    res.json({
-      ...stats,
-      syncLog: imessageSyncLog.slice().reverse(), // newest first
-      syncKeyConfigured: !!process.env.IMESSAGE_SYNC_KEY,
-      bridgeOnline: (Date.now() - bridgeLastSeen) < 30_000,
-      bridgeLastSeen: bridgeLastSeen > 0 ? new Date(bridgeLastSeen).toISOString() : null,
-    });
-  });
-
-  // ── Health ──
-
-  router.get("/health", (_req: Request, res: Response) => {
-    res.json(store.getHealth());
   });
 
   return router;

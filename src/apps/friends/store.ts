@@ -257,6 +257,12 @@ export class FriendsStore extends SettingsStore {
       this.db.exec(`ALTER TABLE friends_messages ADD COLUMN source TEXT DEFAULT 'whatsapp'`);
     } catch { /* column already exists */ }
 
+    // Migration: add local_fingerprint for dedup against local WA sqlite import
+    try {
+      this.db.exec(`ALTER TABLE friends_messages ADD COLUMN local_fingerprint TEXT DEFAULT NULL`);
+    } catch { /* column already exists */ }
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_friends_msgs_fingerprint ON friends_messages(local_fingerprint) WHERE local_fingerprint IS NOT NULL`);
+
     // Migration: add phone_normalized to friends_contacts
     try {
       this.db.exec(`ALTER TABLE friends_contacts ADD COLUMN phone_normalized TEXT DEFAULT ''`);
@@ -665,6 +671,57 @@ export class FriendsStore extends SettingsStore {
 
   isDuplicate(id: string): boolean {
     return !!this.stmts.isDuplicate.get(id);
+  }
+
+  isLocalDuplicate(fingerprint: string): boolean {
+    return !!this.db.prepare(`SELECT 1 FROM friends_messages WHERE local_fingerprint = ?`).get(fingerprint);
+  }
+
+  saveMessageWithFingerprint(msg: FriendsMessageInput & { local_fingerprint: string }) {
+    this.db.prepare(`
+      INSERT OR IGNORE INTO friends_messages (id, chat_id, sender_id, sender_name, timestamp, is_from_me, message_type, char_count, body, source, local_fingerprint)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      msg.id, msg.chat_id, msg.sender_id, msg.sender_name,
+      msg.timestamp, msg.is_from_me ? 1 : 0, msg.message_type, msg.char_count,
+      msg.body || "", msg.source || "whatsapp_local", msg.local_fingerprint
+    );
+  }
+
+  bulkImportLocalMessages(messages: Array<FriendsMessageInput & { local_fingerprint: string }>): { inserted: number; skipped: number } {
+    let inserted = 0;
+    let skipped = 0;
+    const insert = this.db.prepare(`
+      INSERT OR IGNORE INTO friends_messages (id, chat_id, sender_id, sender_name, timestamp, is_from_me, message_type, char_count, body, source, local_fingerprint)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const checkFp = this.db.prepare(`SELECT 1 FROM friends_messages WHERE local_fingerprint = ?`);
+    const checkId = this.db.prepare(`SELECT 1 FROM friends_messages WHERE id = ?`);
+
+    const runBatch = this.db.transaction((batch: typeof messages) => {
+      for (const msg of batch) {
+        if (checkId.get(msg.id) || checkFp.get(msg.local_fingerprint)) {
+          skipped++;
+          continue;
+        }
+        insert.run(
+          msg.id, msg.chat_id, msg.sender_id, msg.sender_name,
+          msg.timestamp, msg.is_from_me ? 1 : 0, msg.message_type, msg.char_count,
+          msg.body || "", msg.source || "whatsapp_local", msg.local_fingerprint
+        );
+        // Upsert contact last_seen
+        if (msg.sender_id !== "self") {
+          this.db.prepare(`
+            INSERT INTO friends_contacts (id, name, first_seen, last_seen)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET last_seen = MAX(last_seen, excluded.last_seen)
+          `).run(msg.sender_id, msg.sender_name, msg.timestamp, msg.timestamp);
+        }
+        inserted++;
+      }
+    });
+    runBatch(messages);
+    return { inserted, skipped };
   }
 
   getContactMessages(contactId: string, limit = 50, offset = 0): any[] {
