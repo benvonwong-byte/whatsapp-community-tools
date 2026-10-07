@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { config } from "./config";
+import { config, ensurePrivateDir } from "./config";
 import { chatSummary, formatMessage, formatSize, formatTime, parseJson } from "./format";
 import { SignalDesktopSource } from "./desktop";
 import { Identity } from "./identity";
@@ -76,8 +76,10 @@ function parseDate(value: string | undefined, field: string): number | undefined
   return ms;
 }
 
-function csvCell(value: unknown): string {
-  const text = value == null ? "" : String(value);
+export function csvCell(value: unknown): string {
+  let text = value == null ? "" : String(value);
+  // Link titles come from whoever shared them; keep spreadsheets from running them as formulas.
+  if (/^[=+\-@\t\r]/.test(text)) text = "'" + text;
   return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
@@ -577,7 +579,7 @@ export function registerTools(server: McpServer, { store, client, identity, desk
     safe((args) => {
       const filters = linkFilters(args);
       const all = 100_000;
-      fs.mkdirSync(config.exportDir, { recursive: true });
+      ensurePrivateDir(config.exportDir);
       const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "").replace("T", "-");
       let file: string;
       let count: number;
@@ -585,13 +587,13 @@ export function registerTools(server: McpServer, { store, client, identity, desk
         const rows = store.listLinks(filters, all, 0);
         count = rows.length;
         file = path.join(config.exportDir, `signal-links-${stamp}.csv`);
-        fs.writeFileSync(file, linksCsv(rows));
+        fs.writeFileSync(file, linksCsv(rows), { mode: 0o600 });
       } else {
         const shares = store.listLinkShares(filters, all, 0);
         count = new Set(shares.map((s) => s.normalized_url)).size;
         const scope = args.chat_id ? `Links shared in ${store.getChat(args.chat_id)?.name}.` : "Links shared in your Signal chats.";
         file = path.join(config.exportDir, `signal-links-${stamp}.md`);
-        fs.writeFileSync(file, linksMarkdown(shares, scope));
+        fs.writeFileSync(file, linksMarkdown(shares, scope), { mode: 0o600 });
       }
       if (count === 0) return text("No links match, so nothing was exported.");
       return json({ file_path: file, links: count, format: args.format });
@@ -731,13 +733,13 @@ export function registerTools(server: McpServer, { store, client, identity, desk
         return fail("This attachment isn't available to download (it may be one you sent from this server).");
       }
 
-      fs.mkdirSync(config.downloadDir, { recursive: true });
+      ensurePrivateDir(config.downloadDir);
       let name = (a.filename || a.id || "attachment").replace(/[^\w.\-]+/g, "_").slice(-100);
       if (!path.extname(name)) name += extensionForMime(a.contentType);
       const dest = path.join(config.downloadDir, `${m.id}-${attachment_index}-${name}`);
 
       if (fromDesktop && !fs.existsSync(dest)) {
-        fs.writeFileSync(dest, desktop!.readAttachment(a));
+        fs.writeFileSync(dest, desktop!.readAttachment(a), { mode: 0o600 });
       } else if (!fs.existsSync(dest) && a.id) {
         const local = path.join(config.attachmentsDir, a.id);
         if (fs.existsSync(local)) {
@@ -745,7 +747,7 @@ export function registerTools(server: McpServer, { store, client, identity, desk
         } else {
           const where = m.chat_type === "group" ? { groupId: m.chat_id.slice("group:".length) } : { recipient: authorAddress(m) };
           const res = await client.rpc<{ data: string }>("getAttachment", { id: a.id, ...where });
-          fs.writeFileSync(dest, Buffer.from(res.data, "base64"));
+          fs.writeFileSync(dest, Buffer.from(res.data, "base64"), { mode: 0o600 });
         }
       }
       return json({ file_path: dest, content_type: a.contentType, filename: a.filename, size: fs.statSync(dest).size });

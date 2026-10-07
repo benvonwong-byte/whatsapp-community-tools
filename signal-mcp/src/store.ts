@@ -1,6 +1,7 @@
 import Database from "better-sqlite3-multiple-ciphers";
 import fs from "fs";
 import path from "path";
+import { ensurePrivateDir, restrictFile } from "./config";
 import { ExtractedLink, extractLinks } from "./links";
 
 /** Sender/contact id used for the account owner, so outgoing messages dedupe across sources. */
@@ -278,9 +279,11 @@ export class SignalStore {
   readonly db: Database.Database;
 
   constructor(dbPath: string) {
-    fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+    ensurePrivateDir(path.dirname(dbPath));
     this.db = new Database(dbPath);
     this.db.pragma("journal_mode = WAL");
+    // Messages are stored unencrypted, so other accounts on this computer must not read them.
+    for (const f of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) restrictFile(f);
     this.db.pragma("busy_timeout = 5000");
     this.db.exec(SCHEMA);
     this.backfillLinks();

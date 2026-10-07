@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Keeps the Note to Self bot running: start a Note to Self with "c " and Claude Code answers.
+  Needs the signal-cli daemon (org.asamk.signal-cli.plist) and a logged-in `claude` CLI.
+  Replace the node, signal-mcp and claude paths (`which node`, `which claude`), your number,
+  your home folder in PATH and HOME, and the folder Claude works in (SIGNAL_BOT_CWD). Then:
+    cp com.signal-mcp.bot.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.signal-mcp.bot.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.signal-mcp.bot</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/node</string>
+    <string>/path/to/whatsapp-community-tools/signal-mcp/dist/index.js</string>
+    <string>bot</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>SIGNAL_CLI_URL</key>
+    <string>http://127.0.0.1:8080</string>
+    <key>SIGNAL_ACCOUNT</key>
+    <string>+15551234567</string>
+    <key>SIGNAL_BOT_CLAUDE</key>
+    <string>/Users/you/.local/bin/claude</string>
+    <key>SIGNAL_BOT_CWD</key>
+    <string>/Users/you/Code</string>
+    <key>SIGNAL_BOT_PERMISSION_MODE</key>
+    <string>auto</string>
+    <!-- launchd starts with a bare PATH; Claude's Bash tool needs Homebrew and your local bin. -->
+    <key>PATH</key>
+    <string>/Users/you/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>HOME</key>
+    <string>/Users/you</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardErrorPath</key>
+  <string>/tmp/signal-mcp-bot.log</string>
+</dict>
+</plist>

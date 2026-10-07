@@ -1,8 +1,21 @@
+import fs from "fs";
 import os from "os";
 import path from "path";
 
-function expandHome(p: string): string {
+export function expandHome(p: string): string {
   return p.startsWith("~/") ? path.join(os.homedir(), p.slice(2)) : p;
+}
+
+/** The archive, downloads and exports hold unencrypted messages: new folders are readable by this user only. */
+export function ensurePrivateDir(dir: string) {
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+}
+
+/** Restricts an existing file to this user (0600). Missing files are ignored. */
+export function restrictFile(file: string) {
+  try {
+    fs.chmodSync(file, 0o600);
+  } catch {}
 }
 
 const dataHome = process.env.XDG_DATA_HOME || path.join(os.homedir(), ".local/share");

@@ -130,6 +130,38 @@ Then add `"env": { "SIGNAL_CLI_URL": "http://127.0.0.1:8080", "SIGNAL_ACCOUNT": 
 
 Without Signal Desktop on the machine, signal-cli is used automatically and is the only source of messages.
 
+## Optional: message Claude from Note to Self
+
+`signal-mcp bot` lets you talk to Claude Code from Signal on your phone. Write a Note to Self that starts with `c ` (or `claude `), and the bot runs Claude Code on your Mac with your Claude login and sends the answer back to Note to Self. Each message continues the same conversation.
+
+| You write | What happens |
+| --- | --- |
+| `c what did Alice send me about the venue?` | Claude answers; 👀 while it works, ✅ when done |
+| `c new` or `c new <message>` | Starts a fresh conversation |
+| `c stop` | Cancels what's running and anything queued |
+| `c status` | Whether it's working, and in which folder |
+| `c` with a photo or file | Claude gets the file's local path and can read it |
+
+It needs signal-cli linked to your account and its daemon running (see above), and the `claude` CLI logged in (`claude auth login`). Then:
+
+```sh
+SIGNAL_ACCOUNT=+15551234567 SIGNAL_BOT_CWD=~/Code node dist/index.js bot
+```
+
+To keep it running, use [`launchd/com.signal-mcp.bot.plist`](launchd/com.signal-mcp.bot.plist) after editing its paths.
+
+Only sync messages from your own linked devices are accepted, and Signal never delivers someone else's message that way, so nobody else can reach the bot. Anyone holding one of your unlocked linked devices can, though, and Claude runs with real access to the Mac: `SIGNAL_BOT_PERMISSION_MODE` defaults to `auto`, where Claude Code's safety checks block risky actions. Use `plan` for read-only answers. The Claude runs it starts use signal-cli rather than Signal Desktop, so they don't raise Keychain prompts.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `SIGNAL_BOT_CWD` | your home folder | The folder Claude Code works in |
+| `SIGNAL_BOT_CLAUDE` | `claude` | Path to the `claude` CLI (launchd needs the full path) |
+| `SIGNAL_BOT_PERMISSION_MODE` | `auto` | Claude Code permission mode for each run |
+| `SIGNAL_BOT_MODEL` | Claude Code's default | Model for the bot's runs |
+| `SIGNAL_BOT_TRIGGER` | `c,claude` | Words that start a message to Claude |
+| `SIGNAL_BOT_TIMEOUT_MINUTES` | `30` | Stops a run that takes longer |
+| `SIGNAL_BOT_SELF_UUID` | none | Your Signal UUID, accepted as the sender if a Note to Self ever arrives without your number |
+
 ## Configuration
 
 | Variable | Default | Purpose |
@@ -151,7 +183,8 @@ Without Signal Desktop on the machine, signal-cli is used automatically and is t
 ## Privacy and safety
 
 - signal-mcp only reads Signal Desktop's data. It never writes to it.
-- The archive at `~/.signal-mcp/messages.db` stores messages unencrypted, unlike Signal Desktop's own database. Treat it like your Signal data. The Keychain-derived key is held only in memory.
+- The archive at `~/.signal-mcp/messages.db` stores messages unencrypted, unlike Signal Desktop's own database. Treat it like your Signal data. signal-mcp keeps it, its downloads and exports readable by your account only (folders 0700, files 0600). The Keychain-derived key is held only in memory.
+- CSV exports prefix cells that start with `=`, `+`, `-` or `@`, so a link title can't run as a spreadsheet formula.
 - Disappearing messages are not archived by default, because the chat chose not to keep them. `get_status` shows how many were skipped. Set `SIGNAL_MCP_ARCHIVE_DISAPPEARING=1` to keep them anyway.
 - When someone deletes a message for everyone, its text, attachments, and links are removed from the archive too.
 - The send tools act as you. They are marked as non-read-only, so Claude asks for approval before using them (unless you've allowed them).

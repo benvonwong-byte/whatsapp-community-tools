@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { runBot } from "./bot";
 import { config } from "./config";
 import { SignalDesktopSource } from "./desktop";
 import { Identity } from "./identity";
@@ -16,6 +17,8 @@ Usage:
   signal-mcp           Run the MCP server on stdio (what Claude launches)
   signal-mcp bridge    Only keep the archive up to date (no MCP); run this always-on
                        so the archive stays current while Claude is closed
+  signal-mcp bot       Answer Note to Self messages starting with "c " by running
+                       Claude Code on this computer (needs signal-cli and SIGNAL_ACCOUNT)
 
 Environment:
   SIGNAL_DESKTOP_DIR   Signal Desktop's data folder (default: its standard location)
@@ -29,6 +32,10 @@ async function main() {
   const command = process.argv[2];
   if (command === "--help" || command === "-h" || command === "help") {
     console.error(USAGE);
+    return;
+  }
+  if (command === "bot") {
+    runBot();
     return;
   }
   if (command && command !== "bridge" && command !== "serve") {
