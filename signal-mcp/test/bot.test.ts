@@ -47,6 +47,15 @@ describe("parseNoteToSelf", () => {
     assert.equal(parse(noteToSelf(`${REPLY_MARK} c is the speed of light`)), null);
   });
 
+  test("with the trigger set to *, every note goes to Claude and a leading c is optional", () => {
+    const all = triggerPattern("*");
+    const p = (m: string) => parseNoteToSelf({ account: SELF_NUMBER, envelope: noteToSelf(m) }, SELF_NUMBER, all, "/att")?.command;
+    assert.deepEqual(p("are there events in SF?"), { kind: "prompt", text: "are there events in SF?", fresh: false });
+    assert.deepEqual(p("c are there events in SF?"), { kind: "prompt", text: "are there events in SF?", fresh: false });
+    assert.deepEqual(p("stop"), { kind: "stop" });
+    assert.equal(p(`${REPLY_MARK} an earlier answer`), undefined);
+  });
+
   test("recognizes control words", () => {
     assert.deepEqual(parse(noteToSelf("c stop"))?.command, { kind: "stop" });
     assert.deepEqual(parse(noteToSelf("c status"))?.command, { kind: "status" });
@@ -70,6 +79,31 @@ describe("chunkReply", () => {
     assert.ok(chunks.length > 1);
     assert.ok(chunks.every((c) => c.length <= 500));
     assert.equal(chunks.join("\n\n"), long);
+  });
+});
+
+describe("SignalBot acknowledges right away", () => {
+  test("replies Got it before the answer", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "signal-bot-ack-"));
+    const fake = path.join(dir, "claude");
+    fs.writeFileSync(fake, `#!/usr/bin/env node
+process.stdin.resume(); process.stdin.on("end", () => setTimeout(() => console.log(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "the answer", session_id: "s1" })), 150));
+`);
+    fs.chmodSync(fake, 0o755);
+    const mock = new MockSignalCli();
+    const url = await mock.start();
+    const bot = new SignalBot({ account: SELF_NUMBER, signalCliUrl: url, claudeBin: fake, cwd: dir, permissionMode: "auto",
+      trigger: triggerPattern("*"), timeoutMs: 10_000, ack: true, statePath: path.join(dir, "state.json"), attachmentsDir: dir });
+    bot.start();
+    await mock.waitForClients(1);
+    mock.push(noteToSelf("are there events in SF this month?"));
+    const end = Date.now() + 10_000;
+    while (mock.callsTo("send").length < 2 && Date.now() < end) await new Promise((r) => setTimeout(r, 25));
+    const sends = mock.callsTo("send").map((p) => p.message);
+    bot.stop();
+    await mock.stop();
+    fs.rmSync(dir, { recursive: true, force: true });
+    assert.deepEqual(sends, [`${REPLY_MARK} Got it, working on it.`, `${REPLY_MARK} the answer`]);
   });
 });
 
@@ -117,6 +151,7 @@ process.stdin.on("end", () => {
       permissionMode: "auto",
       trigger: TRIGGER,
       timeoutMs: 10_000,
+      ack: false,
       statePath: path.join(dir, "state.json"),
       attachmentsDir: path.join(dir, "attachments"),
     });

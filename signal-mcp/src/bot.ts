@@ -31,6 +31,8 @@ export interface BotSettings {
   model?: string;
   trigger: RegExp;
   timeoutMs: number;
+  /** Reply "Got it, working on it." as soon as a request arrives. */
+  ack?: boolean;
   statePath: string;
   attachmentsDir: string;
 }
@@ -50,6 +52,8 @@ export interface NoteToSelf {
 }
 
 export function triggerPattern(words: string): RegExp {
+  // "*" means every Note to Self goes to Claude, with or without a leading "c ".
+  if (words.trim() === "*") return /^\s*(?:(?:c|claude)(?=$|[\s:,])[\s:,]*)?/i;
   const alts = words
     .split(/[,|]/)
     .map((w) => w.trim())
@@ -150,6 +154,7 @@ export function settingsFromEnv(env = process.env): BotSettings {
     permissionMode: env.SIGNAL_BOT_PERMISSION_MODE || "auto",
     model: env.SIGNAL_BOT_MODEL || undefined,
     trigger: triggerPattern(env.SIGNAL_BOT_TRIGGER || "c,claude"),
+    ack: env.SIGNAL_BOT_ACK !== "0",
     timeoutMs: Math.max(1, Number(env.SIGNAL_BOT_TIMEOUT_MINUTES) || 30) * 60 * 1000,
     statePath: expandHome(env.SIGNAL_BOT_STATE || path.join(path.dirname(config.dbPath), "bot-state.json")),
     attachmentsDir: config.attachmentsDir,
@@ -234,7 +239,10 @@ export class SignalBot {
       return void this.reply(this.running ? "The next message starts a new conversation." : "New conversation started.");
     }
     this.queue.push(note);
-    if (this.running) void this.react(note, "⏳");
+    if (this.running) {
+      void this.react(note, "⏳");
+      if (this.s.ack) void this.reply("Got it. I'll start on this when the current request finishes.");
+    }
     void this.drain();
   }
 
@@ -267,6 +275,7 @@ export class SignalBot {
     if (!note || note.command.kind !== "prompt") return;
     if (note.command.fresh) this.state.sessionId = null;
     void this.react(note, "👀");
+    if (this.s.ack) await this.reply("Got it, working on it.");
 
     let prompt = note.command.text || "Look at the attached file.";
     if (note.attachments.length) prompt += `\n\nAttached files:\n${note.attachments.join("\n")}`;

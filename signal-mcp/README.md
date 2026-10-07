@@ -158,7 +158,8 @@ Only sync messages from your own linked devices are accepted, and Signal never d
 | `SIGNAL_BOT_CLAUDE` | `claude` | Path to the `claude` CLI (launchd needs the full path) |
 | `SIGNAL_BOT_PERMISSION_MODE` | `auto` | Claude Code permission mode for each run |
 | `SIGNAL_BOT_MODEL` | Claude Code's default | Model for the bot's runs |
-| `SIGNAL_BOT_TRIGGER` | `c,claude` | Words that start a message to Claude |
+| `SIGNAL_BOT_TRIGGER` | `c,claude` | Words that start a message to Claude; `*` sends every Note to Self |
+| `SIGNAL_BOT_ACK` | `1` | Replies "Got it, working on it." as soon as a request arrives; `0` turns it off |
 | `SIGNAL_BOT_TIMEOUT_MINUTES` | `30` | Stops a run that takes longer |
 | `SIGNAL_BOT_SELF_UUID` | none | Your Signal UUID, accepted as the sender if a Note to Self ever arrives without your number |
 
