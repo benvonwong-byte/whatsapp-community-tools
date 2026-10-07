@@ -4,7 +4,8 @@ import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { config } from "./config";
 import { chatSummary, formatMessage, formatSize, formatTime, parseJson } from "./format";
-import { Ingestor } from "./ingest";
+import { SignalDesktopSource } from "./desktop";
+import { Identity } from "./identity";
 import { extractLinks } from "./links";
 import { extensionForMime, mimeForFile } from "./mime";
 import { SendResult, SignalCliClient } from "./signal-cli";
@@ -28,7 +29,11 @@ const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024; // Signal's attachment limit
 interface Deps {
   store: SignalStore;
   client: SignalCliClient;
-  ingestor: Ingestor;
+  identity: Identity;
+  /** Signal Desktop reader, when Desktop is installed. */
+  desktop: SignalDesktopSource | null;
+  /** Whether signal-cli is configured, which sending needs. */
+  sending: boolean;
 }
 
 type ToolResult = { content: Array<{ type: "text"; text: string }>; isError?: boolean };
@@ -133,12 +138,17 @@ function linksMarkdown(shares: LinkShareRow[], description: string): string {
   return out.join("\n");
 }
 
-export function registerTools(server: McpServer, { store, client, ingestor }: Deps) {
+export function registerTools(server: McpServer, { store, client, identity, desktop, sending }: Deps) {
   const READ = { readOnlyHint: true, openWorldHint: false } as const;
   const SEND = { readOnlyHint: false, destructiveHint: false, openWorldHint: true } as const;
 
   function emptyHint(): string {
     if (store.stats().messages === 0) {
+      if (desktop) {
+        return desktop.lastSync?.error
+          ? `No messages yet: reading Signal Desktop failed (${desktop.lastSync.error}).`
+          : "No messages imported yet; the first Signal Desktop import may still be running. Use get_status to check.";
+      }
       return (
         "No Signal messages are stored yet. Signal keeps no message history on its servers, so only messages " +
         "received while signal-mcp (or `signal-mcp bridge`) is running are available. Use get_status to check the connection."
@@ -164,7 +174,7 @@ export function registerTools(server: McpServer, { store, client, ingestor }: De
   /** Address signal-cli should use for a sender in quote/reaction/attachment params. */
   function authorAddress(m: MessageRow): string {
     if (m.is_from_me) {
-      const self = ingestor.selfAddress();
+      const self = identity.address();
       if (!self) throw new Error("Own Signal account is unknown; set SIGNAL_ACCOUNT in the MCP server config.");
       return self;
     }
@@ -222,7 +232,7 @@ export function registerTools(server: McpServer, { store, client, ingestor }: De
     let chatId = target.chatId;
     if (!chatId) {
       const addr = result.results?.[0]?.recipientAddress;
-      chatId = ingestor.idFor(addr?.uuid, addr?.number);
+      chatId = identity.idFor(addr?.uuid, addr?.number);
       if (chatId && chatId !== SELF) {
         store.upsertContact({ uuid: addr?.uuid, number: addr?.number, username: addr?.username });
       }
@@ -588,115 +598,117 @@ export function registerTools(server: McpServer, { store, client, ingestor }: De
     })
   );
 
-  // ── Send tools ──
+  // ── Send tools (need signal-cli) ──
 
-  server.registerTool(
-    "send_message",
-    {
-      description:
-        "Send a Signal message to a person, group, or Note to Self. Optionally reply to (quote) an earlier message. " +
-        "Find recipients with search_contacts or list_chats first.",
-      inputSchema: {
-        recipient: z
-          .string()
-          .optional()
-          .describe(
-            'chat_id from list_chats (Signal UUID or group:<id>), phone number with country code (+15551234567), "u:<username>", or "me". ' +
-              "Optional when reply_to_message_id is given (defaults to that message's chat)."
-          ),
-        message: z.string().min(1).describe("The message text to send"),
-        reply_to_message_id: z.number().int().optional().describe("message_id to quote-reply to"),
+  if (sending) {
+    server.registerTool(
+      "send_message",
+      {
+        description:
+          "Send a Signal message to a person, group, or Note to Self. Optionally reply to (quote) an earlier message. " +
+          "Find recipients with search_contacts or list_chats first.",
+        inputSchema: {
+          recipient: z
+            .string()
+            .optional()
+            .describe(
+              'chat_id from list_chats (Signal UUID or group:<id>), phone number with country code (+15551234567), "u:<username>", or "me". ' +
+                "Optional when reply_to_message_id is given (defaults to that message's chat)."
+            ),
+          message: z.string().min(1).describe("The message text to send"),
+          reply_to_message_id: z.number().int().optional().describe("message_id to quote-reply to"),
+        },
+        annotations: SEND,
       },
-      annotations: SEND,
-    },
-    safe(async ({ recipient, message, reply_to_message_id }) => {
-      const replyTo = reply_to_message_id !== undefined ? store.getMessage(reply_to_message_id) : undefined;
-      if (reply_to_message_id !== undefined && !replyTo) return fail(`No message with message_id ${reply_to_message_id}.`);
-      const to = recipient ?? replyTo?.chat_id;
-      if (!to) return fail("recipient is required.");
+      safe(async ({ recipient, message, reply_to_message_id }) => {
+        const replyTo = reply_to_message_id !== undefined ? store.getMessage(reply_to_message_id) : undefined;
+        if (reply_to_message_id !== undefined && !replyTo) return fail(`No message with message_id ${reply_to_message_id}.`);
+        const to = recipient ?? replyTo?.chat_id;
+        if (!to) return fail("recipient is required.");
 
-      const target = resolveTarget(to);
-      const params: Record<string, unknown> = { ...target.params, message };
-      let quote: Quote | null = null;
-      if (replyTo) {
-        params.quoteTimestamp = replyTo.timestamp;
-        params.quoteAuthor = authorAddress(replyTo);
-        params.quoteMessage = replyTo.body ?? "";
-        quote = { timestamp: replyTo.timestamp, authorId: replyTo.sender_id, text: replyTo.body };
-      }
-      const result = await client.rpc<SendResult>("send", params);
-      const id = recordOutgoing(target, result, message, [], quote);
-      return text(sendSummary(target, result, id));
-    })
-  );
+        const target = resolveTarget(to);
+        const params: Record<string, unknown> = { ...target.params, message };
+        let quote: Quote | null = null;
+        if (replyTo) {
+          params.quoteTimestamp = replyTo.timestamp;
+          params.quoteAuthor = authorAddress(replyTo);
+          params.quoteMessage = replyTo.body ?? "";
+          quote = { timestamp: replyTo.timestamp, authorId: replyTo.sender_id, text: replyTo.body };
+        }
+        const result = await client.rpc<SendResult>("send", params);
+        const id = recordOutgoing(target, result, message, [], quote);
+        return text(sendSummary(target, result, id));
+      })
+    );
 
-  server.registerTool(
-    "send_file",
-    {
-      description: "Send a file (image, video, audio, document) via Signal, with an optional caption.",
-      inputSchema: {
-        recipient: z
-          .string()
-          .describe('chat_id from list_chats (Signal UUID or group:<id>), phone number (+15551234567), "u:<username>", or "me"'),
-        file_path: z.string().describe("Absolute path to the file to send"),
-        caption: z.string().optional().describe("Optional message text to send with the file"),
+    server.registerTool(
+      "send_file",
+      {
+        description: "Send a file (image, video, audio, document) via Signal, with an optional caption.",
+        inputSchema: {
+          recipient: z
+            .string()
+            .describe('chat_id from list_chats (Signal UUID or group:<id>), phone number (+15551234567), "u:<username>", or "me"'),
+          file_path: z.string().describe("Absolute path to the file to send"),
+          caption: z.string().optional().describe("Optional message text to send with the file"),
+        },
+        annotations: SEND,
       },
-      annotations: SEND,
-    },
-    safe(async ({ recipient, file_path, caption }) => {
-      const resolved = path.resolve(file_path);
-      let stat: fs.Stats;
-      try {
-        stat = fs.statSync(resolved);
-      } catch {
-        return fail(`File not found: ${resolved}`);
-      }
-      if (!stat.isFile()) return fail(`Not a file: ${resolved}`);
-      if (stat.size > MAX_ATTACHMENT_BYTES) return fail("File is larger than Signal's 100 MB attachment limit.");
+      safe(async ({ recipient, file_path, caption }) => {
+        const resolved = path.resolve(file_path);
+        let stat: fs.Stats;
+        try {
+          stat = fs.statSync(resolved);
+        } catch {
+          return fail(`File not found: ${resolved}`);
+        }
+        if (!stat.isFile()) return fail(`Not a file: ${resolved}`);
+        if (stat.size > MAX_ATTACHMENT_BYTES) return fail("File is larger than Signal's 100 MB attachment limit.");
 
-      const target = resolveTarget(recipient);
-      const filename = path.basename(resolved);
-      const contentType = mimeForFile(resolved);
-      // A data URI works even when signal-cli runs in a container that can't see this path.
-      const dataUri = `data:${contentType};filename=${encodeURIComponent(filename)};base64,${fs
-        .readFileSync(resolved)
-        .toString("base64")}`;
-      const params: Record<string, unknown> = { ...target.params, attachments: [dataUri] };
-      if (caption) params.message = caption;
+        const target = resolveTarget(recipient);
+        const filename = path.basename(resolved);
+        const contentType = mimeForFile(resolved);
+        // A data URI works even when signal-cli runs in a container that can't see this path.
+        const dataUri = `data:${contentType};filename=${encodeURIComponent(filename)};base64,${fs
+          .readFileSync(resolved)
+          .toString("base64")}`;
+        const params: Record<string, unknown> = { ...target.params, attachments: [dataUri] };
+        if (caption) params.message = caption;
 
-      const result = await client.rpc<SendResult>("send", params);
-      const id = recordOutgoing(target, result, caption ?? null, [{ contentType, filename, size: stat.size }], null);
-      return text(sendSummary(target, result, id));
-    })
-  );
+        const result = await client.rpc<SendResult>("send", params);
+        const id = recordOutgoing(target, result, caption ?? null, [{ contentType, filename, size: stat.size }], null);
+        return text(sendSummary(target, result, id));
+      })
+    );
 
-  server.registerTool(
-    "send_reaction",
-    {
-      description: "React to a Signal message with an emoji, or remove your reaction.",
-      inputSchema: {
-        message_id: z.number().int().describe("The message_id to react to"),
-        emoji: z.string().min(1).describe("A single emoji, e.g. 👍"),
-        remove: z.boolean().default(false).describe("Remove this reaction instead of adding it"),
+    server.registerTool(
+      "send_reaction",
+      {
+        description: "React to a Signal message with an emoji, or remove your reaction.",
+        inputSchema: {
+          message_id: z.number().int().describe("The message_id to react to"),
+          emoji: z.string().min(1).describe("A single emoji, e.g. 👍"),
+          remove: z.boolean().default(false).describe("Remove this reaction instead of adding it"),
+        },
+        annotations: SEND,
       },
-      annotations: SEND,
-    },
-    safe(async ({ message_id, emoji, remove }) => {
-      const m = store.getMessage(message_id);
-      if (!m) return fail(`No message with message_id ${message_id}.`);
-      const target = resolveTarget(m.chat_id);
-      await client.rpc<SendResult>("sendReaction", {
-        ...target.params,
-        emoji,
-        targetAuthor: authorAddress(m),
-        targetTimestamp: m.timestamp,
-        remove,
-      });
-      if (remove) store.removeReaction(m.chat_id, m.sender_id, m.timestamp, SELF);
-      else store.setReaction(m.chat_id, m.sender_id, m.timestamp, SELF, emoji, Date.now());
-      return text(`${remove ? "Removed" : "Reacted with"} ${emoji} ${remove ? "from" : "to"} message ${message_id} in ${target.label}.`);
-    })
-  );
+      safe(async ({ message_id, emoji, remove }) => {
+        const m = store.getMessage(message_id);
+        if (!m) return fail(`No message with message_id ${message_id}.`);
+        const target = resolveTarget(m.chat_id);
+        await client.rpc<SendResult>("sendReaction", {
+          ...target.params,
+          emoji,
+          targetAuthor: authorAddress(m),
+          targetTimestamp: m.timestamp,
+          remove,
+        });
+        if (remove) store.removeReaction(m.chat_id, m.sender_id, m.timestamp, SELF);
+        else store.setReaction(m.chat_id, m.sender_id, m.timestamp, SELF, emoji, Date.now());
+        return text(`${remove ? "Removed" : "Reacted with"} ${emoji} ${remove ? "from" : "to"} message ${message_id} in ${target.label}.`);
+      })
+    );
+  }
 
   server.registerTool(
     "download_attachment",
@@ -714,16 +726,19 @@ export function registerTools(server: McpServer, { store, client, ingestor }: De
       const attachments = parseJson<Attachment[]>(m.attachments) ?? [];
       const a = attachments[attachment_index];
       if (!a) return fail(`Message ${message_id} has ${attachments.length} attachment(s); index ${attachment_index} doesn't exist.`);
-      if (!a.id || path.basename(a.id) !== a.id) {
+      const fromDesktop = Boolean(a.desktopPath && desktop);
+      if (!fromDesktop && (!a.id || path.basename(a.id) !== a.id)) {
         return fail("This attachment isn't available to download (it may be one you sent from this server).");
       }
 
       fs.mkdirSync(config.downloadDir, { recursive: true });
-      let name = (a.filename || a.id).replace(/[^\w.\-]+/g, "_").slice(-100);
+      let name = (a.filename || a.id || "attachment").replace(/[^\w.\-]+/g, "_").slice(-100);
       if (!path.extname(name)) name += extensionForMime(a.contentType);
       const dest = path.join(config.downloadDir, `${m.id}-${attachment_index}-${name}`);
 
-      if (!fs.existsSync(dest)) {
+      if (fromDesktop && !fs.existsSync(dest)) {
+        fs.writeFileSync(dest, desktop!.readAttachment(a));
+      } else if (!fs.existsSync(dest) && a.id) {
         const local = path.join(config.attachmentsDir, a.id);
         if (fs.existsSync(local)) {
           fs.copyFileSync(local, dest);
@@ -737,29 +752,67 @@ export function registerTools(server: McpServer, { store, client, ingestor }: De
     })
   );
 
+  if (desktop) {
+    server.registerTool(
+      "sync_signal_desktop",
+      {
+        description:
+          "Import new messages from Signal Desktop now (this also happens automatically every few minutes). " +
+          "Set full=true to re-read all history, e.g. to pick up older edits and deletions.",
+        inputSchema: { full: z.boolean().default(false).describe("Re-read every message instead of only new ones") },
+        annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+      },
+      safe(async ({ full }) => {
+        const result = await desktop.sync({ full });
+        const stats = store.stats();
+        return json({
+          imported_or_updated: result.imported,
+          chats_imported: result.chats,
+          total_messages: stats.messages,
+          total_links: stats.links,
+        });
+      })
+    );
+  }
+
   server.registerTool(
     "get_status",
     {
-      description: "Check the connection to signal-cli and how many Signal messages are stored locally.",
+      description: "Check where Signal messages come from (Signal Desktop and/or signal-cli) and how much is stored locally.",
       inputSchema: {},
       annotations: READ,
     },
     safe(async () => {
       const stats = store.stats();
-      const reachable = await client.isUp();
-      const version = reachable ? await client.rpc<{ version: string }>("version", {}, { withAccount: false }).catch(() => null) : null;
-      // Only multi-account daemons implement listAccounts.
-      const accounts = reachable
-        ? await client
-            .rpc<Array<{ number: string | null; aci?: string }>>("listAccounts", {}, { withAccount: false })
-            .catch(() => null)
-        : null;
+      let signalCli: Record<string, unknown> | string = "not used (sending is off; set SIGNAL_CLI_URL to enable it)";
+      if (sending) {
+        const reachable = await client.isUp();
+        const version = reachable ? await client.rpc<{ version: string }>("version", {}, { withAccount: false }).catch(() => null) : null;
+        // Only multi-account daemons implement listAccounts.
+        const accounts = reachable
+          ? await client
+              .rpc<Array<{ number: string | null; aci?: string }>>("listAccounts", {}, { withAccount: false })
+              .catch(() => null)
+          : null;
+        signalCli = {
+          url: config.signalCliUrl,
+          reachable,
+          ...(version ? { version: version.version } : {}),
+          ...(accounts ? { linked_accounts: accounts.map((a) => a.number ?? a.aci) } : {}),
+        };
+      }
+      const signalDesktop = desktop
+        ? {
+            folder: desktop.dir,
+            last_sync: desktop.lastSync ? formatTime(desktop.lastSync.at) : "in progress",
+            ...(desktop.lastSync?.error ? { last_sync_error: desktop.lastSync.error } : {}),
+            ...(config.desktop.chats.length ? { only_chats: config.desktop.chats } : {}),
+          }
+        : "not found";
       return json({
-        signal_cli_url: config.signalCliUrl,
-        signal_cli_reachable: reachable,
-        ...(version ? { signal_cli_version: version.version } : {}),
-        ...(accounts ? { linked_accounts: accounts.map((a) => a.number ?? a.aci) } : {}),
-        account: config.account ?? store.getMeta("self_number") ?? null,
+        signal_desktop: signalDesktop,
+        signal_cli: signalCli,
+        account: identity.number ?? identity.uuid ?? null,
         capturing_new_messages: config.ingest,
         database: config.dbPath,
         messages: stats.messages,
@@ -775,11 +828,20 @@ export function registerTools(server: McpServer, { store, client, ingestor }: De
   );
 }
 
-export const SERVER_INSTRUCTIONS = `Read, search, and send the user's Signal messages (via signal-cli).
-
-- Chats are identified by chat_id: a Signal UUID for 1:1 chats, "group:<base64 id>" for groups, "self" for Note to Self.
-- Messages are identified by an integer message_id (use it with get_message_context, send_reaction, download_attachment, and reply_to_message_id).
-- Every link shared in a chat is catalogued: use list_links to browse or search them (grouped by URL across chats) and export_links to save them to a CSV or Markdown file. list_files does the same for shared files.
-- Look people up with search_contacts and chats with list_chats before sending; never guess a recipient.
-- Signal keeps no history on its servers, so only messages captured since signal-mcp started running are searchable.`;
+export function serverInstructions(opts: { sending: boolean; desktop: boolean }): string {
+  const lines = [
+    opts.sending ? "Read, search, and send the user's Signal messages." : "Read and search the user's Signal messages (read-only: sending is not set up).",
+    "",
+    '- Chats are identified by chat_id: a Signal UUID for 1:1 chats, "group:<base64 id>" for groups, "self" for Note to Self.',
+    `- Messages are identified by an integer message_id (use it with get_message_context, download_attachment${opts.sending ? ", send_reaction, and reply_to_message_id" : ""}).`,
+    "- Every link shared in a chat is catalogued: use list_links to browse or search them (grouped by URL across chats) and export_links to save them to a CSV or Markdown file. list_files does the same for shared files.",
+  ];
+  if (opts.sending) lines.push("- Look people up with search_contacts and chats with list_chats before sending; never guess a recipient.");
+  lines.push(
+    opts.desktop
+      ? "- History is imported from Signal Desktop on this computer and kept in a local archive, which also keeps messages Desktop later removes."
+      : "- Signal keeps no history on its servers, so only messages captured since signal-mcp started running are searchable."
+  );
+  return lines.join("\n");
+}
 

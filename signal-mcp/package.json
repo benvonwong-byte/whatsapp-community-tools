@@ -1,7 +1,7 @@
 {
   "name": "signal-mcp",
   "version": "0.1.0",
-  "description": "MCP server that lets Claude search, read, and send your Signal messages via signal-cli",
+  "description": "MCP server that lets Claude search your Signal history (from Signal Desktop or signal-cli), catalog shared links, and send messages",
   "license": "MIT",
   "author": "Benjamin Von Wong",
   "type": "commonjs",
@@ -31,11 +31,11 @@
   ],
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
-    "better-sqlite3": "^12.11.1",
+    "better-sqlite3-multiple-ciphers": "^13.0.3",
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
+    "@signalapp/sqlcipher": "^4.1.0",
     "@types/node": "^22.20.5",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3"

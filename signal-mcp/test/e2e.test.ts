@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
-import Database from "better-sqlite3";
+import Database from "better-sqlite3-multiple-ciphers";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { ALICE, BOB, CAROL, GROUP2_ID, GROUP_ID, MockSignalCli, SELF_NUMBER, SELF_UUID } from "./mock-signal-cli";

@@ -1,4 +1,4 @@
-import Database from "better-sqlite3";
+import Database from "better-sqlite3-multiple-ciphers";
 import fs from "fs";
 import path from "path";
 import { ExtractedLink, extractLinks } from "./links";
@@ -13,6 +13,10 @@ export interface Attachment {
   size?: number | null;
   caption?: string | null;
   isVoiceNote?: boolean;
+  // Signal Desktop: file under attachments.noindex/, encrypted at rest when version is 2
+  desktopPath?: string | null;
+  localKey?: string | null;
+  version?: number | null;
 }
 
 export interface Quote {
@@ -395,6 +399,56 @@ export class SignalStore {
       .prepare("UPDATE chats SET last_message_at = MAX(COALESCE(last_message_at, 0), ?) WHERE id = ?")
       .run(msg.timestamp, msg.chatId);
     return res.changes > 0 ? Number(res.lastInsertRowid) : null;
+  }
+
+  /**
+   * Insert or refresh a message from a source that reports current state (Signal Desktop).
+   * Deletions are sticky and clear content; the row is never removed, so the archive keeps
+   * messages that later disappear from the source. Returns the message id.
+   */
+  upsertMessage(msg: NewMessage & { editedAt?: number | null; deleted?: boolean }): number {
+    const row = this.db
+      .prepare(
+        `INSERT INTO messages (chat_id, sender_id, timestamp, is_from_me, body, attachments, quote, edited_at, deleted)
+         VALUES (@chatId, @senderId, @timestamp, @isFromMe, @body, @attachments, @quote, @editedAt, @deleted)
+         ON CONFLICT(chat_id, sender_id, timestamp) DO UPDATE SET
+           body = CASE WHEN messages.deleted = 1 OR excluded.deleted = 1 THEN NULL ELSE excluded.body END,
+           attachments = CASE WHEN messages.deleted = 1 OR excluded.deleted = 1 THEN NULL ELSE excluded.attachments END,
+           quote = CASE WHEN messages.deleted = 1 OR excluded.deleted = 1 THEN NULL ELSE excluded.quote END,
+           edited_at = COALESCE(excluded.edited_at, messages.edited_at),
+           deleted = MAX(messages.deleted, excluded.deleted)
+         RETURNING id`
+      )
+      .get({
+        chatId: msg.chatId,
+        senderId: msg.senderId,
+        timestamp: msg.timestamp,
+        isFromMe: msg.isFromMe ? 1 : 0,
+        body: msg.deleted ? null : msg.body,
+        attachments: !msg.deleted && msg.attachments?.length ? JSON.stringify(msg.attachments) : null,
+        quote: !msg.deleted && msg.quote ? JSON.stringify(msg.quote) : null,
+        editedAt: msg.editedAt ?? null,
+        deleted: msg.deleted ? 1 : 0,
+      }) as { id: number };
+    this.db
+      .prepare("UPDATE chats SET last_message_at = MAX(COALESCE(last_message_at, 0), ?) WHERE id = ?")
+      .run(msg.timestamp, msg.chatId);
+    return row.id;
+  }
+
+  /** Set the full list of reactions on a message, as reported by Signal Desktop. */
+  replaceReactions(
+    chatId: string,
+    targetSenderId: string,
+    targetTimestamp: number,
+    reactions: Array<{ reactorId: string; emoji: string; timestamp: number }>
+  ) {
+    this.db
+      .prepare("DELETE FROM reactions WHERE chat_id = ? AND target_sender_id = ? AND target_timestamp = ?")
+      .run(chatId, targetSenderId, targetTimestamp);
+    for (const r of reactions) {
+      this.setReaction(chatId, targetSenderId, targetTimestamp, r.reactorId, r.emoji, r.timestamp);
+    }
   }
 
   /** Returns the edited message's id, or null if the original isn't stored (or a newer edit is). */

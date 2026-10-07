@@ -6,6 +6,12 @@ function expandHome(p: string): string {
 }
 
 const dataHome = process.env.XDG_DATA_HOME || path.join(os.homedir(), ".local/share");
+
+function defaultDesktopDir(): string {
+  if (process.platform === "darwin") return path.join(os.homedir(), "Library/Application Support/Signal");
+  if (process.platform === "win32") return path.join(process.env.APPDATA || os.homedir(), "Signal");
+  return path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "Signal");
+}
 const stateDir = expandHome(process.env.SIGNAL_MCP_DIR || "~/.signal-mcp");
 
 export const config = {
@@ -27,6 +33,18 @@ export const config = {
   // Disappearing messages are skipped by default, honouring the chat's choice not to keep them.
   archiveDisappearing: process.env.SIGNAL_MCP_ARCHIVE_DISAPPEARING === "1",
   exportDir: expandHome(process.env.SIGNAL_MCP_EXPORT_DIR || path.join(stateDir, "exports")),
+  // signal-cli is used when SIGNAL_CLI_URL is set, or when there is no Signal Desktop to read.
+  signalCliConfigured: Boolean(process.env.SIGNAL_CLI_URL),
+  desktop: {
+    enabled: process.env.SIGNAL_DESKTOP !== "0",
+    dir: expandHome(process.env.SIGNAL_DESKTOP_DIR || defaultDesktopDir()),
+    // Comma-separated chat names (or chat_ids) to import; empty imports every chat.
+    chats: (process.env.SIGNAL_DESKTOP_CHATS || "")
+      .split(",")
+      .map((c) => c.trim())
+      .filter(Boolean),
+    syncIntervalMs: Math.max(1, Number(process.env.SIGNAL_DESKTOP_SYNC_MINUTES) || 5) * 60 * 1000,
+  },
   refreshIntervalMs: 30 * 60 * 1000,
 };
 

@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  Optional: captures Signal messages around the clock, even while Claude is closed.
-  Replace the node path (`which node`), the signal-mcp path, and +15551234567, then:
+  Optional: keeps the Signal archive current around the clock, even while Claude is closed.
+  Replace the node path (`which node`) and the signal-mcp path. If you also use signal-cli,
+  set SIGNAL_CLI_URL and SIGNAL_ACCOUNT below; with Signal Desktop alone, remove that block. Then:
     cp com.signal-mcp.bridge.plist ~/Library/LaunchAgents/
     launchctl load ~/Library/LaunchAgents/com.signal-mcp.bridge.plist
 -->
@@ -18,6 +19,8 @@
   </array>
   <key>EnvironmentVariables</key>
   <dict>
+    <key>SIGNAL_CLI_URL</key>
+    <string>http://127.0.0.1:8080</string>
     <key>SIGNAL_ACCOUNT</key>
     <string>+15551234567</string>
   </dict>

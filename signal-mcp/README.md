@@ -1,14 +1,19 @@
 # signal-mcp
 
-An MCP server that lets Claude read, search, and send your Signal messages, and keeps a catalog of every link and file shared in your chats and groups. It is the Signal counterpart to the [WhatsApp MCP server](https://github.com/lharries/whatsapp-mcp): same tool names, same output style, so prompts that work for WhatsApp work here too.
+An MCP server that lets Claude search your Signal history and keeps a catalog of every link and file shared in your chats and groups. It is the Signal counterpart to the [WhatsApp MCP server](https://github.com/lharries/whatsapp-mcp): same tool names, same output style, so prompts that work for WhatsApp work here too.
+
+It reads messages from two possible sources, into one local archive:
 
 ```
-Signal on your phone ⇄ signal-cli (a linked device on your Mac) ⇄ signal-mcp (SQLite + MCP tools) ⇄ Claude
+Signal Desktop on this Mac (its local database)  ─┐
+                                                   ├─▶ signal-mcp archive (SQLite) ⇄ Claude
+signal-cli, optional (live capture + sending)    ─┘
 ```
 
-[signal-cli](https://github.com/AsamK/signal-cli) links to your Signal account as a secondary device, like Signal Desktop. signal-mcp follows its event stream, saves every message to a local SQLite database, and exposes that database to Claude as MCP tools. Everything stays on your machine.
+- **Signal Desktop** (recommended): if Signal Desktop is set up on the Mac, signal-mcp imports everything it has, read-only, and checks for new messages every few minutes. Nothing else needs to be installed.
+- **[signal-cli](https://github.com/AsamK/signal-cli)** (optional): a separate linked device that lets Claude *send* messages, files, and reactions, and captures messages as they arrive. Without Signal Desktop it's the only source, and history starts when you link it, since Signal keeps no message history on its servers.
 
-> **Signal keeps no message history on its servers.** signal-cli only sees messages that arrive after you link it, so the database starts empty and fills up from then on.
+The archive keeps messages even after they're removed from Signal Desktop. Everything stays on your machine.
 
 ## Tools
 
@@ -22,14 +27,15 @@ Signal on your phone ⇄ signal-cli (a linked device on your Mac) ⇄ signal-mcp
 | `get_last_interaction` | Most recent message involving a contact |
 | `list_messages` | Search messages by text, sender, chat, and date range, with surrounding context |
 | `get_message_context` | Messages before and after a given message |
-| `send_message` | Send a message to a person, group, or Note to Self, optionally as a quote-reply |
-| `send_file` | Send an image, video, audio file, or document |
-| `send_reaction` | React to a message with an emoji (or remove a reaction) |
-| `download_attachment` | Save a received attachment to disk and return its path |
 | `list_links` | Every link shared in your chats: where, by whom, when, how often, and its preview title |
 | `list_files` | Images, videos, audio, and documents shared in your chats |
 | `export_links` | Save the link catalog as CSV (for Sheets, Notion, Airtable) or Markdown (organized by chat) |
-| `get_status` | Check the signal-cli connection and how much is stored |
+| `download_attachment` | Save an attachment to disk (decrypting Signal Desktop's copy) and return its path |
+| `sync_signal_desktop` | Import from Signal Desktop now, or re-read all of it |
+| `get_status` | Where messages come from and how much is archived |
+| `send_message` | *With signal-cli:* send to a person, group, or Note to Self, optionally as a quote-reply |
+| `send_file` | *With signal-cli:* send an image, video, audio file, or document |
+| `send_reaction` | *With signal-cli:* react to a message with an emoji |
 
 Chats are identified by `chat_id`: the contact's Signal UUID for 1:1 chats, `group:<id>` for groups, and `self` for Note to Self. Messages have an integer `message_id`. Edits, deletions, reactions, quotes, and @mentions are tracked.
 
@@ -46,43 +52,11 @@ Things to ask Claude:
 
 Exports go to `~/.signal-mcp/exports/`. CSV has one row per link, with columns for the chats and people that shared it. Markdown has one section per chat.
 
-Like messages, links are only catalogued from the point signal-mcp starts capturing.
+## Setup (macOS, with Signal Desktop)
 
-## Setup (macOS)
+You need Node.js 20 or newer, and Signal Desktop set up and linked on the Mac.
 
-You need Node.js 20 or newer and Homebrew.
-
-### 1. Install signal-cli and link it to your phone
-
-```sh
-brew install signal-cli qrencode
-signal-cli link -n "Claude" | tee >(xargs -L 1 qrencode -t utf8)
-```
-
-On your phone, open Signal → Settings → Linked devices → Link new device, and scan the QR code. Then check it worked:
-
-```sh
-signal-cli listAccounts
-```
-
-(Homebrew's signal-cli brings its own Java. A manual install of signal-cli 0.14 or newer needs Java 25, or use the native build from the signal-cli releases page.)
-
-### 2. Run the signal-cli daemon
-
-```sh
-signal-cli -a +15551234567 daemon --http=127.0.0.1:8080 --receive-mode=on-connection --no-receive-stdout
-```
-
-`--receive-mode=on-connection` makes signal-cli fetch messages only while signal-mcp is connected. While nothing is connected, messages wait on Signal's servers and arrive the next time Claude starts, so they are not lost. `--no-receive-stdout` keeps message contents out of the daemon's log.
-
-To keep the daemon running in the background, use the LaunchAgent template in [`launchd/org.asamk.signal-cli.plist`](launchd/org.asamk.signal-cli.plist). Put your number in it, then:
-
-```sh
-cp launchd/org.asamk.signal-cli.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/org.asamk.signal-cli.plist
-```
-
-### 3. Build signal-mcp
+### 1. Build signal-mcp
 
 ```sh
 cd signal-mcp
@@ -90,7 +64,7 @@ npm install
 npm run build
 ```
 
-### 4. Connect it to Claude
+### 2. Connect it to Claude
 
 **Claude Desktop:** add this to `~/Library/Application Support/Claude/claude_desktop_config.json`, then restart Claude:
 
@@ -99,8 +73,7 @@ npm run build
   "mcpServers": {
     "signal": {
       "command": "/opt/homebrew/bin/node",
-      "args": ["/path/to/whatsapp-community-tools/signal-mcp/dist/index.js"],
-      "env": { "SIGNAL_ACCOUNT": "+15551234567" }
+      "args": ["/path/to/whatsapp-community-tools/signal-mcp/dist/index.js"]
     }
   }
 }
@@ -111,50 +84,87 @@ Use the full path that `which node` prints. Claude Desktop doesn't use your shel
 **Claude Code:**
 
 ```sh
-claude mcp add signal -e SIGNAL_ACCOUNT=+15551234567 -- "$(which node)" "$PWD/dist/index.js"
+claude mcp add signal -- "$(which node)" "$PWD/dist/index.js"
 ```
 
-Ask Claude "what's my Signal status?" to check that everything is connected.
+### 3. Allow Keychain access
 
-### 5. Optional: capture messages around the clock
+Signal Desktop encrypts its database with a key it keeps in the macOS Keychain. The first time signal-mcp starts, macOS asks whether `security` may use the "Signal Safe Storage" item.
 
-The MCP server captures messages while Claude is running. To keep the database current even while Claude is closed, run the bridge as a background service using [`launchd/com.signal-mcp.bridge.plist`](launchd/com.signal-mcp.bridge.plist):
+- **Allow**: macOS asks again each time signal-mcp starts.
+- **Always Allow**: no more prompts, but any program that uses macOS's `security` tool could then read the key without asking.
+
+If you click Deny, automatic imports pause until you ask Claude to run `sync_signal_desktop`.
+
+The first import runs in the background and can take a minute on a large history. Ask Claude "what's my Signal status?" to see progress.
+
+### 4. Optional: keep the archive current while Claude is closed
+
+The MCP server imports while Claude is running. To keep importing around the clock, for example to capture messages before Signal Desktop deletes them, run the bridge as a background service using [`launchd/com.signal-mcp.bridge.plist`](launchd/com.signal-mcp.bridge.plist). Edit the paths in it first, then:
 
 ```sh
-cp launchd/com.signal-mcp.bridge.plist ~/Library/LaunchAgents/   # after editing the paths and number
+cp launchd/com.signal-mcp.bridge.plist ~/Library/LaunchAgents/
 launchctl load ~/Library/LaunchAgents/com.signal-mcp.bridge.plist
 ```
 
-The always-on bridge also keeps the linked device active. Signal unlinks devices that haven't connected for about 30 days.
+## Optional: sending with signal-cli
+
+To let Claude send messages, add signal-cli as a second linked device:
+
+```sh
+brew install signal-cli qrencode
+signal-cli link -n "Claude" | tee >(xargs -L 1 qrencode -t utf8)
+```
+
+On your phone, open Signal → Settings → Linked devices → Link new device, and scan the QR code. Check it worked with `signal-cli listAccounts`. (Homebrew's signal-cli brings its own Java. A manual install of 0.14 or newer needs Java 25.)
+
+Run the daemon, and keep it running with [`launchd/org.asamk.signal-cli.plist`](launchd/org.asamk.signal-cli.plist):
+
+```sh
+signal-cli -a +15551234567 daemon --http=127.0.0.1:8080 --receive-mode=on-connection --no-receive-stdout
+```
+
+Then add `"env": { "SIGNAL_CLI_URL": "http://127.0.0.1:8080", "SIGNAL_ACCOUNT": "+15551234567" }` to the Claude config above. The send tools appear once `SIGNAL_CLI_URL` is set.
+
+`--receive-mode=on-connection` makes signal-cli fetch messages only while signal-mcp is connected; otherwise they wait on Signal's servers. Signal unlinks devices that haven't connected for about 30 days, so if you rarely open Claude, run the bridge too.
+
+Without Signal Desktop on the machine, signal-cli is used automatically and is the only source of messages.
 
 ## Configuration
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `SIGNAL_ACCOUNT` | none | Your Signal number (`+15551234567`). Required if the daemon serves several accounts. |
-| `SIGNAL_CLI_URL` | `http://127.0.0.1:8080` | Address of the signal-cli HTTP daemon |
-| `SIGNAL_MCP_DB` | `~/.signal-mcp/messages.db` | SQLite database |
+| `SIGNAL_DESKTOP_DIR` | `~/Library/Application Support/Signal` | Signal Desktop's data folder |
+| `SIGNAL_DESKTOP_CHATS` | all chats | Comma-separated chat names to import from Signal Desktop, e.g. `Book Club,Climate Crew` |
+| `SIGNAL_DESKTOP_SYNC_MINUTES` | `5` | How often to check Signal Desktop for new messages |
+| `SIGNAL_DESKTOP` | `1` | Set to `0` to ignore Signal Desktop |
+| `SIGNAL_CLI_URL` | none | signal-cli HTTP daemon; setting it enables sending (default `http://127.0.0.1:8080` when there's no Signal Desktop) |
+| `SIGNAL_ACCOUNT` | none | Your Signal number for signal-cli (`+15551234567`) |
+| `SIGNAL_MCP_DB` | `~/.signal-mcp/messages.db` | The archive |
 | `SIGNAL_MCP_DOWNLOAD_DIR` | `~/.signal-mcp/downloads` | Where `download_attachment` saves files |
-| `SIGNAL_CLI_ATTACHMENTS_DIR` | `~/.local/share/signal-cli/attachments` | Where signal-cli stores received attachments (a fast path; otherwise they're fetched over RPC) |
-| `SIGNAL_MCP_INGEST` | `1` | Set to `0` if only the bridge should write to the database |
 | `SIGNAL_MCP_EXPORT_DIR` | `~/.signal-mcp/exports` | Where `export_links` writes files |
 | `SIGNAL_MCP_ARCHIVE_DISAPPEARING` | `0` | Set to `1` to also archive disappearing messages (see below) |
+| `SIGNAL_MCP_INGEST` | `1` | Set to `0` if only the bridge should write to the archive |
 
-signal-cli can also run in Docker or on another machine. Point `SIGNAL_CLI_URL` at it. Files are sent as data URIs and attachments are fetched over RPC, so no shared filesystem is needed.
+`SIGNAL_DESKTOP_CHATS` matches chat names case-insensitively, so `book` matches "Book Club". Changing it re-reads Signal Desktop's history for the chats you add.
 
 ## Privacy and safety
 
-- `~/.signal-mcp/messages.db` stores your messages unencrypted, and `~/.local/share/signal-cli` holds your Signal keys. Treat both like your Signal Desktop data.
-- The send tools act as you. They are marked as non-read-only, so Claude asks for approval before using them (unless you've allowed them).
-- The signal-cli HTTP daemon has no authentication. Keep it bound to `127.0.0.1`.
+- signal-mcp only reads Signal Desktop's data. It never writes to it.
+- The archive at `~/.signal-mcp/messages.db` stores messages unencrypted, unlike Signal Desktop's own database. Treat it like your Signal data. The Keychain-derived key is held only in memory.
 - Disappearing messages are not archived by default, because the chat chose not to keep them. `get_status` shows how many were skipped. Set `SIGNAL_MCP_ARCHIVE_DISAPPEARING=1` to keep them anyway.
 - When someone deletes a message for everyone, its text, attachments, and links are removed from the archive too.
+- The send tools act as you. They are marked as non-read-only, so Claude asks for approval before using them (unless you've allowed them).
+- The signal-cli HTTP daemon has no authentication. Keep it bound to `127.0.0.1`.
 
 ## Development
 
 ```sh
-npm test        # end-to-end tests against a mock signal-cli daemon
+npm test        # unit and end-to-end tests
 npm run dev     # run from source with tsx
 ```
 
-The tests start the real MCP server over stdio and drive it with the MCP client SDK. A fake `signal-cli daemon --http` sends events shaped like signal-cli's JSON output.
+The end-to-end tests start the real MCP server over stdio and drive it with the MCP client SDK, against:
+
+- a fake `signal-cli daemon --http` that sends events shaped like signal-cli's JSON output;
+- a fake Signal Desktop profile, encrypted with Signal Desktop's own SQLCipher library and its key and attachment encryption.
