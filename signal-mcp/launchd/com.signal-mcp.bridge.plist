@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Optional: captures Signal messages around the clock, even while Claude is closed.
+  Replace the node path (`which node`), the signal-mcp path, and +15551234567, then:
+    cp com.signal-mcp.bridge.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.signal-mcp.bridge.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.signal-mcp.bridge</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/node</string>
+    <string>/path/to/whatsapp-community-tools/signal-mcp/dist/index.js</string>
+    <string>bridge</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>SIGNAL_ACCOUNT</key>
+    <string>+15551234567</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardErrorPath</key>
+  <string>/tmp/signal-mcp-bridge.log</string>
+</dict>
+</plist>

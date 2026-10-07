@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Keeps the signal-cli daemon running in the background on macOS.
+  Replace +15551234567 with your Signal number (and the signal-cli path with `which signal-cli`
+  if it differs, e.g. /usr/local/bin on Intel Macs), then:
+    cp org.asamk.signal-cli.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/org.asamk.signal-cli.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>org.asamk.signal-cli</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/signal-cli</string>
+    <string>-a</string>
+    <string>+15551234567</string>
+    <string>daemon</string>
+    <string>--http=127.0.0.1:8080</string>
+    <string>--receive-mode=on-connection</string>
+    <string>--no-receive-stdout</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardErrorPath</key>
+  <string>/tmp/signal-cli.log</string>
+</dict>
+</plist>
