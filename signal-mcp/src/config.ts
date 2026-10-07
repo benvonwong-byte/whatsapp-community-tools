@@ -24,6 +24,9 @@ export const config = {
   // The MCP server also listens for new messages while it runs. Set to 0 if a separate
   // `signal-mcp bridge` process is the only thing that should write to the database.
   ingest: process.env.SIGNAL_MCP_INGEST !== "0",
+  // Disappearing messages are skipped by default, honouring the chat's choice not to keep them.
+  archiveDisappearing: process.env.SIGNAL_MCP_ARCHIVE_DISAPPEARING === "1",
+  exportDir: expandHome(process.env.SIGNAL_MCP_EXPORT_DIR || path.join(stateDir, "exports")),
   refreshIntervalMs: 30 * 60 * 1000,
 };
 

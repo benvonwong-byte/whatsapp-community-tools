@@ -7,7 +7,7 @@ import { after, before, describe, test } from "node:test";
 import Database from "better-sqlite3";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { ALICE, BOB, CAROL, GROUP_ID, MockSignalCli, SELF_NUMBER, SELF_UUID } from "./mock-signal-cli";
+import { ALICE, BOB, CAROL, GROUP2_ID, GROUP_ID, MockSignalCli, SELF_NUMBER, SELF_UUID } from "./mock-signal-cli";
 
 const ROOT = path.resolve(__dirname, "..");
 const T0 = Date.parse("2026-10-01T18:00:00Z");
@@ -67,7 +67,37 @@ const envelopes = {
   },
   bobOops: {
     sourceNumber: BOB.number, sourceUuid: BOB.uuid, timestamp: T0 + 200_000,
-    dataMessage: { timestamp: T0 + 200_000, message: "wrong chat, sorry", groupInfo: { groupId: GROUP_ID, type: "DELIVER" } },
+    dataMessage: { timestamp: T0 + 200_000, message: "wrong chat, sorry https://private.example.com/doc", groupInfo: { groupId: GROUP_ID, type: "DELIVER" } },
+  },
+  bobCrewLinks: {
+    sourceNumber: BOB.number, sourceUuid: BOB.uuid, sourceName: "Bob Jones", timestamp: T0 + 50_000,
+    dataMessage: {
+      timestamp: T0 + 50_000, message: "Also relevant https://nytimes.com/2026/10/01/climate.html/ and this talk https://youtu.be/abc123?si=TRACKING",
+      groupInfo: { groupId: GROUP2_ID, groupName: null, revision: 1, type: "DELIVER" },
+    },
+  },
+  bobBookClubLink: {
+    sourceNumber: BOB.number, sourceUuid: BOB.uuid, sourceName: "Bob Jones", timestamp: T0 + 100_000,
+    dataMessage: {
+      timestamp: T0 + 100_000, message: "Great read: https://www.nytimes.com/2026/10/01/climate.html?utm_source=signal&utm_medium=share.",
+      previews: [{ url: "https://www.nytimes.com/2026/10/01/climate.html", title: "The Climate Report", description: "What the new numbers mean.", image: null }],
+      groupInfo: { groupId: GROUP_ID, groupName: null, revision: 3, type: "DELIVER" },
+    },
+  },
+  aliceCheck: {
+    sourceNumber: ALICE.number, sourceUuid: ALICE.uuid, sourceName: "Alice Smith", timestamp: T0 + 150_000,
+    dataMessage: { timestamp: T0 + 150_000, message: "check this out" },
+  },
+  aliceAddsLinks: {
+    sourceNumber: ALICE.number, sourceUuid: ALICE.uuid, sourceName: "Alice Smith", timestamp: T0 + 160_000,
+    editMessage: {
+      targetSentTimestamp: T0 + 150_000,
+      dataMessage: { timestamp: T0 + 160_000, message: "check https://en.wikipedia.org/wiki/Foo_(bar) (and https://www.nytimes.com/2026/10/01/climate.html)" },
+    },
+  },
+  disappearing: {
+    sourceNumber: BOB.number, sourceUuid: BOB.uuid, timestamp: T0 + 20_000,
+    dataMessage: { timestamp: T0 + 20_000, message: "secret plan https://secret.example.org/plan", expiresInSeconds: 604800, groupInfo: { groupId: GROUP_ID, type: "DELIVER" } },
   },
   bobDeletes: {
     sourceNumber: BOB.number, sourceUuid: BOB.uuid, timestamp: T0 + 210_000,
@@ -203,7 +233,7 @@ describe("signal-mcp", () => {
     assert.deepEqual(chats.map((c: any) => c.name).sort(), ["Alice Smith", "Book Club"]);
 
     const last = await call("get_last_interaction", { contact: ALICE.uuid });
-    assert.match(last.text, /Chat: Alice Smith .* From: Me: Yes! 7pm/);
+    assert.match(last.text, /Chat: Alice Smith .* From: Alice Smith: check https:\/\/en\.wikipedia/);
 
     const noChat = JSON.parse((await call("get_direct_chat_by_contact", { contact: "u:bob.42" })).text);
     assert.equal(noChat.chat_id, BOB.uuid);
@@ -289,6 +319,73 @@ describe("signal-mcp", () => {
     const info = JSON.parse(res.text);
     assert.equal(fs.readFileSync(info.file_path, "utf8"), "fake jpeg bytes");
     assert.deepEqual(mock.callsTo("getAttachment").at(-1), { account: SELF_NUMBER, id: "Xyz123.jpg", recipient: CAROL.uuid });
+  });
+
+  test("list_links groups the same link across chats, with preview titles", async () => {
+    const { text } = await call("list_links");
+    const links = JSON.parse(text.slice(text.indexOf("\n") + 1));
+    const nyt = links.find((l: any) => l.domain === "nytimes.com");
+    assert.equal(nyt.url, "https://www.nytimes.com/2026/10/01/climate.html", "latest share, minus tracking params");
+    assert.equal(nyt.title, "The Climate Report");
+    assert.equal(nyt.times_shared, 3);
+    assert.deepEqual([...nyt.chats].sort(), ["Alice Smith", "Book Club", "Climate Crew"]);
+    assert.deepEqual([...nyt.shared_by].sort(), ["Alice Smith", "Bob Jones"]);
+    assert.ok(links.some((l: any) => l.url === "https://youtu.be/abc123"), "tracking `si` param stripped");
+    assert.ok(links.some((l: any) => l.url === "https://en.wikipedia.org/wiki/Foo_(bar)"), "links added by an edit are catalogued");
+    assert.ok(!text.includes("private.example.com"), "links in deleted messages are dropped");
+    assert.ok(!text.includes("secret.example.org"), "disappearing messages are not archived");
+  });
+
+  test("list_links filters by chat, domain, sender and lists individual shares", async () => {
+    const crew = JSON.parse((await call("list_links", { chat_id: `group:${GROUP2_ID}` })).text.replace(/^.*\n/, ""));
+    assert.deepEqual(crew.map((l: any) => l.domain).sort(), ["nytimes.com", "youtu.be"]);
+
+    const wiki = JSON.parse((await call("list_links", { domain: "wikipedia.org" })).text.replace(/^.*\n/, ""));
+    assert.equal(wiki.length, 1);
+
+    const byAlice = JSON.parse((await call("list_links", { sender: ALICE.number })).text.replace(/^.*\n/, ""));
+    assert.deepEqual(byAlice.map((l: any) => l.domain).sort(), ["en.wikipedia.org", "nytimes.com"]);
+
+    const shares = JSON.parse((await call("list_links", { domain: "nytimes.com", group_by_url: false })).text.replace(/^.*\n/, ""));
+    assert.equal(shares.length, 3);
+    assert.deepEqual(shares.map((s: any) => s.chat), ["Alice Smith", "Book Club", "Climate Crew"]);
+
+    assert.match((await call("list_links", { query: "nothing-like-this" })).text, /No links match/);
+  });
+
+  test("export_links writes CSV and Markdown catalogs", async () => {
+    const csv = JSON.parse((await call("export_links", { format: "csv" })).text);
+    const csvText = fs.readFileSync(csv.file_path, "utf8");
+    assert.match(csvText, /^url,title,domain,times_shared,first_shared,last_shared,chats,shared_by,description\n/);
+    assert.match(csvText, /https:\/\/www\.nytimes\.com\/2026\/10\/01\/climate\.html,The Climate Report,nytimes\.com,3,/);
+
+    const md = JSON.parse((await call("export_links", { format: "markdown" })).text);
+    const mdText = fs.readFileSync(md.file_path, "utf8");
+    assert.match(mdText, /^# Signal links/);
+    assert.match(mdText, /## Book Club \(1\)\n\n- \[The Climate Report\]\(<https:\/\/www\.nytimes\.com\/.*>\) — nytimes\.com · Bob Jones, /);
+    assert.match(mdText, /## Climate Crew \(2\)\n\n(- .*\n)*- \[The Climate Report\]\(<https:\/\/nytimes\.com\/2026\/10\/01\/climate\.html>\)/);
+    assert.match(mdText, /\[https:\/\/en\.wikipedia\.org\/wiki\/Foo_\(bar\)\]/);
+  });
+
+  test("list_files catalogs shared files", async () => {
+    const files = JSON.parse((await call("list_files", { kind: "image" })).text);
+    assert.equal(files.length, 1);
+    assert.equal(files[0].filename, "menu.jpg");
+    assert.equal(files[0].chat, "Carol");
+    assert.equal(files[0].size, "2 KB");
+    assert.match((await call("list_files", { kind: "document", query: "menu" })).text, /No files match/);
+  });
+
+  test("get_status reports links and skipped disappearing messages", async () => {
+    const status = JSON.parse((await call("get_status")).text);
+    assert.equal(status.links, 3);
+    assert.equal(status.disappearing_messages_skipped, 1);
+  });
+
+  test("links in messages sent through the server are catalogued", async () => {
+    await call("send_message", { recipient: ALICE.uuid, message: "Here's the plan https://docs.example.com/plan" });
+    const mine = JSON.parse((await call("list_links", { sender: "me" })).text.replace(/^.*\n/, ""));
+    assert.ok(mine.some((l: any) => l.url === "https://docs.example.com/plan" && l.shared_by[0] === "Me"));
   });
 
   test("reconnects with Last-Event-ID and ignores replayed events", async () => {

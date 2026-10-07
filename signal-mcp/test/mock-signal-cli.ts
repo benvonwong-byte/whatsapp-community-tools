@@ -7,6 +7,7 @@ export const ALICE = { uuid: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", number: "+1
 export const BOB = { uuid: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", number: "+15552222222" };
 export const CAROL = { uuid: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", number: null };
 export const GROUP_ID = "Pmpi+EfPWmsxiomLe9Nx2XF9HOE483p6iKiFj65iMwI=";
+export const GROUP2_ID = "Q2xpbWF0ZUNyZXdHcm91cElkMDAwMDAwMDAwMDAwMDA=";
 
 /**
  * A stand-in for `signal-cli daemon --http`: JSON-RPC on /api/v1/rpc and SSE on /api/v1/events,
@@ -126,6 +127,16 @@ export class MockSignalCli {
             members: [
               { ...ALICE, isAdmin: true },
               { ...BOB, isAdmin: false },
+              { uuid: SELF_UUID, number: SELF_NUMBER, isAdmin: false },
+            ],
+          },
+          {
+            id: GROUP2_ID,
+            name: "Climate Crew",
+            isMember: true,
+            isBlocked: false,
+            members: [
+              { ...BOB, isAdmin: true },
               { uuid: SELF_UUID, number: SELF_NUMBER, isAdmin: false },
             ],
           },

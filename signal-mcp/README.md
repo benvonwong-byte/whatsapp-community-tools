@@ -1,6 +1,6 @@
 # signal-mcp
 
-An MCP server that lets Claude read, search, and send your Signal messages. It is the Signal counterpart to the [WhatsApp MCP server](https://github.com/lharries/whatsapp-mcp): same tool names, same output style, so prompts that work for WhatsApp work here too.
+An MCP server that lets Claude read, search, and send your Signal messages, and keeps a catalog of every link and file shared in your chats and groups. It is the Signal counterpart to the [WhatsApp MCP server](https://github.com/lharries/whatsapp-mcp): same tool names, same output style, so prompts that work for WhatsApp work here too.
 
 ```
 Signal on your phone ⇄ signal-cli (a linked device on your Mac) ⇄ signal-mcp (SQLite + MCP tools) ⇄ Claude
@@ -26,9 +26,27 @@ Signal on your phone ⇄ signal-cli (a linked device on your Mac) ⇄ signal-mcp
 | `send_file` | Send an image, video, audio file, or document |
 | `send_reaction` | React to a message with an emoji (or remove a reaction) |
 | `download_attachment` | Save a received attachment to disk and return its path |
+| `list_links` | Every link shared in your chats: where, by whom, when, how often, and its preview title |
+| `list_files` | Images, videos, audio, and documents shared in your chats |
+| `export_links` | Save the link catalog as CSV (for Sheets, Notion, Airtable) or Markdown (organized by chat) |
 | `get_status` | Check the signal-cli connection and how much is stored |
 
 Chats are identified by `chat_id`: the contact's Signal UUID for 1:1 chats, `group:<id>` for groups, and `self` for Note to Self. Messages have an integer `message_id`. Edits, deletions, reactions, quotes, and @mentions are tracked.
+
+## Link catalog
+
+Every message is scanned for links, both in the text and in Signal's link previews. Each link is recorded with the chat, the sender, the time, and the preview's title and description. Tracking parameters (`utm_*`, `fbclid`, and similar) are stripped. Variants of the same URL (with or without `www.`, `http` vs `https`, a trailing slash, a `#fragment`) are recognized as one link. So when an article goes round several groups, `list_links` shows it once, with how many times and where it was shared.
+
+Things to ask Claude:
+
+- "What links were shared in Book Club this month?"
+- "Which articles have been shared in more than one of my groups?"
+- "Find the YouTube links Alice sent me."
+- "Export all links from my climate groups as a CSV."
+
+Exports go to `~/.signal-mcp/exports/`. CSV has one row per link, with columns for the chats and people that shared it. Markdown has one section per chat.
+
+Like messages, links are only catalogued from the point signal-mcp starts capturing.
 
 ## Setup (macOS)
 
@@ -119,6 +137,8 @@ The always-on bridge also keeps the linked device active. Signal unlinks devices
 | `SIGNAL_MCP_DOWNLOAD_DIR` | `~/.signal-mcp/downloads` | Where `download_attachment` saves files |
 | `SIGNAL_CLI_ATTACHMENTS_DIR` | `~/.local/share/signal-cli/attachments` | Where signal-cli stores received attachments (a fast path; otherwise they're fetched over RPC) |
 | `SIGNAL_MCP_INGEST` | `1` | Set to `0` if only the bridge should write to the database |
+| `SIGNAL_MCP_EXPORT_DIR` | `~/.signal-mcp/exports` | Where `export_links` writes files |
+| `SIGNAL_MCP_ARCHIVE_DISAPPEARING` | `0` | Set to `1` to also archive disappearing messages (see below) |
 
 signal-cli can also run in Docker or on another machine. Point `SIGNAL_CLI_URL` at it. Files are sent as data URIs and attachments are fetched over RPC, so no shared filesystem is needed.
 
@@ -127,6 +147,8 @@ signal-cli can also run in Docker or on another machine. Point `SIGNAL_CLI_URL` 
 - `~/.signal-mcp/messages.db` stores your messages unencrypted, and `~/.local/share/signal-cli` holds your Signal keys. Treat both like your Signal Desktop data.
 - The send tools act as you. They are marked as non-read-only, so Claude asks for approval before using them (unless you've allowed them).
 - The signal-cli HTTP daemon has no authentication. Keep it bound to `127.0.0.1`.
+- Disappearing messages are not archived by default, because the chat chose not to keep them. `get_status` shows how many were skipped. Set `SIGNAL_MCP_ARCHIVE_DISAPPEARING=1` to keep them anyway.
+- When someone deletes a message for everyone, its text, attachments, and links are removed from the archive too.
 
 ## Development
 

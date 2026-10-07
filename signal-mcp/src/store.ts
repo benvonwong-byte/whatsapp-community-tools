@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import fs from "fs";
 import path from "path";
+import { ExtractedLink, extractLinks } from "./links";
 
 /** Sender/contact id used for the account owner, so outgoing messages dedupe across sources. */
 export const SELF = "self";
@@ -124,6 +125,19 @@ CREATE INDEX IF NOT EXISTS messages_chat_ts ON messages(chat_id, timestamp);
 CREATE INDEX IF NOT EXISTS messages_sender ON messages(sender_id);
 CREATE INDEX IF NOT EXISTS messages_ts ON messages(timestamp);
 
+CREATE TABLE IF NOT EXISTS links (
+  message_id INTEGER NOT NULL,
+  url TEXT NOT NULL,                -- as shared
+  clean_url TEXT NOT NULL,          -- as shared, minus tracking parameters
+  normalized_url TEXT NOT NULL,     -- canonical form, groups repeat shares of the same link
+  domain TEXT NOT NULL,
+  title TEXT,                       -- from the link preview, when there was one
+  description TEXT,
+  PRIMARY KEY (message_id, normalized_url)
+);
+CREATE INDEX IF NOT EXISTS links_normalized ON links(normalized_url);
+CREATE INDEX IF NOT EXISTS links_domain ON links(domain);
+
 CREATE TABLE IF NOT EXISTS reactions (
   chat_id TEXT NOT NULL,
   target_sender_id TEXT NOT NULL,
@@ -148,15 +162,100 @@ const CHAT_SELECT = `
   FROM chats c
   LEFT JOIN contacts dc ON c.type = 'direct' AND dc.id = c.id`;
 
-const MESSAGE_SELECT = `
-  SELECT m.id, m.chat_id, ${CHAT_NAME} AS chat_name, c.type AS chat_type,
-         m.sender_id,
-         CASE WHEN m.is_from_me = 1 THEN 'Me' ELSE ${CONTACT_NAME("s", "m.sender_id")} END AS sender_name,
-         m.timestamp, m.is_from_me, m.body, m.attachments, m.quote, m.edited_at, m.deleted
+const SENDER_NAME = `CASE WHEN m.is_from_me = 1 THEN 'Me' ELSE ${CONTACT_NAME("s", "m.sender_id")} END`;
+
+const MESSAGE_FROM = `
   FROM messages m
   JOIN chats c ON c.id = m.chat_id
   LEFT JOIN contacts dc ON c.type = 'direct' AND dc.id = c.id
   LEFT JOIN contacts s ON s.id = m.sender_id`;
+
+const MESSAGE_SELECT = `
+  SELECT m.id, m.chat_id, ${CHAT_NAME} AS chat_name, c.type AS chat_type,
+         m.sender_id, ${SENDER_NAME} AS sender_name,
+         m.timestamp, m.is_from_me, m.body, m.attachments, m.quote, m.edited_at, m.deleted
+  ${MESSAGE_FROM}`;
+
+export interface LinkFilters {
+  chatId?: string;
+  senderId?: string;
+  domain?: string;
+  query?: string;
+  after?: number;
+  before?: number;
+}
+
+export interface LinkRow {
+  url: string;
+  normalized_url: string;
+  title: string | null;
+  description: string | null;
+  domain: string;
+  share_count: number;
+  first_shared: number;
+  last_shared: number;
+  chats: string; // JSON array of chat names
+  shared_by: string; // JSON array of sender names
+  latest_message_id: number;
+}
+
+export interface LinkShareRow {
+  message_id: number;
+  url: string;
+  normalized_url: string;
+  title: string | null;
+  description: string | null;
+  domain: string;
+  timestamp: number;
+  chat_id: string;
+  chat_name: string;
+  sender_name: string;
+}
+
+export interface FileRow {
+  message_id: number;
+  attachment_index: number;
+  filename: string | null;
+  content_type: string | null;
+  size: number | null;
+  caption: string | null;
+  timestamp: number;
+  chat_id: string;
+  chat_name: string;
+  sender_name: string;
+}
+
+export type FileKind = "image" | "video" | "audio" | "document";
+
+function linkWhere(f: LinkFilters, params: Record<string, unknown>): string {
+  const where = ["m.deleted = 0"];
+  if (f.chatId) {
+    where.push("m.chat_id = @chatId");
+    params.chatId = f.chatId;
+  }
+  if (f.senderId) {
+    where.push("m.sender_id = @senderId");
+    params.senderId = f.senderId;
+  }
+  if (f.domain) {
+    where.push("(l.domain = @domain OR l.domain LIKE @subdomain)");
+    params.domain = f.domain.toLowerCase().replace(/^www\./, "");
+    params.subdomain = `%.${params.domain}`;
+  }
+  if (f.query) {
+    where.push("(l.url LIKE @like OR l.title LIKE @like OR l.description LIKE @like OR m.body LIKE @like)");
+    params.like = `%${f.query}%`;
+  }
+  if (f.after !== undefined) {
+    where.push("m.timestamp > @after");
+    params.after = f.after;
+  }
+  if (f.before !== undefined) {
+    where.push("m.timestamp < @before");
+    params.before = f.before;
+  }
+  return `WHERE ${where.join(" AND ")}`;
+}
 
 export function normalizePhone(input: string): string | null {
   const trimmed = input.trim();
@@ -180,6 +279,19 @@ export class SignalStore {
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("busy_timeout = 5000");
     this.db.exec(SCHEMA);
+    this.backfillLinks();
+  }
+
+  /** Catalog links in messages stored before the links table existed. */
+  private backfillLinks() {
+    if (this.getMeta("links_backfilled")) return;
+    const rows = this.db
+      .prepare("SELECT id, body FROM messages WHERE deleted = 0 AND (body LIKE '%http%' OR body LIKE '%www.%')")
+      .all() as Array<{ id: number; body: string }>;
+    this.db.transaction(() => {
+      for (const row of rows) this.setLinks(row.id, extractLinks(row.body));
+      this.setMeta("links_backfilled", "1");
+    })();
   }
 
   close() {
@@ -285,19 +397,42 @@ export class SignalStore {
     return res.changes > 0 ? Number(res.lastInsertRowid) : null;
   }
 
-  applyEdit(chatId: string, senderId: string, targetTimestamp: number, body: string | null, editedAt: number) {
-    this.db
+  /** Returns the edited message's id, or null if the original isn't stored (or a newer edit is). */
+  applyEdit(
+    chatId: string,
+    senderId: string,
+    targetTimestamp: number,
+    body: string | null,
+    editedAt: number
+  ): number | null {
+    const row = this.db
       .prepare(
         `UPDATE messages SET body = ?, edited_at = ?
-         WHERE chat_id = ? AND sender_id = ? AND timestamp = ? AND COALESCE(edited_at, 0) <= ?`
+         WHERE chat_id = ? AND sender_id = ? AND timestamp = ? AND deleted = 0 AND COALESCE(edited_at, 0) <= ?
+         RETURNING id`
       )
-      .run(body, editedAt, chatId, senderId, targetTimestamp, editedAt);
+      .get(body, editedAt, chatId, senderId, targetTimestamp, editedAt) as { id: number } | undefined;
+    return row?.id ?? null;
   }
 
+  /** Delete-for-everyone: drop the content so the archive honours the sender's deletion. */
   markDeleted(chatId: string, senderId: string, targetTimestamp: number) {
-    this.db
-      .prepare("UPDATE messages SET deleted = 1 WHERE chat_id = ? AND sender_id = ? AND timestamp = ?")
-      .run(chatId, senderId, targetTimestamp);
+    const row = this.db
+      .prepare(
+        `UPDATE messages SET deleted = 1, body = NULL, attachments = NULL, quote = NULL
+         WHERE chat_id = ? AND sender_id = ? AND timestamp = ? RETURNING id`
+      )
+      .get(chatId, senderId, targetTimestamp) as { id: number } | undefined;
+    if (row) this.setLinks(row.id, []);
+  }
+
+  setLinks(messageId: number, links: ExtractedLink[]) {
+    this.db.prepare("DELETE FROM links WHERE message_id = ?").run(messageId);
+    const insert = this.db.prepare(
+      `INSERT OR IGNORE INTO links (message_id, url, clean_url, normalized_url, domain, title, description)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    );
+    for (const l of links) insert.run(messageId, l.url, l.cleanUrl, l.normalizedUrl, l.domain, l.title, l.description);
   }
 
   setReaction(
@@ -485,15 +620,114 @@ export class SignalStore {
     return result;
   }
 
-  stats(): { messages: number; chats: number; contacts: number; lastMessageAt: number | null } {
+  /** One row per distinct link, most recently shared first. */
+  listLinks(filters: LinkFilters, limit: number, offset: number): LinkRow[] {
+    const params: Record<string, unknown> = { limit, offset };
+    const where = linkWhere(filters, params);
+    return this.db
+      .prepare(
+        `SELECT (SELECT l2.clean_url FROM links l2 JOIN messages m2 ON m2.id = l2.message_id
+                 WHERE l2.normalized_url = l.normalized_url ORDER BY m2.timestamp DESC LIMIT 1) AS url,
+                l.normalized_url, MAX(l.title) AS title, MAX(l.description) AS description, l.domain,
+                COUNT(*) AS share_count, MIN(m.timestamp) AS first_shared, MAX(m.timestamp) AS last_shared,
+                json_group_array(DISTINCT ${CHAT_NAME}) AS chats,
+                json_group_array(DISTINCT ${SENDER_NAME}) AS shared_by,
+                MAX(m.id) AS latest_message_id
+         FROM links l JOIN messages m ON m.id = l.message_id
+         JOIN chats c ON c.id = m.chat_id
+         LEFT JOIN contacts dc ON c.type = 'direct' AND dc.id = c.id
+         LEFT JOIN contacts s ON s.id = m.sender_id
+         ${where}
+         GROUP BY l.normalized_url
+         ORDER BY last_shared DESC
+         LIMIT @limit OFFSET @offset`
+      )
+      .all(params) as LinkRow[];
+  }
+
+  /** Every individual share of a link, most recent first. */
+  listLinkShares(filters: LinkFilters, limit: number, offset: number): LinkShareRow[] {
+    const params: Record<string, unknown> = { limit, offset };
+    const where = linkWhere(filters, params);
+    return this.db
+      .prepare(
+        `SELECT m.id AS message_id, l.clean_url AS url, l.normalized_url,
+                COALESCE(l.title, (SELECT MAX(title) FROM links WHERE normalized_url = l.normalized_url)) AS title,
+                COALESCE(l.description, (SELECT MAX(description) FROM links WHERE normalized_url = l.normalized_url)) AS description,
+                l.domain, m.timestamp,
+                m.chat_id, ${CHAT_NAME} AS chat_name, ${SENDER_NAME} AS sender_name
+         FROM links l JOIN messages m ON m.id = l.message_id
+         JOIN chats c ON c.id = m.chat_id
+         LEFT JOIN contacts dc ON c.type = 'direct' AND dc.id = c.id
+         LEFT JOIN contacts s ON s.id = m.sender_id
+         ${where}
+         ORDER BY m.timestamp DESC, m.id DESC
+         LIMIT @limit OFFSET @offset`
+      )
+      .all(params) as LinkShareRow[];
+  }
+
+  listFiles(
+    opts: { chatId?: string; senderId?: string; query?: string; kind?: FileKind; after?: number; before?: number },
+    limit: number,
+    offset: number
+  ): FileRow[] {
+    const where = ["m.deleted = 0", "m.attachments IS NOT NULL"];
+    const params: Record<string, unknown> = { limit, offset };
+    if (opts.chatId) {
+      where.push("m.chat_id = @chatId");
+      params.chatId = opts.chatId;
+    }
+    if (opts.senderId) {
+      where.push("m.sender_id = @senderId");
+      params.senderId = opts.senderId;
+    }
+    if (opts.query) {
+      where.push("(json_extract(a.value, '$.filename') LIKE @like OR json_extract(a.value, '$.caption') LIKE @like OR m.body LIKE @like)");
+      params.like = `%${opts.query}%`;
+    }
+    if (opts.kind) {
+      const type = "COALESCE(json_extract(a.value, '$.contentType'), '')";
+      where.push(
+        opts.kind === "document"
+          ? `${type} NOT LIKE 'image/%' AND ${type} NOT LIKE 'video/%' AND ${type} NOT LIKE 'audio/%'`
+          : `${type} LIKE '${opts.kind}/%'`
+      );
+    }
+    if (opts.after !== undefined) {
+      where.push("m.timestamp > @after");
+      params.after = opts.after;
+    }
+    if (opts.before !== undefined) {
+      where.push("m.timestamp < @before");
+      params.before = opts.before;
+    }
+    return this.db
+      .prepare(
+        `SELECT m.id AS message_id, CAST(a.key AS INTEGER) AS attachment_index,
+                json_extract(a.value, '$.filename') AS filename,
+                json_extract(a.value, '$.contentType') AS content_type,
+                json_extract(a.value, '$.size') AS size,
+                json_extract(a.value, '$.caption') AS caption,
+                m.timestamp, m.chat_id, ${CHAT_NAME} AS chat_name, ${SENDER_NAME} AS sender_name
+         ${MESSAGE_FROM}, json_each(m.attachments) a
+         WHERE ${where.join(" AND ")}
+         ORDER BY m.timestamp DESC, m.id DESC, attachment_index
+         LIMIT @limit OFFSET @offset`
+      )
+      .all(params) as FileRow[];
+  }
+
+  stats(): { messages: number; chats: number; contacts: number; links: number; lastMessageAt: number | null } {
     const row = this.db
       .prepare(
         `SELECT (SELECT COUNT(*) FROM messages) AS messages,
                 (SELECT COUNT(*) FROM chats) AS chats,
                 (SELECT COUNT(*) FROM contacts WHERE id != '${SELF}') AS contacts,
+                (SELECT COUNT(DISTINCT normalized_url) FROM links) AS links,
                 (SELECT MAX(timestamp) FROM messages) AS lastMessageAt`
       )
-      .get() as { messages: number; chats: number; contacts: number; lastMessageAt: number | null };
+      .get() as { messages: number; chats: number; contacts: number; links: number; lastMessageAt: number | null };
     return row;
   }
 }

@@ -3,13 +3,18 @@ import path from "path";
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { config } from "./config";
-import { chatSummary, formatMessage, formatTime, parseJson } from "./format";
+import { chatSummary, formatMessage, formatSize, formatTime, parseJson } from "./format";
 import { Ingestor } from "./ingest";
+import { extractLinks } from "./links";
 import { extensionForMime, mimeForFile } from "./mime";
 import { SendResult, SignalCliClient } from "./signal-cli";
 import {
   Attachment,
   ContactRow,
+  FileKind,
+  LinkFilters,
+  LinkRow,
+  LinkShareRow,
   MessageRow,
   Quote,
   SELF,
@@ -64,6 +69,68 @@ function parseDate(value: string | undefined, field: string): number | undefined
   const ms = Date.parse(/^\d{4}-\d{2}-\d{2}$/.test(value.trim()) ? `${value.trim()}T00:00:00` : value);
   if (Number.isNaN(ms)) throw new Error(`${field} must be an ISO-8601 date, e.g. 2026-01-31 or 2026-01-31T09:00:00`);
   return ms;
+}
+
+function csvCell(value: unknown): string {
+  const text = value == null ? "" : String(value);
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function linkSummary(l: LinkRow) {
+  return {
+    url: l.url,
+    ...(l.title ? { title: l.title } : {}),
+    domain: l.domain,
+    times_shared: l.share_count,
+    first_shared: formatTime(l.first_shared),
+    last_shared: formatTime(l.last_shared),
+    chats: JSON.parse(l.chats) as string[],
+    shared_by: JSON.parse(l.shared_by) as string[],
+    ...(l.description ? { description: l.description.slice(0, 200) } : {}),
+    message_id: l.latest_message_id,
+  };
+}
+
+function linksCsv(rows: LinkRow[]): string {
+  const header = ["url", "title", "domain", "times_shared", "first_shared", "last_shared", "chats", "shared_by", "description"];
+  const lines = rows.map((l) =>
+    [
+      l.url,
+      l.title,
+      l.domain,
+      l.share_count,
+      formatTime(l.first_shared),
+      formatTime(l.last_shared),
+      (JSON.parse(l.chats) as string[]).join("; "),
+      (JSON.parse(l.shared_by) as string[]).join("; "),
+      l.description,
+    ]
+      .map(csvCell)
+      .join(",")
+  );
+  return [header.join(","), ...lines].join("\n") + "\n";
+}
+
+/** Markdown with one section per chat, each distinct link listed once (most recent share). */
+function linksMarkdown(shares: LinkShareRow[], description: string): string {
+  const byChat = new Map<string, Map<string, LinkShareRow>>();
+  for (const share of shares) {
+    const chat = byChat.get(share.chat_name) ?? new Map<string, LinkShareRow>();
+    if (!chat.has(share.normalized_url)) chat.set(share.normalized_url, share);
+    byChat.set(share.chat_name, chat);
+  }
+  const out = [`# Signal links`, "", `${description} Exported ${formatTime(Date.now())}.`, ""];
+  for (const chatName of [...byChat.keys()].sort((a, b) => a.localeCompare(b))) {
+    const links = [...byChat.get(chatName)!.values()];
+    out.push(`## ${chatName} (${links.length})`, "");
+    for (const l of links) {
+      const label = (l.title || l.url).replace(/([\[\]])/g, "\\$1");
+      out.push(`- [${label}](<${l.url}>) — ${l.domain} · ${l.sender_name}, ${formatTime(l.timestamp).slice(0, 10)}`);
+      if (l.description) out.push(`  > ${l.description.replace(/\s+/g, " ").slice(0, 200)}`);
+    }
+    out.push("");
+  }
+  return out.join("\n");
 }
 
 export function registerTools(server: McpServer, { store, client, ingestor }: Deps) {
@@ -163,7 +230,7 @@ export function registerTools(server: McpServer, { store, client, ingestor }: De
     if (!chatId || !result.timestamp) return null;
     if (chatId.startsWith("group:")) store.ensureGroupChat(chatId.slice("group:".length));
     else store.ensureDirectChat(chatId);
-    return store.insertMessage({
+    const id = store.insertMessage({
       chatId,
       senderId: SELF,
       timestamp: result.timestamp,
@@ -172,7 +239,40 @@ export function registerTools(server: McpServer, { store, client, ingestor }: De
       attachments,
       quote,
     });
+    if (id) store.setLinks(id, extractLinks(body));
+    return id;
   }
+
+  /** Shared filter parsing for the link tools. */
+  function linkFilters(args: {
+    chat_id?: string;
+    sender?: string;
+    domain?: string;
+    query?: string;
+    after?: string;
+    before?: string;
+  }): LinkFilters {
+    if (args.chat_id && !store.getChat(args.chat_id)) {
+      throw new Error(`No chat with chat_id "${args.chat_id}". Use list_chats to find it.`);
+    }
+    return {
+      chatId: args.chat_id,
+      senderId: args.sender ? resolveContactId(args.sender) : undefined,
+      domain: args.domain,
+      query: args.query,
+      after: parseDate(args.after, "after"),
+      before: parseDate(args.before, "before"),
+    };
+  }
+
+  const LINK_FILTER_SCHEMA = {
+    chat_id: z.string().optional().describe("Only links shared in this chat (chat_id from list_chats)"),
+    sender: z.string().optional().describe('Only links shared by this person: phone number, Signal UUID, or "me"'),
+    domain: z.string().optional().describe("Only links to this site, e.g. youtube.com (includes subdomains)"),
+    query: z.string().optional().describe("Only links whose URL, preview title/description, or message text contains this"),
+    after: z.string().optional().describe("Only links shared after this ISO-8601 date/time"),
+    before: z.string().optional().describe("Only links shared before this ISO-8601 date/time"),
+  };
 
   function sendSummary(target: Target, result: SendResult, messageId: number | null): string {
     const failures = (result.results ?? []).filter((r) => r.type && r.type !== "SUCCESS");
@@ -369,6 +469,125 @@ export function registerTools(server: McpServer, { store, client, ingestor }: De
     })
   );
 
+  // ── Link and file catalog ──
+
+  server.registerTool(
+    "list_links",
+    {
+      description:
+        "List links shared in Signal chats, with preview titles, where and by whom they were shared. " +
+        "By default each distinct link appears once with how many times it was shared; set group_by_url=false to list every share.",
+      inputSchema: {
+        ...LINK_FILTER_SCHEMA,
+        group_by_url: z.boolean().default(true).describe("Combine repeat shares of the same link into one entry"),
+        limit: z.number().int().min(1).max(500).default(50).describe("Maximum number of results"),
+        page: z.number().int().min(0).default(0).describe("Page number for pagination"),
+      },
+      annotations: READ,
+    },
+    safe((args) => {
+      const filters = linkFilters(args);
+      const offset = args.page * args.limit;
+      const results = args.group_by_url
+        ? store.listLinks(filters, args.limit, offset).map(linkSummary)
+        : store.listLinkShares(filters, args.limit, offset).map((l) => ({
+            shared_at: formatTime(l.timestamp),
+            chat: l.chat_name,
+            chat_id: l.chat_id,
+            shared_by: l.sender_name,
+            url: l.url,
+            ...(l.title ? { title: l.title } : {}),
+            message_id: l.message_id,
+          }));
+      if (results.length === 0) return text(store.stats().links === 0 ? emptyHint() : "No links match.");
+      const more = results.length === args.limit ? ` More on page ${args.page + 1}.` : "";
+      return text(`${results.length} result(s), page ${args.page}.${more}\n${JSON.stringify(results, null, 2)}`);
+    })
+  );
+
+  server.registerTool(
+    "list_files",
+    {
+      description: "List files (images, videos, audio, documents) shared in Signal chats. Use download_attachment to save one.",
+      inputSchema: {
+        chat_id: z.string().optional().describe("Only files shared in this chat"),
+        sender: z.string().optional().describe('Only files shared by this person: phone number, Signal UUID, or "me"'),
+        query: z.string().optional().describe("Only files whose name, caption, or message text contains this"),
+        kind: z.enum(["image", "video", "audio", "document"]).optional().describe("Only this kind of file"),
+        after: z.string().optional().describe("Only files shared after this ISO-8601 date/time"),
+        before: z.string().optional().describe("Only files shared before this ISO-8601 date/time"),
+        limit: z.number().int().min(1).max(500).default(50).describe("Maximum number of results"),
+        page: z.number().int().min(0).default(0).describe("Page number for pagination"),
+      },
+      annotations: READ,
+    },
+    safe((args) => {
+      if (args.chat_id && !store.getChat(args.chat_id)) return fail(`No chat with chat_id "${args.chat_id}".`);
+      const files = store.listFiles(
+        {
+          chatId: args.chat_id,
+          senderId: args.sender ? resolveContactId(args.sender) : undefined,
+          query: args.query,
+          kind: args.kind as FileKind | undefined,
+          after: parseDate(args.after, "after"),
+          before: parseDate(args.before, "before"),
+        },
+        args.limit,
+        args.page * args.limit
+      );
+      if (files.length === 0) return text(store.stats().messages === 0 ? emptyHint() : "No files match.");
+      return json(
+        files.map((f) => ({
+          message_id: f.message_id,
+          attachment_index: f.attachment_index,
+          filename: f.filename,
+          type: f.content_type,
+          ...(f.size ? { size: formatSize(f.size) } : {}),
+          ...(f.caption ? { caption: f.caption } : {}),
+          chat: f.chat_name,
+          shared_by: f.sender_name,
+          shared_at: formatTime(f.timestamp),
+        }))
+      );
+    })
+  );
+
+  server.registerTool(
+    "export_links",
+    {
+      description:
+        "Export the link catalog to a file: CSV (one row per distinct link, for spreadsheets/Notion/Airtable) " +
+        "or Markdown (organised by chat). Returns the file path.",
+      inputSchema: {
+        ...LINK_FILTER_SCHEMA,
+        format: z.enum(["csv", "markdown"]).default("markdown").describe("File format"),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    safe((args) => {
+      const filters = linkFilters(args);
+      const all = 100_000;
+      fs.mkdirSync(config.exportDir, { recursive: true });
+      const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "").replace("T", "-");
+      let file: string;
+      let count: number;
+      if (args.format === "csv") {
+        const rows = store.listLinks(filters, all, 0);
+        count = rows.length;
+        file = path.join(config.exportDir, `signal-links-${stamp}.csv`);
+        fs.writeFileSync(file, linksCsv(rows));
+      } else {
+        const shares = store.listLinkShares(filters, all, 0);
+        count = new Set(shares.map((s) => s.normalized_url)).size;
+        const scope = args.chat_id ? `Links shared in ${store.getChat(args.chat_id)?.name}.` : "Links shared in your Signal chats.";
+        file = path.join(config.exportDir, `signal-links-${stamp}.md`);
+        fs.writeFileSync(file, linksMarkdown(shares, scope));
+      }
+      if (count === 0) return text("No links match, so nothing was exported.");
+      return json({ file_path: file, links: count, format: args.format });
+    })
+  );
+
   // ── Send tools ──
 
   server.registerTool(
@@ -546,7 +765,11 @@ export function registerTools(server: McpServer, { store, client, ingestor }: De
         messages: stats.messages,
         chats: stats.chats,
         contacts: stats.contacts,
+        links: stats.links,
         latest_message_time: stats.lastMessageAt ? formatTime(stats.lastMessageAt) : null,
+        ...(config.archiveDisappearing
+          ? {}
+          : { disappearing_messages_skipped: Number(store.getMeta("skipped_disappearing") ?? 0) }),
       });
     })
   );
@@ -556,6 +779,7 @@ export const SERVER_INSTRUCTIONS = `Read, search, and send the user's Signal mes
 
 - Chats are identified by chat_id: a Signal UUID for 1:1 chats, "group:<base64 id>" for groups, "self" for Note to Self.
 - Messages are identified by an integer message_id (use it with get_message_context, send_reaction, download_attachment, and reply_to_message_id).
+- Every link shared in a chat is catalogued: use list_links to browse or search them (grouped by URL across chats) and export_links to save them to a CSV or Markdown file. list_files does the same for shared files.
 - Look people up with search_contacts and chats with list_chats before sending; never guess a recipient.
 - Signal keeps no history on its servers, so only messages captured since signal-mcp started running are searchable.`;
 

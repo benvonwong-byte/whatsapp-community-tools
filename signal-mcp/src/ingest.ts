@@ -1,4 +1,5 @@
 import { config } from "./config";
+import { extractLinks } from "./links";
 import { log } from "./log";
 import { EventSubscription, SignalCliClient } from "./signal-cli";
 import { Attachment, SELF, SignalStore, UUID_RE, groupChatId } from "./store";
@@ -148,6 +149,12 @@ export class Ingestor {
       return;
     }
 
+    if (Number(dm.expiresInSeconds) > 0 && !config.archiveDisappearing) {
+      const skipped = Number(this.store.getMeta("skipped_disappearing") ?? 0) + 1;
+      this.store.setMeta("skipped_disappearing", String(skipped));
+      return;
+    }
+
     const body = this.describe(dm);
     const attachments: Attachment[] = (dm.attachments ?? []).map((a: any) => ({
       id: a.id ?? null,
@@ -167,7 +174,7 @@ export class Ingestor {
 
     // Direct chats are created lazily so receipts-like noise doesn't add empty chats.
     if (!chatId.startsWith("group:")) this.store.ensureDirectChat(chatId);
-    this.store.insertMessage({
+    const id = this.store.insertMessage({
       chatId,
       senderId,
       timestamp,
@@ -176,13 +183,16 @@ export class Ingestor {
       attachments,
       quote,
     });
+    if (id) this.store.setLinks(id, extractLinks(body, dm.previews));
   }
 
   private applyEdit(chatId: string, senderId: string, edit: any) {
     const target = Number(edit.targetSentTimestamp);
     const dm = edit.dataMessage;
     if (!target || !dm) return;
-    this.store.applyEdit(chatId, senderId, target, this.describe(dm), Number(dm.timestamp) || Date.now());
+    const body = this.describe(dm);
+    const id = this.store.applyEdit(chatId, senderId, target, body, Number(dm.timestamp) || Date.now());
+    if (id) this.store.setLinks(id, extractLinks(body, dm.previews));
   }
 
   /** Text for a data message, with mentions resolved and non-text content summarised. */
